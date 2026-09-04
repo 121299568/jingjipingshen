@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>经济评审管理系统</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --primary-color: #2c3e50;
+      --secondary-color: #34495e;
+      --accent-color: #3498db;
+      --success-color: #27ae60;
+      --warning-color: #f39c12;
+      --danger-color: #e74c3c;
+    }
+    
+    body {
+      font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    
+    .sidebar {
+      background: var(--primary-color);
+      min-height: 100vh;
+      color: white;
+      position: fixed;
+      width: 260px;
+      z-index: 1000;
+    }
+    
+    .sidebar .nav-link {
+      color: rgba(255,255,255,0.8);
+      padding: 12px 20px;
+      border-radius: 0;
+      transition: all 0.3s;
+    }
+    
+    .sidebar .nav-link:hover,
+    .sidebar .nav-link.active {
+      background: var(--accent-color);
+      color: white;
+    }
+    
+    .sidebar .nav-link i {
+      margin-right: 10px;
+      width: 20px;
+      text-align: center;
+    }
+    
+    .main-content {
+      margin-left: 260px;
+      padding: 20px;
+    }
+    
+    .card {
+      border: none;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      transition: transform 0.3s;
+    }
+    
+    .card:hover {
+      transform: translateY(-5px);
+    }
+    
+    .stat-card {
+      background: linear-gradient(135deg, var(--accent-color), #2980b9);
+      color: white;
+    }
+    
+    .stat-card h3 {
+      font-size: 2.5rem;
+      font-weight: bold;
+    }
+    
+    .login-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .login-card {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      overflow: hidden;
+      max-width: 400px;
+      width: 100%;
+    }
+    
+    .login-header {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      border: none;
+    }
+    
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #764ba2, #667eea);
+    }
+    
+    .workflow-step {
+      position: relative;
+      padding: 20px;
+      border-left: 3px solid var(--accent-color);
+      margin-left: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .workflow-step::before {
+      content: '';
+      position: absolute;
+      left: -8px;
+      top: 20px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent-color);
+    }
+    
+    .table th {
+      background: var(--primary-color);
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <!-- 登录页面 -->
+  <div id="loginPage" class="login-container">
+    <div class="login-card">
+      <div class="login-header">
+        <h2><i class="bi bi-calculator"></i> 经济评审管理系统</h2>
+        <p class="mb-0">Economic Review Management System</p>
+      </div>
+      <div class="p-4">
+        <form id="loginForm">
+          <div class="mb-3">
+            <label class="form-label">用户名</label>
+            <input type="text" class="form-control" id="username" placeholder="请输入用户名" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">密码</label>
+            <input type="password" class="form-control" id="password" placeholder="请输入密码" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">角色</label>
+            <select class="form-select" id="role">
+              <option value="biz">各事业部</option>
+              <option value="rd">研发中心</option>
+              <option value="expert">评审专家</option>
+              <option value="accountant">外部会计师事务所</option>
+              <option value="admin">系统管理员</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">登录</button>
+        </form>
+        <hr>
+        <small class="text-muted">演示账号: admin / admin123</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="mainApp" style="display: none;">
+    <!-- 侧边栏 -->
+    <nav class="sidebar">
+      <div class="p-3 text-center">
+        <h4><i class="bi bi-calculator"></i> 经济评审系统</h4>
+        <small id="userDisplay" class="text-muted"></small>
+      </div>
+      <ul class="nav flex-column">
+        <li class="nav-item">
+          <a class="nav-link active" href="#" data-page="dashboard">
+            <i class="bi bi-speedometer2"></i> 工作台
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-page="review-sessions">
+            <i class="bi bi-calendar-check"></i> 评审批次管理
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-page="projects">
+            <i class="bi bi-folder2-open"></i> 项目资料
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-page="scoring">
+            <i class="bi bi-star"></i> 专家评审打分
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-page="comments">
+            <i class="bi bi-chat-text"></i> 批注管理
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-page="stats">
+            <i class="bi bi-graph-up"></i> 统计分析
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-page="users">
+            <i class="bi bi-people"></i> 用户管理
+          </a>
+        </li>
+        <li class="nav-item mt-3">
+          <a class="nav-link text-danger" href="#" id="logoutBtn">
+            <i class="bi bi-box-arrow-right"></i> 退出登录
+          </a>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <!-- 仪表盘 -->
+      <div id="page-dashboard" class="page-content">
+        <h2 class="mb-4"><i class="bi bi-speedometer2"></i> 工作台</h2>
+        <div class="row g-4">
+          <div class="col-md-3">
+            <div class="card stat-card">
+              <div class="card-body">
+                <h3 id="stat-sessions">0</h3>
+                <p class="mb-0">评审批次</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card stat-card" style="background: linear-gradient(135deg, #11998e, #38ef7d);">
+              <div class="card-body">
+                <h3 id="stat-projects">0</h3>
+                <p class="mb-0">项目总数</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card stat-card" style="background: linear-gradient(135deg, #fc4a1a, #f7b733);">
+              <div class="card-body">
+                <h3 id="stat-scores">0</h3>
+                <p class="mb-0">评分记录</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card stat-card" style="background: linear-gradient(135deg, #8360c3, #2ebf91);">
+              <div class="card-body">
+                <h3 id="stat-users">0</h3>
+                <p class="mb-0">注册用户</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="row g-4 mt-3">
+          <div class="col-md-8">
+            <div class="card">
+              <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-clock-history"></i> 最近活动</h5>
+              </div>
+              <div class="card-body">
+                <div id="recentActivity">暂无活动记录</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card">
+              <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-bell"></i> 待办事项</h5>
+              </div>
+              <div class="card-body">
+                <ul id="todoList" class="list-group list-group-flush">
+                  <li class="list-group-item text-muted">暂无待办事项</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 其他页面内容 -->
+      <div id="page-review-sessions" class="page-content" style="display: none;">
+        <h2 class="mb-4"><i class="bi bi-calendar-check"></i> 评审批次管理</h2>
+        <div class="card">
+          <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">评审批次列表</h5>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addSessionModal">
+              <i class="bi bi-plus-circle"></i> 新建评审批次
+            </button>
+          </div>
+          <div class="card-body">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>批次名称</th>
+                  <th>状态</th>
+                  <th>评审时间</th>
+                  <th>项目数量</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="sessionTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-projects" class="page-content" style="display: none;">
+        <h2 class="mb-4"><i class="bi bi-folder2-open"></i> 项目资料管理</h2>
+        <div class="card">
+          <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">项目列表</h5>
+            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addProjectModal">
+              <i class="bi bi-plus-circle"></i> 新建项目
+            </button>
+          </div>
+          <div class="card-body">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>项目名称</th>
+                  <th>所属事业部</th>
+                  <th>提交时间</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="projectTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-scoring" class="page-content" style="display: none;">
+        <h2 class="mb-4"><i class="bi bi-star"></i> 专家评审打分</h2>
+        <div class="card">
+          <div class="card-header bg-white">
+            <h5 class="mb-0">评分列表</h5>
+          </div>
+          <div class="card-body">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>项目名称</th>
+                  <th>评审专家</th>
+                  <th>工作量评分</th>
+                  <th>质量评分</th>
+                  <th>总分</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="scoreTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-stats" class="page-content" style="display: none;">
+        <h2 class="mb-4"><i class="bi bi-graph-up"></i> 统计分析</h2>
+        <div class="row g-4">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header bg-white">
+                <h5 class="mb-0">评审趋势</h5>
+              </div>
+              <div class="card-body">
+                <canvas id="trendChart" height="200"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header bg-white">
+                <h5 class="mb-0">评分分布</h5>
+              </div>
+              <div class="card-body">
+                <canvas id="scoreChart" height="200"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal fade" id="addSessionModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">新建评审批次</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="addSessionForm">
+            <div class="mb-3">
+              <label class="form-label">批次名称</label>
+              <input type="text" class="form-control" id="sessionName" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">评审时间</label>
+              <input type="datetime-local" class="form-control" id="sessionTime" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">备注</label>
+              <textarea class="form-control" id="sessionNote" rows="3"></textarea>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn btn-primary" onclick="saveSession()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
