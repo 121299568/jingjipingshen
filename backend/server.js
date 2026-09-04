@@ -226,6 +226,7 @@ app.post('/api/projects/import-excel', auth(true), upload.single('file'), (req, 
       status: 'reviewing',
       source_file: req.file.originalname,
       source_path: req.file.path,
+      session_id: req.body.session_id || null,
       ...parsed.project,
       cost_summary: parsed.cost_summary,
       created_at: new Date().toISOString()
