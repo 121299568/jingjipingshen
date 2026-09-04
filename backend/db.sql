@@ -1,4 +1,4 @@
--- 经济评审管理系统数据库设计
+-- 经济评审管理系统数据库设计 v2（含成本明细表）
 
 -- 用户表
 CREATE TABLE users (
@@ -19,7 +19,7 @@ CREATE TABLE users (
 CREATE TABLE review_sessions (
     id INT PRIMARY KEY AUTO_INCREMENT,
     session_name VARCHAR(200) NOT NULL,
-    session_code VARCHAR(50) UNIQUE NOT NULL,
+    session_code VARCHAR(50) UNIQUE,
     status ENUM('pending', 'in_progress', 'completed', 'cancelled') DEFAULT 'pending',
     review_time DATETIME,
     start_time DATETIME,
@@ -31,13 +31,20 @@ CREATE TABLE review_sessions (
     FOREIGN KEY (creator_id) REFERENCES users(id)
 );
 
--- 项目表
+-- 项目主表
 CREATE TABLE projects (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    project_name VARCHAR(200) NOT NULL,
-    project_code VARCHAR(50) UNIQUE,
+    project_name VARCHAR(300) NOT NULL,
+    project_code VARCHAR(50),
     biz_department VARCHAR(100),
     rd_department VARCHAR(100),
+    project_type VARCHAR(50),
+    business_direction VARCHAR(100),
+    business_sub_direction VARCHAR(100),
+    product_direction VARCHAR(100),
+    contract_amount DECIMAL(12,2),
+    source_file VARCHAR(255),
+    cost_summary JSON,
     submission_date DATE,
     status ENUM('draft', 'submitted', 'pre_review', 'reviewing', 'completed', 'rejected') DEFAULT 'draft',
     reviewer_id INT,
@@ -49,7 +56,61 @@ CREATE TABLE projects (
     FOREIGN KEY (session_id) REFERENCES review_sessions(id)
 );
 
--- 项目资料表
+-- 工作明细表（人员/分包工作量成本）
+CREATE TABLE work_items (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    project_id INT NOT NULL,
+    category ENUM('long_term', 'zhongshi', 'huazhao', 'outsourcing', 'subcontract'),
+    work_task VARCHAR(200),
+    work_item VARCHAR(200),
+    description TEXT,
+    person_days DECIMAL(10,2),
+    person VARCHAR(50),
+    cost DECIMAL(12,2),
+    expert_days JSON, -- 专业分包：5位专家独立估算
+    expert_days_avg DECIMAL(10,2),
+    adjusted_cost DECIMAL(12,2),
+    source_sheet VARCHAR(100),
+    row_idx INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+-- 采购明细表
+CREATE TABLE procurement_items (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    project_id INT NOT NULL,
+    type ENUM('software', 'hardware'),
+    name VARCHAR(200),
+    spec TEXT,
+    unit VARCHAR(20),
+    quantity DECIMAL(12,2),
+    unit_price DECIMAL(12,2),
+    subtotal DECIMAL(12,2),
+    remark VARCHAR(500),
+    source_sheet VARCHAR(100),
+    row_idx INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+-- 差旅明细表
+CREATE TABLE travel_items (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    project_id INT NOT NULL,
+    purpose VARCHAR(200),
+    destination VARCHAR(200),
+    days DECIMAL(5,2),
+    hotel DECIMAL(10,2),
+    per_diem DECIMAL(10,2),
+    transport DECIMAL(10,2),
+    source_sheet VARCHAR(100),
+    row_idx INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+-- 文件上传表
 CREATE TABLE project_files (
     id INT PRIMARY KEY AUTO_INCREMENT,
     project_id INT NOT NULL,
@@ -82,7 +143,7 @@ CREATE TABLE expert_scores (
     FOREIGN KEY (expert_id) REFERENCES users(id)
 );
 
--- 评审意见批注表
+-- 批注表
 CREATE TABLE review_comments (
     id INT PRIMARY KEY AUTO_INCREMENT,
     session_id INT NOT NULL,
@@ -99,7 +160,7 @@ CREATE TABLE review_comments (
     FOREIGN KEY (expert_id) REFERENCES users(id)
 );
 
--- 工作流记录表
+-- 工作流日志表
 CREATE TABLE workflow_logs (
     id INT PRIMARY KEY AUTO_INCREMENT,
     project_id INT NOT NULL,
@@ -126,18 +187,6 @@ CREATE TABLE ai_analysis_results (
     FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
--- 定时任务表
-CREATE TABLE scheduled_tasks (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    task_name VARCHAR(100) NOT NULL,
-    task_type VARCHAR(50),
-    cron_expression VARCHAR(50),
-    last_run_at TIMESTAMP,
-    next_run_at TIMESTAMP,
-    is_enabled BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- 系统配置表
 CREATE TABLE system_config (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -147,14 +196,20 @@ CREATE TABLE system_config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- 初始化数据
+-- ==================== 初始化数据 ====================
+
+-- 用户
 INSERT INTO users (username, password, real_name, role, department) VALUES
 ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '系统管理员', 'admin', 'IT部'),
 ('biz_dept', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '事业部代表', 'biz', '各事业部'),
 ('rd_staff', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '研发中心员工', 'rd', '研发中心'),
 ('expert01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '评审专家A', 'expert', '评审专家库'),
 ('expert02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '评审专家B', 'expert', '评审专家库'),
-('accountant', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '会计师', 'accountant', '外部会计师事务所');
+('accountant', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '会计师', '外部会计师事务所');
+
+-- 评审批次
+INSERT INTO review_sessions (session_name, session_code, status, review_time, creator_id) VALUES
+('2026年度Q1经济评审', '2026-Q1', 'in_progress', '2026-03-15 09:00:00', 1);
 
 -- 系统配置
 INSERT INTO system_config (config_key, config_value, description) VALUES
