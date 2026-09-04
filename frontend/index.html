@@ -11,12 +11,10 @@
 :root{--primary:#667eea;--success:#27ae60;--warning:#f39c12;--danger:#e74c3c;--info:#3498db;--dark:#2c3e50}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
-/* Login */
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}
 .login-card{background:#fff;border-radius:16px;padding:40px;width:400px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
 .login-card h2{text-align:center;margin-bottom:8px;color:var(--dark)}
 .login-card p{text-align:center;color:#888;margin-bottom:24px;font-size:14px}
-/* App */
 .app-wrap{display:none;min-height:100vh}
 .sidebar{position:fixed;left:0;top:0;bottom:0;width:220px;background:var(--dark);color:#fff;padding:0;z-index:100;overflow-y:auto}
 .sidebar-brand{padding:20px 16px;font-size:16px;font-weight:bold;border-bottom:1px solid rgba(255,255,255,.1)}
@@ -33,6 +31,14 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .stat-card .stat-label{font-size:13px;opacity:.85}
 .chart-container{position:relative;height:250px}
 .badge-custom{padding:4px 10px;border-radius:20px;font-size:12px}
+.file-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin:2px}
+.file-tag.feasibility{background:#e3f2fd;color:#1976d2}
+.file-tag.bid{background:#fce4ec;color:#c2185b}
+.file-tag.award{background:#e8f5e9;color:#388e3c}
+.file-tag.contract{background:#fff3e0;color:#f57c00}
+.file-tag.profit{background:#f3e5f5;color:#7b1fa2}
+.file-tag.subcontract{background:#ffebee;color:#d32f2f}
+.file-tag.other{background:#eceff1;color:#455a64}
 </style>
 </head>
 <body>
@@ -135,6 +141,20 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         </select>
       </div>
       <div id="costHeaderCard" class="card card-custom mb-3 d-none"><div class="card-body" id="costHeaderBody"></div></div>
+      
+      <!-- 项目资料上传区 -->
+      <div class="card card-custom mb-3">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-folder-fill text-primary"></i> 项目评审资料</span>
+          <button class="btn btn-sm btn-primary" onclick="showUploadModal(currentCostProjectId)"><i class="bi bi-cloud-upload"></i> 上传资料</button>
+        </div>
+        <div class="card-body">
+          <div id="projectFilesList" class="row g-2">
+            <p class="text-muted small">请先选择项目，然后点击"上传资料"按钮上传评审材料。</p>
+          </div>
+        </div>
+      </div>
+
       <div class="alert alert-info small mb-3"><strong>💡 专家工作量评估流程：</strong>专业分包类项目由5位专家独立估算人天 → 取平均值 → 乘以人工单价得到最终成本。<br>示例：专家1~5分别估算 10/10/10/9/10 天，平均 9.8 天 × 单价 1,100 元 = <strong>最终成本 10,780 元</strong></div>
       <div class="row g-3 mb-3" id="costSummaryCards"></div>
       <div class="row g-3 mb-3">
@@ -215,7 +235,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         <h6>用户管理</h6><button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal"><i class="bi bi-plus"></i>新建用户</button>
       </div>
       <div class="card card-custom"><div class="card-body p-0">
-        <table class="table table-hover mb-0"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>部门</th><th>状态</th><th>操作</th></tr></thead>
+        <table class="table table-hover mb-0"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>部门</th><th>事业部</th><th>状态</th><th>操作</th></tr></thead>
         <tbody id="userTbody"></tbody></table>
       </div></div>
     </div>
@@ -274,17 +294,61 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
   </div></div>
 </div>
 
+<!-- MODAL: Upload Project Files -->
+<div class="modal fade" id="uploadFileModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5><i class="bi bi-cloud-upload"></i> 上传项目评审资料</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">可选择以下类型的评审材料上传（至少上传一项）：</p>
+        <div class="mb-3">
+          <label class="form-label">选择文件 *</label>
+          <input type="file" class="form-control" id="uploadFileInput" accept=".pdf,.docx,.doc,.xlsx,.xls,.jpg,.jpeg,.png">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">资料类型 *</label>
+          <select class="form-select" id="uploadFileType">
+            <option value="feasibility">可行性研究报告</option>
+            <option value="bid">招投标文件</option>
+            <option value="award">中标通知书</option>
+            <option value="contract">合同文件</option>
+            <option value="profit">投标利润率评审表</option>
+            <option value="subcontract">分包申请表</option>
+            <option value="other">其他材料</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">备注说明</label>
+          <textarea class="form-control" id="uploadFileDesc" rows="2" placeholder="可选填写..."></textarea>
+        </div>
+        <div id="uploadStatus"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" onclick="doUploadFile()">上传</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Add Score -->
 <div class="modal fade" id="addScoreModal" tabindex="-1">
   <div class="modal-dialog"><div class="modal-content">
     <div class="modal-header"><h5>提交专家评分</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
       <div class="mb-3"><label class="form-label">项目</label><select class="form-select" id="scoreProjId"></select></div>
-      <div class="mb-3"><label class="form-label">工作量(25分)</label><input type="number" class="form-control" id="scoreWork" max="25"></div>
-      <div class="mb-3"><label class="form-label">质量(25分)</label><input type="number" class="form-control" id="scoreQuality" max="25"></div>
-      <div class="mb-3"><label class="form-label">难度(25分)</label><input type="number" class="form-control" id="scoreDiff" max="25"></div>
-      <div class="mb-3"><label class="form-label">创新(25分)</label><input type="number" class="form-control" id="scoreInno" max="25"></div>
-      <div class="mb-3"><label class="form-label">备注</label><textarea class="form-control" id="scoreComment" rows="2"></textarea></div>
+      <div class="row g-2">
+        <div class="col-6"><label class="form-label">工作量(25分)</label><input type="number" class="form-control" id="scoreWork" max="25"></div>
+        <div class="col-6"><label class="form-label">质量(25分)</label><input type="number" class="form-control" id="scoreQuality" max="25"></div>
+      </div>
+      <div class="row g-2 mt-1">
+        <div class="col-6"><label class="form-label">难度(25分)</label><input type="number" class="form-control" id="scoreDiff" max="25"></div>
+        <div class="col-6"><label class="form-label">创新(25分)</label><input type="number" class="form-control" id="scoreInno" max="25"></div>
+      </div>
+      <div class="mb-3 mt-2"><label class="form-label">备注</label><textarea class="form-control" id="scoreComment" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -302,6 +366,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
       <div class="mb-3"><label class="form-label">姓名</label><input type="text" class="form-control" id="newRealName" required></div>
       <div class="mb-3"><label class="form-label">角色</label><select class="form-select" id="newRole"><option>admin</option><option>biz</option><option>rd</option><option>expert</option><option>accountant</option></select></div>
       <div class="mb-3"><label class="form-label">部门</label><input type="text" class="form-control" id="newDept"></div>
+      <div class="mb-3"><label class="form-label">事业部</label><select class="form-select" id="newBizDept"><option value="">（不适用）</option><option>电网事业部</option><option>系统集成事业部</option><option>电力气象事业部</option><option>人工智能事业部</option><option>管理事业部</option><option>能源事业部</option></select></div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -313,8 +378,9 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const API='http://localhost:3000/api';
-let currentUser=null, sessions=[], projects=[], workItems=[], procurementItems=[], travelItems=[], scores=[], users=[];
+let currentUser=null, sessions=[], projects=[], workItems=[], procurementItems=[], travelItems=[], scores=[], users=[], files=[];
 let currentPage={page:'dashboard',projectId:null};
+let currentCostProjectId=null;
 
 document.addEventListener('DOMContentLoaded',()=>{
   const saved=localStorage.getItem('currentUser');
@@ -325,7 +391,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 function showMainApp(){
   document.getElementById('loginPage').style.display='none';
   document.getElementById('mainApp').style.display='block';
-  document.getElementById('currentUserDisplay').textContent=currentUser.username+' ('+getRoleName(currentUser.role)+')';
+  document.getElementById('currentUserDisplay').textContent=currentUser.username+' ('+getRoleName(currentUser.role)+')'+(currentUser.business_dept?' ['+currentUser.business_dept+']':'');
   loadAll();
 }
 function doLogout(){localStorage.clear();location.reload();}
@@ -443,10 +509,11 @@ function renderProjects(){
     <td>
       <button class="btn btn-sm btn-info me-1" title="成本分析" onclick="goToCost(${p.id})"><i class="bi bi-graph-down"></i></button>
       <button class="btn btn-sm btn-success me-1" title="评分" onclick="goToScore(${p.id})"><i class="bi bi-star"></i></button>
+      <button class="btn btn-sm btn-warning me-1" title="上传资料" onclick="showUploadModal(${p.id})"><i class="bi bi-cloud-upload"></i></button>
     </td>
   </tr>`).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无项目，请通过Excel导入或新建</td></tr>';
 }
-function goToCost(pid){currentPage.page='cost-analysis';currentPage.projectId=pid;navigateTo('cost-analysis');}
+function goToCost(pid){currentPage.page='cost-analysis';currentPage.projectId=pid;currentCostProjectId=pid;navigateTo('cost-analysis');}
 function goToScore(pid){currentPage.page='scoring';currentPage.projectId=pid;navigateTo('scoring');}
 
 // ---- COST ANALYSIS ----
@@ -454,11 +521,19 @@ function updateCostSelect(){
   const sel=document.getElementById('costProjectSelect');
   if(sel){sel.innerHTML='<option value="">-- 请选择项目 --</option>'+projects.map(p=>`<option value="${p.id}">${p.project_name||p.name}</option>`).join('');}
 }
-async function renderCostAnalysis(){updateCostSelect();if(currentPage.projectId)await loadCostDetail(currentPage.projectId);}
+async function renderCostAnalysis(){
+  updateCostSelect();
+  if(currentCostProjectId)await loadCostDetail(currentCostProjectId);
+}
 async function loadCostDetail(pid){
   if(!pid)return;
-  const [pjR,costR]=await Promise.all([fetch(API+'/projects/'+pid,{headers:authH()}),fetch(API+'/projects/'+pid+'/cost',{headers:authH()})]);
-  const proj=await pjR.json(),cost=await costR.json();
+  currentCostProjectId=pid;
+  const [pjR,costR,filesR]=await Promise.all([
+    fetch(API+'/projects/'+pid,{headers:authH()}),
+    fetch(API+'/projects/'+pid+'/cost',{headers:authH()}),
+    fetch(API+'/projects/'+pid+'/files',{headers:authH()})
+  ]);
+  const proj=await pjR.json(),cost=await costR.json(),projectFiles=await filesR.json();
   
   // Header
   const hc=document.getElementById('costHeaderCard'),hb=document.getElementById('costHeaderBody');
@@ -473,6 +548,35 @@ async function loadCostDetail(pid){
         <div class="col-md-3"><strong>总成本:</strong> ¥${Number(cs.total_cost||0).toLocaleString()}</div>
       </div>
       <div class="progress mt-2" style="height:6px"><div class="progress-bar bg-success" style="width:${cs.profit_rate!=null?((1-cs.profit_rate)*100):100}%">${cs.profit_rate!=null?(cs.profit_rate*100).toFixed(1)+'%利润率':'-'}</div></div>`;
+  }
+  
+  // Files list
+  const flEl=document.getElementById('projectFilesList');
+  if(flEl){
+    if(projectFiles&&projectFiles.length>0){
+      flEl.innerHTML=projectFiles.map(f=>`
+        <div class="col-md-4 col-lg-3">
+          <div class="card card-custom h-100">
+            <div class="card-body p-2">
+              <div class="d-flex align-items-center">
+                <i class="bi bi-file-earmark-${getFileIcon(f.file_type)} fs-4 ${getFileColor(f.file_category)} me-2"></i>
+                <div class="flex-grow-1 overflow-hidden">
+                  <div class="text-truncate small fw-bold" title="${f.originalname}">${f.originalname}</div>
+                  <div><span class="file-tag ${f.file_category}">${getFileCategoryName(f.file_category)}</span></div>
+                </div>
+              </div>
+              <div class="mt-1 small text-muted">${f.upload_time?new Date(f.upload_time).toLocaleDateString():'-'}</div>
+              ${f.description?`<div class="small text-muted text-truncate" title="${f.description}">${f.description}</div>`:''}
+              <div class="mt-2">
+                <a href="${API}${f.url}" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i>查看</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }else{
+      flEl.innerHTML='<p class="text-muted small">暂无上传的评审资料，请点击右上角"上传资料"按钮添加。</p>';
+    }
   }
   
   // Summary cards
@@ -556,6 +660,69 @@ async function loadCostDetail(pid){
     }else{edcEl.classList.add('d-none');}
   }
 }
+
+// ---- FILE UPLOAD ----
+function showUploadModal(projectId){
+  if(!projectId){alert('请先选择项目');return;}
+  currentPage.projectId=projectId;
+  document.getElementById('uploadStatus').innerHTML='';
+  document.getElementById('uploadFileInput').value='';
+  document.getElementById('uploadFileDesc').value='';
+  new bootstrap.Modal(document.getElementById('uploadFileModal')).show();
+}
+async function doUploadFile(){
+  const fileInput=document.getElementById('uploadFileInput');
+  const file=fileInput.files[0];
+  const type=document.getElementById('uploadFileType').value;
+  const desc=document.getElementById('uploadFileDesc').value;
+  const statusEl=document.getElementById('uploadStatus');
+  
+  if(!file){alert('请选择文件');return;}
+  const allowed=/\.(pdf|docx?|xlsx?|jpg|jpeg|png)$/i;
+  if(!allowed.test(file.name)){alert('不支持的文件类型');return;}
+  
+  statusEl.innerHTML='<div class="alert alert-info"><i class="bi bi-hourglass-split"></i> 正在上传...</div>';
+  
+  try{
+    const formData=new FormData();
+    formData.append('file',file);
+    formData.append('category',type);
+    formData.append('description',desc);
+    
+    const r=await fetch(API+'/projects/'+currentPage.projectId+'/files',{
+      method:'POST',
+      headers:{Authorization:'Bearer '+localStorage.getItem('token')},
+      body:formData
+    });
+    
+    if(!r.ok){const d=await r.json();throw new Error(d.error||'上传失败');}
+    
+    const data=await r.json();
+    statusEl.innerHTML='<div class="alert alert-success"><i class="bi bi-check-circle"></i> 上传成功！</div>';
+    
+    setTimeout(()=>{
+      bootstrap.Modal.getInstance(document.getElementById('uploadFileModal'))?.hide();
+      loadCostDetail(currentPage.projectId);
+    },800);
+  }catch(e){
+    statusEl.innerHTML='<div class="alert alert-danger"><i class="bi bi-x-circle"></i> '+e.message+'</div>';
+  }
+}
+
+function getFileIcon(ext){
+  const map={pdf:'pdf',docx:'word',doc:'word',xlsx:'excel',xls:'excel',jpg:'image',jpeg:'image',png:'image'};
+  return map[ext?.toLowerCase()]||'file';
+}
+function getFileColor(cat){
+  const map={feasibility:'text-primary',bid:'text-danger',award:'text-success',contract:'text-warning',profit:'text-info',subcontract:'text-dark',other:'text-secondary'};
+  return map[cat]||'text-muted';
+}
+function getFileCategoryName(cat){
+  const map={feasibility:'可研报告',bid:'招标文件',award:'中标通知',contract:'合同文件',profit:'利润率评审',subcontract:'分包申请',other:'其他'};
+  return map[cat]||cat;
+}
+
+// ---- TAB SWITCH ----
 function switchTab(tab,btn){
   ['work','procurement','travel'].forEach(t=>{
     const el=document.getElementById('tab-'+t);if(el)el.style.display=t===tab?'block':'none';
@@ -607,7 +774,7 @@ function renderUsers(){
   const tb=document.getElementById('userTbody');if(!tb)return;
   tb.innerHTML=users.map(u=>`<tr>
     <td>${u.username}</td><td>${u.real_name||u.realname||'-'}</td>
-    <td>${getRoleName(u.role)}</td><td>${u.department||u.dept||'-'}</td>
+    <td>${getRoleName(u.role)}</td><td>${u.department||'-'}</td><td>${u.business_dept||'-'}</td>
     <td><span class="badge bg-success">${u.status==='active'?'正常':'禁用'}</span></td>
     <td><button class="btn btn-sm btn-outline-warning me-1"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button></td>
   </tr>`).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无用户</td></tr>';
@@ -651,11 +818,11 @@ function doImport(){
     .then(r=>r.json()).then(data=>{
       barEl.style.width='100%';
       setTimeout(()=>{
-        statusEl.innerHTML='<div class="alert alert-success mt-2"><strong><i class="bi bi-check-circle"></i> 导入成功！</strong><br><strong>项目:</strong>'+data.project.project_name+'<br><strong>工作量明细:</strong>'+data.stats.work_items+' 条<br><strong>采购明细:</strong>'+data.stats.procurement_items+' 条<br><strong>总成本:</strong> ¥'+Number(data.stats.total_cost).toLocaleString()+'<br><strong>合同金额:</strong> ¥'+Number(data.stats.contract_amount).toLocaleString()+'</div>';
+        statusEl.innerHTML='<div class="alert alert-success mt-2"><strong><i class="bi bi-check-circle"></i> 导入成功！</strong><br><strong>项目:</strong>'+data.project.project_name+'<br><strong>工作量明细:</strong>'+data.stats.work_items+' 条<br><strong>采购明细:</strong>'+data.stats.procurement_items+' 条<br><strong>总成本:</strong> ¥'+Number(data.stats.total_cost).toLocaleString()+'</div>';
         setTimeout(()=>{bootstrap.Modal.getInstance(document.getElementById('importExcelModal')).hide();document.getElementById('fileInput').value='';loadAll();},1800);
       },500);
     }).catch(e=>{
-      statusEl.innerHTML='<div class="alert alert-danger"><i class="bi bi-x-circle"></i> 导入失败: '+e.message+'</div>';
+      statusEl.innerHTML='<div class="alert alert-danger"><i class="bi bi-x-circle"></i> 导入失败: '+(e.message||e)+'</div>';
       progEl.classList.add('d-none');
     });
 }
@@ -679,8 +846,9 @@ function saveUser(){
   const realName=document.getElementById('newRealName').value.trim();
   const role=document.getElementById('newRole').value;
   const dept=document.getElementById('newDept').value.trim();
+  const bizDept=document.getElementById('newBizDept').value||null;
   if(!username||!realName){alert('请填写用户名和姓名');return;}
-  fetch(API+'/users',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({username,real_name:realName,role,department:dept})})
+  fetch(API+'/users',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({username,real_name:realName,role,department:dept,business_dept:bizDept})})
     .then(r=>r.json()).then(d=>{users.push(d);bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();renderUsers();alert('用户创建成功');})
     .catch(e=>alert('保存失败: '+e));
 }

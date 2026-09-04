@@ -1,6 +1,6 @@
--- 经济评审管理系统数据库设计 v2（含成本明细表）
+-- 经济评审管理系统数据库设计 v3（含权限+文件表）
 
--- 用户表
+-- 用户表（新增business_dept字段，角色枚举按权限文档扩展）
 CREATE TABLE users (
     id INT PRIMARY KEY AUTO_INCREMENT,
     username VARCHAR(50) UNIQUE NOT NULL,
@@ -8,8 +8,9 @@ CREATE TABLE users (
     real_name VARCHAR(50),
     email VARCHAR(100),
     phone VARCHAR(20),
-    role ENUM('admin', 'biz', 'rd', 'expert', 'accountant') NOT NULL,
+    role ENUM('admin', 'biz', 'rd', 'expert', 'accountant') NOT NULL DEFAULT 'expert',
     department VARCHAR(100),
+    business_dept VARCHAR(50),  -- 事业部归属：电网/系统集成/电力气象/人工智能/管理/能源
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     is_active BOOLEAN DEFAULT TRUE
@@ -31,12 +32,13 @@ CREATE TABLE review_sessions (
     FOREIGN KEY (creator_id) REFERENCES users(id)
 );
 
--- 项目主表
+-- 项目主表（新增business_dept）
 CREATE TABLE projects (
     id INT PRIMARY KEY AUTO_INCREMENT,
     project_name VARCHAR(300) NOT NULL,
     project_code VARCHAR(50),
     biz_department VARCHAR(100),
+    business_dept VARCHAR(50),       -- 事业部：电网事业部/系统集成事业部等
     rd_department VARCHAR(100),
     project_type VARCHAR(50),
     business_direction VARCHAR(100),
@@ -56,7 +58,7 @@ CREATE TABLE projects (
     FOREIGN KEY (session_id) REFERENCES review_sessions(id)
 );
 
--- 工作明细表（人员/分包工作量成本）
+-- 工作明细表
 CREATE TABLE work_items (
     id INT PRIMARY KEY AUTO_INCREMENT,
     project_id INT NOT NULL,
@@ -67,7 +69,7 @@ CREATE TABLE work_items (
     person_days DECIMAL(10,2),
     person VARCHAR(50),
     cost DECIMAL(12,2),
-    expert_days JSON, -- 专业分包：5位专家独立估算
+    expert_days JSON,
     expert_days_avg DECIMAL(10,2),
     adjusted_cost DECIMAL(12,2),
     source_sheet VARCHAR(100),
@@ -110,17 +112,17 @@ CREATE TABLE travel_items (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
--- 文件上传表
+-- 项目评审资料附件表（核心新增）
 CREATE TABLE project_files (
     id INT PRIMARY KEY AUTO_INCREMENT,
     project_id INT NOT NULL,
     file_name VARCHAR(255) NOT NULL,
     file_path VARCHAR(500) NOT NULL,
-    file_type VARCHAR(50),
-    file_size BIGINT,
+    file_type VARCHAR(50),         -- pdf/docx/xls/jpg/png等
+    file_category VARCHAR(50),      -- feasibility/bid/award/contract/profit/subcontract
     uploader_id INT,
     upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_public BOOLEAN DEFAULT FALSE,
+    description VARCHAR(500),
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (uploader_id) REFERENCES users(id)
 );
@@ -149,42 +151,28 @@ CREATE TABLE review_comments (
     session_id INT NOT NULL,
     project_id INT NOT NULL,
     expert_id INT NOT NULL,
-    page_number INT,
     content TEXT NOT NULL,
     comment_type ENUM('text', 'highlight', 'stamping', 'annotation') DEFAULT 'text',
-    x_position DECIMAL(5,2),
-    y_position DECIMAL(5,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES review_sessions(id),
     FOREIGN KEY (project_id) REFERENCES projects(id),
     FOREIGN KEY (expert_id) REFERENCES users(id)
 );
 
--- 工作流日志表
+-- 工作流日志表（全链路操作审计）
 CREATE TABLE workflow_logs (
     id INT PRIMARY KEY AUTO_INCREMENT,
     project_id INT NOT NULL,
-    from_role VARCHAR(50),
-    to_role VARCHAR(50),
-    action VARCHAR(100),
-    operator_id INT,
+    session_id INT,
+    operator_id INT NOT NULL,
+    operator_role VARCHAR(50),
+    action VARCHAR(100) NOT NULL,
+    from_status VARCHAR(50),
+    to_status VARCHAR(50),
     remark TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (project_id) REFERENCES projects(id),
     FOREIGN KEY (operator_id) REFERENCES users(id)
-);
-
--- AI分析记录表
-CREATE TABLE ai_analysis_results (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    project_id INT NOT NULL,
-    analysis_type VARCHAR(50),
-    input_data JSON,
-    output_summary TEXT,
-    suggestions JSON,
-    model_version VARCHAR(50),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
 -- 系统配置表
@@ -198,24 +186,22 @@ CREATE TABLE system_config (
 
 -- ==================== 初始化数据 ====================
 
--- 用户
-INSERT INTO users (username, password, real_name, role, department) VALUES
-('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '系统管理员', 'admin', 'IT部'),
-('biz_dept', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '事业部代表', 'biz', '各事业部'),
-('rd_staff', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '研发中心员工', 'rd', '研发中心'),
-('expert01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '评审专家A', 'expert', '评审专家库'),
-('expert02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '评审专家B', 'expert', '评审专家库'),
-('accountant', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '会计师', '外部会计师事务所');
+INSERT INTO users (username, password, real_name, role, department, business_dept) VALUES
+('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '系统管理员', 'admin', 'IT部', NULL),
+('biz_gdw', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '电网事业部经办人', 'biz', '电网事业部', '电网事业部'),
+('biz_xt', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '系统集成事业部经办人', 'biz', '系统集成事业部', '系统集成事业部'),
+('rd_staff', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '研发中心员工', 'rd', '研发中心', NULL),
+('expert01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '评审专家A', 'expert', '评审专家库', NULL),
+('expert02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '评审专家B', 'expert', '评审专家库', NULL),
+('cpa01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '会计师事务所专家甲', 'accountant', '外部会计师事务所', NULL);
 
--- 评审批次
 INSERT INTO review_sessions (session_name, session_code, status, review_time, creator_id) VALUES
-('2026年度Q1经济评审', '2026-Q1', 'in_progress', '2026-03-15 09:00:00', 1);
+('2026年度Q3经济评审', '2026-Q3', 'in_progress', '2026-09-15 09:00:00', 1);
 
--- 系统配置
 INSERT INTO system_config (config_key, config_value, description) VALUES
 ('review_score_weight_workload', '0.4', '工作量权重'),
 ('review_score_weight_quality', '0.3', '质量权重'),
 ('review_score_weight_difficulty', '0.2', '难度权重'),
 ('review_score_weight_innovation', '0.1', '创新权重'),
-('ai_analysis_enabled', 'true', '是否启用AI分析'),
-('max_file_upload_size', '100MB', '最大上传文件大小');
+('allowed_file_extensions', 'pdf,docx,xlsx,xls,jpg,png', '允许上传的文件类型'),
+('max_upload_size_mb', '50', '单个文件大小限制(MB)');
