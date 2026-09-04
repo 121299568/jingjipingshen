@@ -42,6 +42,15 @@
       "creator_id": 1,
       "note": "演示批次",
       "created_at": "2026-09-04T15:40:35.563Z"
+    },
+    {
+      "id": 2,
+      "status": "pending",
+      "created_at": "2026-09-04T18:57:27.708Z",
+      "creator_id": 1,
+      "name": "测试批次-1788548247703",
+      "review_time": "2026-09-10T10:00",
+      "note": "测试"
     }
   ],
   "projects": [
@@ -887,9 +896,44 @@
     }
   ],
   "travelItems": [],
-  "scores": [],
-  "comments": [],
-  "workflowLogs": [],
+  "scores": [
+    {
+      "id": 1,
+      "expert_name": "测试专家",
+      "expert_id": 1,
+      "submitted_at": "2026-09-04T18:57:27.729Z",
+      "session_id": 2,
+      "project_id": 1,
+      "total_score": 88.5,
+      "workload_score": 90,
+      "quality_score": 85,
+      "comment": "测试评分"
+    }
+  ],
+  "comments": [
+    {
+      "id": 1,
+      "expert_name": "admin",
+      "created_at": "2026-09-04T18:57:27.750Z",
+      "session_id": 2,
+      "project_id": 1,
+      "expert_id": 4,
+      "content": "这是测试批注",
+      "comment_type": "text"
+    }
+  ],
+  "workflowLogs": [
+    {
+      "id": 1,
+      "project_id": 1,
+      "from_role": "expert",
+      "to_role": "expert",
+      "action": "score_submitted",
+      "remark": "专家评分提交: 88.5分",
+      "operator_id": 1,
+      "created_at": "2026-09-04T18:57:27.730Z"
+    }
+  ],
   "uploadedFiles": [
     {
       "id": 1788536447716,
