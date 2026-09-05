@@ -95,7 +95,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addSessionModal"><i class="bi bi-plus"></i>新建批次</button>
       </div>
       <div class="card card-custom"><div class="card-body p-0">
-        <table class="table table-hover mb-0"><thead><tr><th>ID</th><th>批次名称</th><th>状态</th><th>评审时间</th><th>项目数</th></tr></thead>
+        <table class="table table-hover mb-0"><thead><tr><th>ID</th><th>批次名称</th><th>状态</th><th>评审时间</th><th>项目数</th><th>操作</th></tr></thead>
         <tbody id="sessionTbody"></tbody></table>
       </div></div>
     </div>
@@ -430,7 +430,12 @@ function renderSessions(){
     <td><span class="badge bg-${{completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary'}">${{completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status}</span></td>
     <td>${fmtTime(s.review_time)||'-'}</td>
     <td>${projects.filter(p=>p.session_id===s.id).length}</td>
-  </tr>`).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无批此</td></tr>';
+      <td>
+        ${s.status==='pending'?`<button class="btn btn-sm btn-warning" onclick="updateSessionStatus(${s.id},'in_progress')"><i class="bi bi-play-fill"></i>启动</button>`:''}
+        ${s.status==='in_progress'?`<button class="btn btn-sm btn-success" onclick="updateSessionStatus(${s.id},'completed')"><i class="bi bi-archive-fill"></i>归档</button>`:''}
+        ${s.status==='completed'?`<span class="text-muted small"><i class="bi bi-archive"></i>已归档</span>`:''}
+      </td>
+    </tr>`).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无批此</td></tr>';
 }
 
 // PROJECTS - 批次抽屉：按评审批次分组，归档批次收缩，进行中批次默认展开
@@ -767,6 +772,19 @@ function saveUser(){
 // Helpers
 function getFileIcon(ext){const m={pdf:'pdf',docx:'word',doc:'word',xlsx:'excel',xls:'excel',jpg:'image',png:'image'};return m[ext?.toLowerCase()]||'file';}
 function getFileCategoryName(cat){const m={estimation:'估算表',feasibility:'可研',bid:'招标',award:'中标',contract:'合同',profit:'利润率',subcontract:'分包',other:'其他'};return m[cat]||cat;}
+
+function updateSessionStatus(sessionId, newStatus) {
+  if(!confirm(newStatus==='completed'?'确定要归档该批次吗？归档后项目资料将锁定。':'确定要启动该批次吗？'))return;
+  fetch(API+'/sessions/'+sessionId,{method:'PATCH',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({status:newStatus})})
+    .then(r=>r.json()).then(d=>{
+      if(d.id){
+        const idx=sessions.findIndex(s=>s.id===sessionId);
+        if(idx>=0)sessions[idx]=d;
+        renderSessions();renderProjects();
+        alert(newStatus==='completed'?'✓ 批次已归档，项目资料已锁定。':'✓ 批次已启动，可开始接收项目资料。');
+      }else{alert('操作失败: '+d.error);}
+    }).catch(e=>alert('网络错误: '+e.message));
+}
 </script>
 </body>
 </html>

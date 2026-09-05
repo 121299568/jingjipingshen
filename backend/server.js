@@ -169,6 +169,24 @@ app.post('/api/sessions', auth(['admin', 'rd']), (req, res) => {
   res.json(s);
 });
 
+// 更新评审批次状态（管理员或RD可归档/启动）
+app.patch('/api/sessions/:id', auth(['admin', 'rd']), (req, res) => {
+  const idx = store.reviewSessions.findIndex(x => x.id === parseInt(req.params.id));
+  if (idx < 0) return res.status(404).json({ error: '批次不存在' });
+  const allowed = ['pending', 'in_progress', 'completed'];
+  const newStatus = req.body.status;
+  if (!newStatus || !allowed.includes(newStatus)) {
+    return res.status(400).json({ error: '无效状态，可选: pending/in_progress/completed' });
+  }
+  store.reviewSessions[idx].status = newStatus;
+  if (newStatus === 'completed') {
+    store.reviewSessions[idx].completed_at = new Date().toISOString();
+  }
+  saveStore(store);
+  console.log('[SESSION] Batch #' + req.params.id + ' status -> ' + newStatus);
+  res.json(store.reviewSessions[idx]);
+});
+
 // 项目
 app.get('/api/projects', auth(), (req, res) => {
   const list = filterByDept(store, 'projects', req.user);
