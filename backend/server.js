@@ -1,4 +1,4 @@
-// server.js - 经济评审管理系统 v3 (工作量评估流程)
+// 经济评审管理系统后端 v3 (工作量评估流程)
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 // ==================== 数据存储 ====================
 const DATA_DIR = path.join(__dirname, 'data');
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -25,18 +26,17 @@ function defaultStore() {
       { id: 3, username: 'biz_xt', password: '123456', real_name: '系统集成事业部经办人', role: 'biz', department: '系统集成事业部', business_dept: '系统集成事业部' },
       { id: 4, username: 'rd_staff', password: '123456', real_name: '研发中心员工', role: 'rd', department: '研发中心', business_dept: null },
       { id: 5, username: 'expert01', password: '123456', real_name: '评审专家A', role: 'expert', department: '评审专家库', business_dept: null },
-      { id: 6, username: 'expert02', password: '123456', real_name: '评审专家B', role: 'expert', department: '评审专家库', business_dept: null },
-      { id: 7, username: 'cpa01', password: '123456', real_name: '会计师事务所专家甲', role: 'accountant', department: '外部会计师事务所', business_dept: null }
+      { id: 6, username: 'cpa01', password: '123456', real_name: '会计师事务所专家甲', role: 'accountant', department: '外部会计师事务所', business_dept: null }
     ],
     reviewSessions: [
       { id: 1, name: '2026年度Q3经济评审', status: 'in_progress', review_time: '2026-09-15 09:00', creator_id: 1, note: '示例批次', created_at: new Date().toISOString() }
     ],
     projects: [],
-    workItems: [],           // 工作明细（含专家人天评估）
+    workItems: [],
     procurementItems: [],
     travelItems: [],
-    expertEstimates: [],     // 专家人天评估记录
-    confirmations: [],       // 专家确认记录
+    expertEstimates: [],
+    confirmations: [],
     files: [],
     workflowLogs: []
   };
@@ -45,26 +45,6 @@ function defaultStore() {
 function loadStore() {
   if (!fs.existsSync(STORE_FILE)) {
     const s = defaultStore();
-    const seedFile = path.join(DATA_DIR, 'seed-project.json');
-    if (fs.existsSync(seedFile)) {
-      try {
-        const d = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
-        s.projects.push({ 
-          id: 1, 
-          project_name: d.project.project_name || '国网乐陵市供电公司维修项目', 
-          project_code: d.project.project_code || '',
-          biz_department: d.project.biz_department || '电力工程',
-          contract_amount: d.project.contract_amount || 133660,
-          cost_summary: d.cost_summary,
-          status: 'reviewing', 
-          session_id: 1, 
-          created_at: new Date().toISOString() 
-        });
-        s.workItems = d.work_items.map((w, i) => ({ id: i + 1, project_id: 1, ...w }));
-        s.procurementItems = d.procurement_items.map((p, i) => ({ id: i + 1, project_id: 1, ...p }));
-        s.travelItems = d.travel_items.map((t, i) => ({ id: i + 1, project_id: 1, ...t }));
-      } catch(e) {}
-    }
     saveStore(s);
     return s;
   }
@@ -110,7 +90,6 @@ function auth(requiredRoles) {
   };
 }
 
-// 数据隔离
 function filterByDept(store, key, user) {
   if (user.role === 'admin' || user.role === 'rd') return store[key];
   if (user.role === 'biz' && user.business_dept) {
@@ -123,7 +102,6 @@ function filterByDept(store, key, user) {
   return store[key];
 }
 
-// 日志
 function logWorkflow(projectId, action, remark, userId) {
   const user = store.users.find(u => u.id === userId);
   store.workflowLogs.push({
@@ -153,7 +131,7 @@ const fileFilter = (req, file, cb) => {
 };
 const upload = multer({ storage, fileFilter, limits: { fileSize: 50 * 1024 * 1024 } });
 
-// ==================== 路由 ====================
+// ==================== API路由 ====================
 
 // 登录
 app.post('/api/auth/login', (req, res) => {
@@ -298,18 +276,12 @@ app.get('/api/projects/:id/files', auth(), (req, res) => {
 
 // ==================== 工作量评估接口 ====================
 
-// 获取项目的专家评估任务列表
 app.get('/api/projects/:id/estimates', auth(), (req, res) => {
   const projectId = parseInt(req.params.id);
   const estimates = store.expertEstimates.filter(e => e.project_id === projectId);
-  
-  // 根据角色返回不同数据
   if (req.user.role === 'expert' || req.user.role === 'accountant') {
-    // 专家只看自己评估的工作项
-    const myEstimates = estimates.filter(e => e.expert_id === req.user.id);
-    res.json(myEstimates);
-  } else if (req.user.role === 'biz') {
-    // 事业部只能看到平均值，看不到原始评估
+    res.json(estimates.filter(e => e.expert_id === req.user.id));
+  } else {
     const summary = {};
     estimates.forEach(e => {
       if (!summary[e.work_item_id]) summary[e.work_item_id] = { count: 0, total: 0 };
@@ -325,32 +297,25 @@ app.get('/api/projects/:id/estimates', auth(), (req, res) => {
       });
     }
     res.json(result);
-  } else {
-    // 研发中心和管理员看全部
-    res.json(estimates);
   }
 });
 
-// 提交工作量评估（专家打分人天）
 app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
   const { project_id, work_item_id, days, comment } = req.body;
   if (!project_id || !work_item_id || days === undefined) {
     return res.status(400).json({ error: '缺少必要参数' });
   }
-  
-  // 检查是否已提交过
   const existing = store.expertEstimates.find(e => e.expert_id === req.user.id && e.project_id === project_id && e.work_item_id === work_item_id);
   if (existing) {
-    return res.status(400).json({ error: '您已经提交过该项评估，如需修改请联系研发中心作废任务' });
+    return res.status(400).json({ error: '您已经提交过该项评估' });
   }
-  
   const estimate = {
     id: store.expertEstimates.length + 1,
     project_id,
     work_item_id,
     expert_id: req.user.id,
     expert_name: req.user.real_name,
-    days,              // 评估人天
+    days,
     comment: comment || '',
     submitted_at: new Date().toISOString()
   };
@@ -360,16 +325,12 @@ app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
   res.json(estimate);
 });
 
-// 计算工作项的平均人天
 app.get('/api/projects/:id/estimate-summary', auth(), (req, res) => {
   const projectId = parseInt(req.params.id);
   const estimates = store.expertEstimates.filter(e => e.project_id === projectId);
-  
   if (estimates.length === 0) {
     return res.json({ message: '暂无专家评估数据' });
   }
-  
-  // 按工作项分组计算平均
   const summary = {};
   estimates.forEach(e => {
     if (!summary[e.work_item_id]) {
@@ -379,48 +340,42 @@ app.get('/api/projects/:id/estimate-summary', auth(), (req, res) => {
     summary[e.work_item_id].total += e.days;
     summary[e.work_item_id].count++;
   });
-  
   const result = Object.entries(summary).map(([workItemId, data]) => ({
     work_item_id: parseInt(workItemId),
-    days_list: data.items,        // 各专家评估的人天数
-    avg_days: Math.round(data.total / data.count * 10) / 10,  // 平均人天
+    days_list: data.items,
+    avg_days: Math.round(data.total / data.count * 10) / 10,
     expert_count: data.count,
     max_days: Math.max(...data.items),
     min_days: Math.min(...data.items)
   }));
-  
   res.json(result);
 });
 
-// 专家确认平均值
 app.post('/api/confirmations', auth(['expert', 'accountant']), (req, res) => {
   const { project_id, work_item_id, confirmed } = req.body;
   if (!project_id || !work_item_id || confirmed === undefined) {
     return res.status(400).json({ error: '缺少必要参数' });
   }
-  
   const confirmation = {
     id: store.confirmations.length + 1,
     project_id,
     work_item_id,
     expert_id: req.user.id,
     expert_name: req.user.real_name,
-    confirmed,   // true=确认, false=驳回
+    confirmed,
     comment: req.body.comment || '',
     confirmed_at: new Date().toISOString()
   };
   store.confirmations.push(confirmation);
   saveStore(store);
-  logWorkflow(project_id, confirmed ? 'confirm_estimate' : 'reject_estimate', 
+  logWorkflow(project_id, confirmed ? 'confirm_estimate' : 'reject_estimate',
     `专家${confirmation.expert_name}${confirmed ? '确认' : '驳回'}工作项${work_item_id}的平均值`, req.user.id);
   res.json(confirmation);
 });
 
-// 获取确认状态
 app.get('/api/projects/:id/confirmations', auth(), (req, res) => {
   const projectId = parseInt(req.params.id);
   const confirmations = store.confirmations.filter(c => c.project_id === projectId);
-  
   if (req.user.role === 'expert' || req.user.role === 'accountant') {
     res.json(confirmations.filter(c => c.expert_id === req.user.id));
   } else {
@@ -432,8 +387,6 @@ app.get('/api/projects/:id/confirmations', auth(), (req, res) => {
 app.get('/api/projects/:id/cost', auth(), (req, res) => {
   const p = store.projects.find(x => x.id === parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '项目不存在' });
-  
-  // 获取工作量评估汇总
   const estimateSummary = store.expertEstimates
     .filter(e => e.project_id === p.id)
     .reduce((acc, e) => {
@@ -441,7 +394,6 @@ app.get('/api/projects/:id/cost', auth(), (req, res) => {
       acc[e.work_item_id].push(e.days);
       return acc;
     }, {});
-  
   res.json({
     work_items: store.workItems.filter(w => w.project_id === p.id).map(w => ({
       ...w,
@@ -506,6 +458,18 @@ app.get('/api/stats/cost-structure', auth(), (req, res) => {
 app.get('/api/workflow/:projectId', auth(), (req, res) => {
   const logs = store.workflowLogs.filter(l => l.project_id === parseInt(req.params.id));
   res.json(logs);
+});
+
+// ==================== 前端静态文件服务 ====================
+app.use(express.static(FRONTEND_DIR));
+
+// 根路径返回index.html
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api/')) {
+    res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
+  } else {
+    res.status(404).json({ error: 'Not found' });
+  }
 });
 
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
