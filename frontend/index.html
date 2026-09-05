@@ -1,4 +1,149 @@
-<!DOCTYPE html>
+<!DOC
+    <!-- STATS PAGE - 丰富统计分析 -->
+    <div id="page-stats-rich" class="page">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6><i class="bi bi-bar-chart-fill"></i> 综合统计分析</h6>
+        <div class="d-flex gap-2">
+          <select id="statsReportType" class="form-select form-select-sm" style="width:150px">
+            <option value="summary">汇总报告</option>
+            <option value="department">事业部分析</option>
+            <option value="expert">专家工作量</option>
+          </select>
+          <select id="statsDepartment" class="form-select form-select-sm" style="width:150px">
+            <option value="">全部事业部</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="generateReport()"><i class="bi bi-file-earmark-text"></i>生成报告</button>
+          <button class="btn btn-success btn-sm" onclick="downloadReport()"><i class="bi bi-download"></i>下载报告</button>
+        </div>
+      </div>
+
+      <!-- 概览卡片 -->
+      <div class="row g-3 mb-4" id="statsOverview">
+        <div class="col-md-3">
+          <div class="card bg-primary text-white h-100">
+            <div class="card-body text-center">
+              <h2 class="display-4" id="statTotalProjects">0</h2>
+              <p class="mb-0">项目总数</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card bg-success text-white h-100">
+            <div class="card-body text-center">
+              <h2 class="display-4" id="statTotalAmount">0</h2>
+              <p class="mb-0">合同总额(万)</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card bg-info text-white h-100">
+            <div class="card-body text-center">
+              <h2 class="display-4" id="statCompletedProjects">0</h2>
+              <p class="mb-0">已完成项目</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card bg-warning text-white h-100">
+            <div class="card-body text-center">
+              <h2 class="display-4" id="statTotalSessions">0</h2>
+              <p class="mb-0">评审批次</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 图表区域 -->
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <div class="card card-custom">
+            <div class="card-header bg-white">
+              <h6 class="mb-0"><i class="bi bi-pie-chart"></i> 事业部分布</h6>
+            </div>
+            <div class="card-body">
+              <canvas id="deptChart" height="250"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card card-custom">
+            <div class="card-header bg-white">
+              <h6 class="mb-0"><i class="bi bi-bar-chart"></i> 月度趋势</h6>
+            </div>
+            <div class="card-body">
+              <canvas id="monthlyChart" height="250"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <div class="card card-custom">
+            <div class="card-header bg-white">
+              <h6 class="mb-0"><i class="bi bi-file-earmark"></i> 资料上传情况</h6>
+            </div>
+            <div class="card-body">
+              <canvas id="fileChart" height="250"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card card-custom">
+            <div class="card-header bg-white">
+              <h6 class="mb-0"><i class="bi bi-calendar3"></i> 批次完成进度</h6>
+            </div>
+            <div class="card-body">
+              <canvas id="sessionChart" height="250"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 详细数据表格 -->
+      <div class="row g-3">
+        <div class="col-12">
+          <div class="card card-custom">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+              <h6 class="mb-0"><i class="bi bi-table"></i> 事业部详细统计</h6>
+              <button class="btn btn-sm btn-outline-primary" onclick="exportTableToCSV()"><i class="bi bi-file-spreadsheet"></i>导出CSV</button>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-hover mb-0" id="deptStatsTable">
+                  <thead class="table-light">
+                    <tr>
+                      <th>序号</th>
+                      <th>事业部</th>
+                      <th>项目数</th>
+                      <th>合同金额(元)</th>
+                      <th>平均金额(元)</th>
+                      <th>占比</th>
+                    </tr>
+                  </thead>
+                  <tbody id="deptStatsBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 报告预览区域 -->
+      <div class="row g-3 mt-3" id="reportPreviewSection" style="display:none">
+        <div class="col-12">
+          <div class="card card-custom">
+            <div class="card-header bg-white">
+              <h6 class="mb-0"><i class="bi bi-file-earmark-preview"></i> 报告预览</h6>
+            </div>
+            <div class="card-body">
+              <iframe id="reportPreviewFrame" style="width:100%;height:600px;border:1px solid #dee2e6;border-radius:4px"></iframe>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+TYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -785,6 +930,256 @@ function updateSessionStatus(sessionId, newStatus) {
       }else{alert('操作失败: '+d.error);}
     }).catch(e=>alert('网络错误: '+e.message));
 }
+
+// ==================== 综合统计分析 ====================
+let deptChartInstance = null;
+let monthlyChartInstance = null;
+let fileChartInstance = null;
+let sessionChartInstance = null;
+
+async function loadStatsRich() {
+  try {
+    const r = await fetch(API + '/stats/detailed', { headers: authH() });
+    const data = await r.json();
+    renderStatsOverview(data);
+    renderDeptChart(data.departments);
+    renderMonthlyChart(data.monthly_trend);
+    renderFileChart(data.file_categories);
+    renderSessionChart(data.sessions);
+    renderDeptTable(data.departments);
+    populateDeptSelect(data.departments);
+  } catch(e) {
+    console.error('Failed to load stats:', e);
+  }
+}
+
+function renderStatsOverview(data) {
+  document.getElementById('statTotalProjects').textContent = data.overview.total_projects;
+  document.getElementById('statTotalAmount').textContent = (data.overview.total_amount / 10000).toFixed(1);
+  document.getElementById('statCompletedProjects').textContent = data.overview.completed_projects;
+  document.getElementById('statTotalSessions').textContent = data.overview.total_sessions;
+}
+
+function renderDeptChart(depts) {
+  const ctx = document.getElementById('deptChart');
+  if (!ctx) return;
+  if (deptChartInstance) deptChartInstance.destroy();
+  
+  deptChartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: depts.map(d => d.name),
+      datasets: [{
+        data: depts.map(d => d.total_amount),
+        backgroundColor: ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4fac00', '#00f2fe']
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'right' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ' ¥' + ctx.parsed.toLocaleString()
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderMonthlyChart(trend) {
+  const ctx = document.getElementById('monthlyChart');
+  if (!ctx) return;
+  if (monthlyChartInstance) monthlyChartInstance.destroy();
+  
+  monthlyChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: trend.map(t => t.month),
+      datasets: [{
+        label: '项目数量',
+        data: trend.map(t => t.projects),
+        borderColor: '#667eea',
+        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+        fill: true,
+        tension: 0.4
+      }, {
+        label: '合同金额(万)',
+        data: trend.map(t => (t.total_amount / 10000).toFixed(1)),
+        borderColor: '#10b981',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        fill: true,
+        tension: 0.4,
+        yAxisID: 'y1'
+      }]
+    },
+    options: {
+      responsive: true,
+      interaction: { intersect: false },
+      scales: {
+        y: { beginAtZero: true },
+        y1: { position: 'right', beginAtZero: true }
+      }
+    }
+  });
+}
+
+function renderFileChart(cats) {
+  const ctx = document.getElementById('fileChart');
+  if (!ctx) return;
+  if (fileChartInstance) fileChartInstance.destroy();
+  
+  const labels = {
+    estimation: '估算表', feasibility: '可研报告', bid: '招标文件',
+    award: '中标文件', contract: '合同', profit: '利润评审', subcontract: '分包申请'
+  };
+  
+  fileChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: Object.keys(cats).map(k => labels[k] || k),
+      datasets: [{
+        label: '上传数量',
+        data: Object.values(cats).map(c => c.count),
+        backgroundColor: '#667eea'
+      }, {
+        label: '覆盖项目数',
+        data: Object.values(cats).map(c => c.projects_with_file),
+        backgroundColor: '#10b981'
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'top' } }
+    }
+  });
+}
+
+function renderSessionChart(sessions) {
+  const ctx = document.getElementById('sessionChart');
+  if (!ctx) return;
+  if (sessionChartInstance) sessionChartInstance.destroy();
+  
+  sessionChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sessions.map(s => s.name || s.session_name || '批次' + s.id),
+      datasets: [{
+        label: '总项目数',
+        data: sessions.map(s => s.project_count),
+        backgroundColor: '#667eea'
+      }, {
+        label: '已完成',
+        data: sessions.map(s => s.completed_projects),
+        backgroundColor: '#10b981'
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'top' } },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+    }
+  });
+}
+
+function renderDeptTable(depts) {
+  const tbody = document.getElementById('deptStatsBody');
+  if (!tbody) return;
+  
+  const totalAmount = depts.reduce((s, d) => s + d.total_amount, 0);
+  tbody.innerHTML = depts.map((d, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${d.name}</td>
+      <td>${d.count}</td>
+      <td>${d.total_amount.toLocaleString()}</td>
+      <td>${d.avg_amount.toLocaleString()}</td>
+      <td>${totalAmount > 0 ? ((d.total_amount / totalAmount) * 100).toFixed(1) : 0}%</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="text-muted text-center">暂无数据</td></tr>';
+}
+
+function populateDeptSelect(depts) {
+  const select = document.getElementById('statsDepartment');
+  if (!select) return;
+  select.innerHTML = '<option value="">全部事业部</option>' + 
+    depts.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
+}
+
+function generateReport() {
+  const type = document.getElementById('statsReportType').value;
+  const dept = document.getElementById('statsDepartment').value;
+  
+  fetch(API + '/reports/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authH() },
+    body: JSON.stringify({ type, params: { department: dept } })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      currentReportContent = data.content;
+      showReportPreview(data.content);
+    } else {
+      alert('生成报告失败: ' + (data.error || '未知错误'));
+    }
+  })
+  .catch(e => alert('网络错误: ' + e.message));
+}
+
+let currentReportContent = '';
+
+function showReportPreview(content) {
+  const section = document.getElementById('reportPreviewSection');
+  const frame = document.getElementById('reportPreviewFrame');
+  if (section && frame) {
+    section.style.display = 'block';
+    frame.srcdoc = content;
+    section.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+function downloadReport() {
+  if (!currentReportContent) {
+    alert('请先生成报告');
+    return;
+  }
+  
+  const type = document.getElementById('statsReportType').value;
+  const blob = new Blob([currentReportContent], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '经济评审分析报告_' + type + '_' + new Date().toISOString().slice(0,10) + '.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportTableToCSV() {
+  const table = document.getElementById('deptStatsTable');
+  if (!table) return;
+  
+  let csv = [];
+  const rows = table.querySelectorAll('tr');
+  rows.forEach(row => {
+    const cols = row.querySelectorAll('td, th');
+    const rowData = Array.from(cols).map(col => '"' + col.textContent.replace(/"/g, '""') + '"');
+    csv.push(rowData.join(','));
+  });
+  
+  const blob = new Blob(['\ufeff' + csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '事业部统计表_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 </script>
 </body>
 </html>

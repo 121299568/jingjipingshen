@@ -436,6 +436,166 @@ function calculateCategoryCost(items) {
 }
 
 // 统计
+
+// ==================== 高级统计分析 ====================
+app.get('/api/stats/detailed', auth(), (req, res) => {
+  const user = req.user;
+  const projects = filterByDept(store, 'projects', user);
+  const files = store.projectFiles || [];
+  const sessions = store.reviewSessions || [];
+  const estimates = store.expertEstimates || [];
+  
+  // 1. 批次统计
+  const sessionStats = sessions.map(s => ({
+    ...s,
+    project_count: projects.filter(p => p.session_id === s.id).length,
+    completed_projects: projects.filter(p => p.session_id === s.id && p.status === 'completed').length,
+    files_count: files.filter(f => projects.some(p => p.id === f.project_id && p.session_id === s.id)).length
+  }));
+  
+  // 2. 事业部统计
+  const deptMap = {};
+  projects.forEach(p => {
+    const dept = p.biz_department || '未分类';
+    if (!deptMap[dept]) deptMap[dept] = { count: 0, total_amount: 0 };
+    deptMap[dept].count++;
+    deptMap[dept].total_amount += Number(p.contract_amount) || 0;
+  });
+  const deptStats = Object.entries(deptMap).map(([name, data]) => ({
+    name, ...data, avg_amount: data.count > 0 ? data.total_amount / data.count : 0
+  })).sort((a, b) => b.total_amount - a.total_amount);
+  
+  // 3. 资料上传统计
+  const categories = ['estimation', 'feasibility', 'bid', 'award', 'contract', 'profit', 'subcontract'];
+  const fileCategoryStats = {};
+  categories.forEach(cat => {
+    const catFiles = files.filter(f => f.file_category === cat);
+    fileCategoryStats[cat] = { count: catFiles.length, projects_with_file: new Set(catFiles.map(f => f.project_id)).size };
+  });
+  
+  // 4. 项目状态分布
+  const statusDist = {};
+  projects.forEach(p => { const s = p.status || 'draft'; statusDist[s] = (statusDist[s] || 0) + 1; });
+  
+  // 5. 评估统计
+  const estimateStats = { total_estimates: estimates.length, avg_days: 0, by_project: {} };
+  if (estimates.length > 0) {
+    estimateStats.avg_days = estimates.reduce((s, e) => s + Number(e.days || 0), 0) / estimates.length;
+    estimates.forEach(e => {
+      const pid = e.project_id;
+      if (!estimateStats.by_project[pid]) estimateStats.by_project[pid] = { count: 0, total_days: 0, experts: new Set() };
+      estimateStats.by_project[pid].count++;
+      estimateStats.by_project[pid].total_days += Number(e.days || 0);
+      estimateStats.by_project[pid].experts.add(e.expert_id);
+    });
+    Object.values(estimateStats.by_project).forEach(p => {
+      p.avg_days = p.count > 0 ? p.total_days / p.count : 0;
+      p.expert_count = p.experts.size;
+      delete p.experts;
+    });
+  }
+  
+  // 6. 时间趋势
+  const monthlyStats = {};
+  projects.forEach(p => {
+    const month = new Date(p.created_at).toISOString().slice(0, 7);
+    if (!monthlyStats[month]) monthlyStats[month] = { projects: 0, amount: 0 };
+    monthlyStats[month].projects++;
+    monthlyStats[month].amount += Number(p.contract_amount) || 0;
+  });
+  const monthlyTrend = Object.entries(monthlyStats).sort(([a], [b]) => a.localeCompare(b)).map(([m, d]) => ({ month: m, ...d }));
+  
+  // 7. 专家工作量
+  const expertStats = {};
+  estimates.forEach(e => {
+    const eid = e.expert_id;
+    if (!expertStats[eid]) expertStats[eid] = { id: eid, name: e.expert_name, total_days: 0, projects: new Set() };
+    expertStats[eid].total_days += Number(e.days || 0);
+    expertStats[eid].projects.add(e.project_id);
+  });
+  const expertAnalysis = Object.values(expertStats).map(e => ({
+    ...e, project_count: e.projects.size, avg_days_per_project: e.projects.size > 0 ? e.total_days / e.projects.size : 0
+  }));
+  
+  res.json({
+    version: '2.0', generated_at: new Date().toISOString(),
+    overview: {
+      total_projects: projects.length, total_sessions: sessions.length,
+      total_files: files.length, total_estimates: estimates.length,
+      completed_projects: projects.filter(p => p.status === 'completed').length,
+      total_amount: projects.reduce((s, p) => s + Number(p.contract_amount || 0), 0)
+    },
+    sessions: sessionStats, departments: deptStats,
+    file_categories: fileCategoryStats, status_distribution: statusDist,
+    estimates: estimateStats, monthly_trend: monthlyTrend, experts: expertAnalysis
+  });
+});
+
+app.post('/api/reports/generate', auth(['admin', 'rd']), async (req, res) => {
+  try {
+    const { type, format } = req.body;
+    const stats = await getDetailedStats(req.user);
+    let content = '', mimeType = 'text/html';
+    
+    if (type === 'summary') { content = generateSummaryReport(stats); mimeType = 'text/html'; }
+    else if (type === 'department') { content = generateDepartmentReport(stats, req.body.params); mimeType = 'text/html'; }
+    else if (type === 'expert') { content = generateExpertReport(stats); mimeType = 'text/html'; }
+    else { return res.status(400).json({ error: '未知的报告类型' }); }
+    
+    res.json({ success: true, report_type: type, format, content, generated_at: new Date().toISOString() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function getDetailedStats(user) {
+  const projects = filterByDept(store, 'projects', user);
+  const files = store.projectFiles || [];
+  const sessions = store.reviewSessions || [];
+  const estimates = store.expertEstimates || [];
+  return { projects, files, sessions, estimates };
+}
+
+function generateSummaryReport(stats) {
+  const { projects, sessions, files, estimates } = stats;
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>经济评审汇总报告</title>' +
+    '<style>body{font-family:Arial,sans-serif;margin:40px;}h1{color:#333;border-bottom:2px solid #667eea;padding-bottom:10px;}table{border-collapse:collapse;width:100%;margin:20px 0;}th,td{border:1px solid #ddd;padding:12px;text-align:left;}th{background:#667eea;color:white;}.metric{display:inline-block;margin:10px 20px;padding:15px 25px;background:#f0f4ff;border-radius:8px;}.metric-value{font-size:24px;font-weight:bold;color:#667eea;}</style>' +
+    '</head><body><h1>经济评审汇总报告</h1><p>生成时间: ' + new Date().toLocaleString('zh-CN') + '</p>' +
+    '<div class="metrics"><div class="metric"><div class="metric-value">' + projects.length + '</div><div>项目总数</div></div>' +
+    '<div class="metric"><div class="metric-value">' + (projects.reduce((s,p) => s + Number(p.contract_amount||0), 0)/10000).toFixed(2) + '万</div><div>合同总金额</div></div>' +
+    '<div class="metric"><div class="metric-value">' + sessions.length + '</div><div>评审批次</div></div>' +
+    '<div class="metric"><div class="metric-value">' + files.length + '</div><div>上传文件</div></div></div>' +
+    '<h2>批此列表</h2><table><tr><th>ID</th><th>名称</th><th>状态</th><th>项目数</th></tr>' +
+    sessions.map(s => '<tr><td>' + s.id + '</td><td>' + (s.name||s.session_name||'-') + '</td><td>' + s.status + '</td><td>' + projects.filter(p=>p.session_id===s.id).length + '</td></tr>').join('') + '</table></body></html>';
+}
+
+function generateDepartmentReport(stats, params) {
+  const { projects } = stats;
+  const dept = params.department || '';
+  const deptProjects = dept ? projects.filter(p => p.biz_department === dept) : projects;
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>事业部分析报告</title>' +
+    '<style>body{font-family:Arial;margin:40px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:10px;}th{background:#667eea;color:white;}</style></head><body>' +
+    '<h1>事业部经济评审分析报告</h1><p>部门: ' + (dept||'全部') + '</p><table><tr><th>ID</th><th>项目名称</th><th>金额</th><th>状态</th></tr>' +
+    deptProjects.map(p => '<tr><td>' + p.id + '</td><td>' + String(p.project_name||'').substring(0,30) + '</td><td>' + Number(p.contract_amount||0).toLocaleString() + '</td><td>' + p.status + '</td></tr>').join('') +
+    '</table><p>总计: ' + deptProjects.length + ' 个项目</p></body></html>';
+}
+
+function generateExpertReport(stats) {
+  const { estimates, projects } = stats;
+  const expertMap = {};
+  estimates.forEach(e => {
+    const eid = e.expert_id;
+    if (!expertMap[eid]) expertMap[eid] = { name: e.expert_name, days: 0, projects: new Set() };
+    expertMap[eid].days += Number(e.days || 0);
+    expertMap[eid].projects.add(e.project_id);
+  });
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>专家工作量报告</title>' +
+    '<style>body{font-family:Arial;margin:40px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:10px;}th{background:#10b981;color:white;}</style></head><body>' +
+    '<h1>专家工作量评估报告</h1><p>生成时间: ' + new Date().toLocaleString('zh-CN') + '</p>' +
+    '<table><tr><th>专家ID</th><th>姓名</th><th>项目数</th><th>总人天</th><th>平均人天</th></tr>' +
+    Object.values(expertMap).map(e => '<tr><td>-</td><td>' + e.name + '</td><td>' + e.projects.size + '</td><td>' + e.days.toFixed(2) + '</td><td>' + (e.days/e.projects.size).toFixed(2) + '</td></tr>').join('') +
+    '</table></body></html>';
+}
+
+
 app.get('/api/stats/summary', auth(), (req, res) => {
   const s = store;
   const totalCost = s.projects.reduce((sum, p) => sum + (parseFloat(p.contract_amount) || 0), 0);
