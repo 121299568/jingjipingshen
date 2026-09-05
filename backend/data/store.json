@@ -47,6 +47,15 @@
     },
     {
       "id": 6,
+      "username": "expert02",
+      "password": "123456",
+      "real_name": "评审专家B",
+      "role": "expert",
+      "department": "评审专家库",
+      "business_dept": null
+    },
+    {
+      "id": 7,
       "username": "cpa01",
       "password": "123456",
       "real_name": "会计师事务所专家甲",
@@ -63,7 +72,7 @@
       "review_time": "2026-09-15 09:00",
       "creator_id": 1,
       "note": "示例批次",
-      "created_at": "2026-09-04T19:51:17.466Z"
+      "created_at": "2026-09-05T02:10:41.167Z"
     }
   ],
   "projects": [
@@ -86,7 +95,7 @@
       },
       "status": "reviewing",
       "session_id": 1,
-      "created_at": "2026-09-04T19:51:17.469Z"
+      "created_at": "2026-09-05T02:10:41.175Z"
     }
   ],
   "workItems": [
@@ -486,54 +495,8 @@
     }
   ],
   "travelItems": [],
-  "scores": [],
-  "comments": [],
-  "files": [
-    {
-      "id": 1,
-      "project_id": 1,
-      "filename": "1788551586624-72ff2b577ee4a407.pdf",
-      "originalname": "å¯ç æ¥å_v1.pdf",
-      "file_type": "pdf",
-      "file_category": "feasibility",
-      "uploader_id": 1,
-      "url": "/uploads/1788551586624-72ff2b577ee4a407.pdf",
-      "description": "可研报告_v1.pdf",
-      "upload_time": "2026-09-04T19:53:06.628Z"
-    },
-    {
-      "id": 2,
-      "project_id": 1,
-      "filename": "1788551586636-9828fc12503e1cd7.docx",
-      "originalname": "åå_signed.docx",
-      "file_type": "docx",
-      "file_category": "contract",
-      "uploader_id": 1,
-      "url": "/uploads/1788551586636-9828fc12503e1cd7.docx",
-      "description": "合同_signed.docx",
-      "upload_time": "2026-09-04T19:53:06.638Z"
-    }
-  ],
-  "workflowLogs": [
-    {
-      "id": 1,
-      "project_id": 1,
-      "operator_id": 1,
-      "operator_role": "admin",
-      "operator_name": "系统管理员",
-      "action": "upload_file",
-      "remark": "上传feasibility文件：å¯ç æ¥å_v1.pdf",
-      "created_at": "2026-09-04T19:53:06.629Z"
-    },
-    {
-      "id": 2,
-      "project_id": 1,
-      "operator_id": 1,
-      "operator_role": "admin",
-      "operator_name": "系统管理员",
-      "action": "upload_file",
-      "remark": "上传contract文件：åå_signed.docx",
-      "created_at": "2026-09-04T19:53:06.639Z"
-    }
-  ]
+  "expertEstimates": [],
+  "confirmations": [],
+  "files": [],
+  "workflowLogs": []
 }
