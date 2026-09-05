@@ -62,6 +62,14 @@
       "role": "accountant",
       "department": "外部会计师事务所",
       "business_dept": null
+    },
+    {
+      "id": 8,
+      "username": "test_expert_1788575394791",
+      "real_name": "测试专家",
+      "role": "expert",
+      "department": "评审专家库",
+      "password": "123456"
     }
   ],
   "reviewSessions": [
@@ -73,6 +81,14 @@
       "creator_id": 1,
       "note": "示例批次",
       "created_at": "2026-09-05T02:10:41.167Z"
+    },
+    {
+      "id": 2,
+      "status": "pending",
+      "created_at": "2026-09-05T02:29:54.742Z",
+      "creator_id": 1,
+      "name": "测试批次-1788575394741",
+      "review_time": "2026-10-01T10:00"
     }
   ],
   "projects": [
@@ -96,6 +112,16 @@
       "status": "reviewing",
       "session_id": 1,
       "created_at": "2026-09-05T02:10:41.175Z"
+    },
+    {
+      "id": 2,
+      "status": "draft",
+      "created_at": "2026-09-05T02:29:54.745Z",
+      "creator_id": 1,
+      "project_name": "测试项目-1788575394744",
+      "biz_department": "电网事业部",
+      "contract_amount": 50000,
+      "session_id": 1
     }
   ],
   "workItems": [
@@ -495,8 +521,126 @@
     }
   ],
   "travelItems": [],
-  "expertEstimates": [],
-  "confirmations": [],
-  "files": [],
-  "workflowLogs": []
+  "expertEstimates": [
+    {
+      "id": 1,
+      "project_id": 2,
+      "work_item_id": 1,
+      "expert_id": 5,
+      "days": 10,
+      "comment": "初步评估",
+      "submitted_at": "2026-09-05T02:29:54.780Z"
+    }
+  ],
+  "confirmations": [
+    {
+      "id": 1,
+      "project_id": 2,
+      "work_item_id": 1,
+      "expert_id": 5,
+      "confirmed": true,
+      "comment": "",
+      "confirmed_at": "2026-09-05T02:29:54.788Z"
+    }
+  ],
+  "files": [
+    {
+      "id": 1,
+      "project_id": 2,
+      "filename": "1788575394760-067249c202dba5c4.xlsx",
+      "originalname": "æµè¯ä¼°ç®è¡¨.xlsx",
+      "file_type": "xlsx",
+      "file_category": "estimation",
+      "uploader_id": 1,
+      "url": "/uploads/1788575394760-067249c202dba5c4.xlsx",
+      "description": "测试估算表.xlsx",
+      "upload_time": "2026-09-05T02:29:54.764Z"
+    },
+    {
+      "id": 2,
+      "project_id": 2,
+      "filename": "1788575394772-3d588e9c5ade7b3a.pdf",
+      "originalname": "å¯ç æ¥å.pdf",
+      "file_type": "pdf",
+      "file_category": "feasibility",
+      "uploader_id": 1,
+      "url": "/uploads/1788575394772-3d588e9c5ade7b3a.pdf",
+      "description": "可研报告.pdf",
+      "upload_time": "2026-09-05T02:29:54.772Z"
+    },
+    {
+      "id": 3,
+      "project_id": 2,
+      "filename": "1788575394775-4d91f50c7f946eee.docx",
+      "originalname": "åå.docx",
+      "file_type": "docx",
+      "file_category": "contract",
+      "uploader_id": 1,
+      "url": "/uploads/1788575394775-4d91f50c7f946eee.docx",
+      "description": "合同.docx",
+      "upload_time": "2026-09-05T02:29:54.775Z"
+    }
+  ],
+  "workflowLogs": [
+    {
+      "id": 1,
+      "project_id": 2,
+      "operator_id": 1,
+      "operator_role": "admin",
+      "operator_name": "系统管理员",
+      "action": "create_project",
+      "remark": "创建项目：测试项目-1788575394744",
+      "created_at": "2026-09-05T02:29:54.746Z"
+    },
+    {
+      "id": 2,
+      "project_id": 2,
+      "operator_id": 1,
+      "operator_role": "admin",
+      "operator_name": "系统管理员",
+      "action": "upload_file",
+      "remark": "上传estimation文件：æµè¯ä¼°ç®è¡¨.xlsx",
+      "created_at": "2026-09-05T02:29:54.765Z"
+    },
+    {
+      "id": 3,
+      "project_id": 2,
+      "operator_id": 1,
+      "operator_role": "admin",
+      "operator_name": "系统管理员",
+      "action": "upload_file",
+      "remark": "上传feasibility文件：å¯ç æ¥å.pdf",
+      "created_at": "2026-09-05T02:29:54.773Z"
+    },
+    {
+      "id": 4,
+      "project_id": 2,
+      "operator_id": 1,
+      "operator_role": "admin",
+      "operator_name": "系统管理员",
+      "action": "upload_file",
+      "remark": "上传contract文件：åå.docx",
+      "created_at": "2026-09-05T02:29:54.776Z"
+    },
+    {
+      "id": 5,
+      "project_id": 2,
+      "operator_id": 5,
+      "operator_role": "expert",
+      "operator_name": "评审专家A",
+      "action": "submit_estimate",
+      "remark": "专家undefined评估工作项1: 10人天",
+      "created_at": "2026-09-05T02:29:54.781Z"
+    },
+    {
+      "id": 6,
+      "project_id": 2,
+      "operator_id": 5,
+      "operator_role": "expert",
+      "operator_name": "评审专家A",
+      "action": "confirm_estimate",
+      "remark": "专家undefined确认工作项1的平均值",
+      "created_at": "2026-09-05T02:29:54.788Z"
+    }
+  ]
 }
