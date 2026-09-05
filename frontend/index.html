@@ -13,7 +13,7 @@
 body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}
 .login-card{background:#fff;border-radius:16px;padding:40px;width:400px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:220px;background:var(--dark);color:#fff;padding:0;z-index:100}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:220px;background:var(--dark);color:#fff;z-index:100;overflow-y:auto}
 .sidebar-brand{padding:20px 16px;font-size:16px;font-weight:bold;border-bottom:1px solid rgba(255,255,255,.1)}
 .nav-item{padding:12px 20px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:14px}
 .nav-item:hover,.nav-item.active{background:rgba(255,255,255,.1)}
@@ -21,7 +21,10 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .page{display:none}.page.active{display:block}
 .card-custom{border:none;box-shadow:0 2px 12px rgba(0,0,0,.08);border-radius:12px}
 .stat-card{border-radius:12px;color:#fff;padding:20px}
-.file-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin:2px}
+.badge-missing{background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:11px}
+.badge-uploaded{background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:12px;font-size:11px}
+.file-card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:8px;background:#fff}
+.file-card.core{border-left:4px solid var(--danger)}
 </style>
 </head>
 <body>
@@ -64,12 +67,12 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
       <div class="row g-3 mb-4">
         <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#667eea,#764ba2)"><div class="stat-label">评审批次</div><div class="stat-num" id="s-sessions">0</div></div></div>
         <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#11998e,#38ef7d)"><div class="stat-label">项目总数</div><div class="stat-num" id="s-projects">0</div></div></div>
-        <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#eb3349,#f45c43)"><div class="stat-label">总成本(元)</div><div class="stat-num" id="s-cost">0</div></div></div>
-        <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#fc4a1a,#f7b733)"><div class="stat-label">评估任务数</div><div class="stat-num" id="s-estimates">0</div></div></div>
+        <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#eb3349,#f45c43)"><div class="stat-label">缺少估算表</div><div class="stat-num text-danger" id="s-missing">0</div></div></div>
+        <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#fc4a1a,#f7b733)"><div class="stat-label">待评估项目</div><div class="stat-num" id="s-pending">0</div></div></div>
       </div>
       <div class="row g-3">
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white">近期活动</div><div class="card-body" id="recentActivity"><p class="text-muted">暂无活动记录</p></div></div></div>
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white">待办事项</div><div class="card-body" id="todoList"><p class="text-muted">暂无待办</p></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white">资料上传进度</div><div class="card-body"><canvas id="uploadProgressChart"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white">近期活动</div><div class="card-body" id="recentActivity"></div></div></div>
       </div>
     </div>
 
@@ -80,12 +83,12 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addSessionModal"><i class="bi bi-plus"></i>新建批次</button>
       </div>
       <div class="card card-custom"><div class="card-body p-0">
-        <table class="table table-hover mb-0"><thead><tr><th>ID</th><th>批次名称</th><th>状态</th><th>评审时间</th><th>操作</th></tr></thead>
+        <table class="table table-hover mb-0"><thead><tr><th>ID</th><th>批次名称</th><th>状态</th><th>评审时间</th><th>项目数</th></tr></thead>
         <tbody id="sessionTbody"></tbody></table>
       </div></div>
     </div>
 
-    <!-- PROJECTS -->
+    <!-- PROJECTS - 核心页面：项目资料管理 -->
     <div id="page-projects" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6>项目资料管理</h6>
@@ -94,76 +97,119 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
           <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#importExcelModal"><i class="bi bi-file-earmark-excel"></i>Excel导入</button>
         </div>
       </div>
+      
+      <!-- 资料缺失提醒 -->
+      <div id="missingNotice" class="alert alert-warning d-none mb-3">
+        <i class="bi bi-exclamation-triangle"></i> <span id="missingText"></span>
+      </div>
+      
       <div class="card card-custom"><div class="card-body p-0">
-        <table class="table table-hover mb-0"><thead><tr><th>ID</th><th>项目名称</th><th>承建部门</th><th>合同金额</th><th>状态</th><th>操作</th></tr></thead>
-        <tbody id="projectTbody"></tbody></table>
+        <table class="table table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>ID</th><th>项目名称</th><th>承建部门</th><th>合同金额</th><th>状态</th>
+              <th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">招标</th><th class="text-center">合同</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="projectTbody"></tbody>
+        </table>
       </div></div>
     </div>
 
-    <!-- COST ANALYSIS / WORKLOAD ESTIMATION -->
+    <!-- UPLOAD PAGE - 上传资料专用页面 -->
+    <div id="page-upload" class="page">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6><i class="bi bi-cloud-upload"></i> 上传项目资料</h6>
+        <button class="btn btn-sm btn-secondary" onclick="navigateTo('projects')"><i class="bi bi-arrow-left"></i>返回项目列表</button>
+      </div>
+      
+      <div class="card card-custom mb-3">
+        <div class="card-header bg-white">
+          <h5 id="uploadProjectName">项目资料上传</h5>
+          <p class="small text-muted mb-0" id="uploadProjectInfo"></p>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="card h-100 border-primary">
+                <div class="card-header bg-danger text-white"><i class="bi bi-star-fill"></i> 核心资料（必传）</div>
+                <div class="card-body">
+                  <p class="text-muted small mb-3">项目成本估算汇总表是专家工作量评估的核心依据，必须上传。</p>
+                  <button class="btn btn-danger w-100 py-3" onclick="triggerUpload('estimation')">
+                    <i class="bi bi-file-earmark-excel fs-3"></i><br>
+                    上传项目估算表
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-header bg-secondary text-white"><i class="bi bi-folder"></i> 参考资料</div>
+                <div class="card-body">
+                  <div class="d-grid gap-2">
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('feasibility')">
+                      <i class="bi bi-file-earmark-text"></i> 可行性研究报告
+                    </button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('bid')">
+                      <i class="bi bi-file-earmark-bar-graph"></i> 招投标文件
+                    </button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('award')">
+                      <i class="bi bi-file-earmark-check"></i> 中标通知书
+                    </button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('contract')">
+                      <i class="bi bi-file-earmark-medical"></i> 合同文件
+                    </button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('profit')">
+                      <i class="bi bi-file-earmark-money"></i> 投标利润率评审表
+                    </button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('subcontract')">
+                      <i class="bi bi-file-earmark-break"></i> 分包申请表
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 已上传文件列表 -->
+          <div class="mt-4">
+            <h6>已上传资料</h6>
+            <div id="uploadedFilesList" class="row g-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- COST ANALYSIS -->
     <div id="page-cost-analysis" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6>工作量评估与成本分析</h6>
+        <h6>工作量评估</h6>
         <select id="costProjectSelect" class="form-select w-auto" onchange="loadCostDetail(this.value)">
           <option value="">-- 请选择项目 --</option>
         </select>
       </div>
       
-      <!-- 文件上传区 -->
-      <div class="card card-custom mb-3">
-        <div class="card-header bg-white d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-folder-fill text-primary"></i> 项目评审资料</span>
-          <button class="btn btn-sm btn-primary" id="uploadBtn" onclick="showUploadModal()" disabled><i class="bi bi-cloud-upload"></i> 上传资料</button>
-        </div>
-        <div class="card-body">
-          <div id="projectFilesList" class="row g-2"><p class="text-muted small">请先选择项目</p></div>
-        </div>
-      </div>
-
-      <!-- 工作量评估说明 -->
       <div class="alert alert-info small mb-3">
-        <strong>💡 工作量评估流程：</strong>专业分包类项目由<strong>5位专家独立估算人天</strong> → 系统计算<strong>平均人天</strong> → 乘以人工单价得到<strong>最终成本</strong>。<br>
-        示例：专家1~5分别估算 10/10/10/9/10 天，平均 9.8 天 × 单价 1,100 元 = <strong>最终成本 10,780 元</strong>
+        <strong>💡 工作流程：</strong>选择项目后，专家可在下方输入各工作项的<strong>人天评估</strong> → 提交 → 系统计算平均人天 → 乘以单价得最终成本。
       </div>
-
-      <!-- 头部信息 -->
-      <div id="costHeaderCard" class="card card-custom mb-3 d-none"><div class="card-body" id="costHeaderBody"></div></div>
       
-      <!-- 汇总卡片 -->
+      <div id="costHeaderCard" class="card card-custom mb-3 d-none"><div class="card-body" id="costHeaderBody"></div></div>
       <div class="row g-3 mb-3" id="costSummaryCards"></div>
       
-      <!-- 图表 -->
-      <div class="row g-3 mb-3">
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><i class="bi bi-pie-chart"></i> 成本结构占比</div><div class="card-body"><canvas id="costPieChart"></canvas></div></div></div>
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><i class="bi bi-bar-chart"></i> 各分类成本对比</div><div class="card-body"><canvas id="costBarChart"></canvas></div></div></div>
-      </div>
-      
-      <!-- 工作明细（含专家评估） -->
-      <div class="card card-custom mb-3">
-        <div class="card-header bg-white">
-          <i class="bi bi-table"></i> 工作明细与专家评估
-          <span class="badge bg-success ms-2" id="estimateBadge">等待评估</span>
+      <div class="card card-custom">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-table"></i> 工作明细与专家评估</span>
+          <span class="badge bg-success" id="estimateBadge">等待评估</span>
         </div>
         <div class="card-body p-0">
           <table class="table table-sm table-hover mb-0">
             <thead class="table-light"><tr>
-              <th>类别</th><th>任务</th><th>工作项</th><th>人天</th><th>原费用(元)</th>
-              <th colspan="5" class="text-center">专家评估人天</th><th>平均人天</th><th>最终成本(元)</th>
+              <th>类别</th><th>任务</th><th>工作项</th><th>人天</th><th>原费用</th>
+              <th colspan="5" class="text-center">专家评估人天</th><th>平均</th><th>最终成本</th>
             </tr></thead>
             <tbody id="workTbody"></tbody>
           </table>
-        </div>
-      </div>
-      
-      <!-- 采购/差旅Tab -->
-      <div class="card card-custom mb-3">
-        <div class="card-header bg-white d-flex gap-2">
-          <button class="btn btn-sm btn-outline-primary active" onclick="switchTab('procurement',this)">采购明细</button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="switchTab('travel',this)">差旅明细</button>
-        </div>
-        <div class="card-body p-0">
-          <div id="tab-procurement"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>类型</th><th>名称</th><th>规格</th><th>单位</th><th>数量</th><th>单价</th><th>小计</th></tr></thead><tbody id="procTbody"></tbody></table></div>
-          <div id="tab-travel" style="display:none"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>出差事项</th><th>目的地</th><th>天数</th><th>住宿费</th><th>差补</th><th>交通费</th><th>合计</th></tr></thead><tbody id="travelTbody"></tbody></table></div>
         </div>
       </div>
     </div>
@@ -171,7 +217,10 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <!-- STATS -->
     <div id="page-stats" class="page">
       <h6 class="mb-3">统计分析</h6>
-      <div class="card card-custom"><div class="card-body"><canvas id="statsChart" height="100"></canvas></div></div>
+      <div class="row g-3">
+        <div class="col-md-8"><div class="card card-custom"><div class="card-header bg-white"><i class="bi bi-graph-up"></i> 成本结构</div><div class="card-body"><canvas id="statsChart" height="100"></canvas></div></div></div>
+        <div class="col-md-4"><div class="card card-custom"><div class="card-header bg-white"><i class="bi bi-clipboard-data"></i> 资料完整率</div><div class="card-body"><canvas id="materialChart" height="200"></canvas></div></div></div>
+      </div>
     </div>
 
     <!-- USERS -->
@@ -226,20 +275,11 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 
 <div class="modal fade" id="uploadFileModal" tabindex="-1">
   <div class="modal-dialog"><div class="modal-content">
-    <div class="modal-header"><h5>上传评审资料</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-header"><h5>上传资料</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
-      <div class="mb-3"><label class="form-label">文件 *</label><input type="file" class="form-control" id="uploadFileInput" accept=".pdf,.docx,.doc,.xlsx,.jpg,.png"></div>
-      <div class="mb-3"><label class="form-label">资料类型 *</label>
-        <select class="form-select" id="uploadFileType">
-          <option value="feasibility">可行性研究报告</option>
-          <option value="bid">招投标文件</option>
-          <option value="award">中标通知书</option>
-          <option value="contract">合同文件</option>
-          <option value="profit">投标利润率评审表</option>
-          <option value="subcontract">分包申请表</option>
-          <option value="other">其他材料</option>
-        </select>
-      </div>
+      <input type="hidden" id="uploadCategory">
+      <div class="mb-3"><label class="form-label">选择文件 *</label><input type="file" class="form-control" id="uploadFileInput" accept=".pdf,.docx,.doc,.xlsx,.xls,.jpg,.png"></div>
+      <div class="mb-3"><label class="form-label">备注</label><textarea class="form-control" id="uploadDesc" rows="2"></textarea></div>
       <div id="uploadStatus"></div>
     </div>
     <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-primary" onclick="doUploadFile()">上传</button></div>
@@ -265,6 +305,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 const API='http://localhost:3000/api';
 let currentUser=null, sessions=[], projects=[], users=[], files=[];
 let currentProjectId=null;
+let uploadingCategory='';
 
 document.addEventListener('DOMContentLoaded',()=>{
   const saved=localStorage.getItem('currentUser');
@@ -290,11 +331,12 @@ function navigateTo(page){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  document.getElementById('pageTitle').textContent={dashboard:'工作台',sessions:'评审批次',projects:'项目资料',cost_analysis:'工作量评估',stats:'统计分析',users:'用户管理'}[page]||page;
+  document.getElementById('pageTitle').textContent={dashboard:'工作台',sessions:'评审批次',projects:'项目资料',upload:'上传资料',cost_analysis:'工作量评估',stats:'统计分析',users:'用户管理'}[page]||page;
   switch(page){
     case'dashboard':renderDashboard();break;
     case'sessions':populateSessionSelect();renderSessions();break;
     case'projects':populateSessionSelect();renderProjects();break;
+    case'upload':break;
     case'cost-analysis':updateCostSelect();renderCostAnalysis();break;
     case'stats':renderStats();break;
     case'users':renderUsers();break;
@@ -327,11 +369,47 @@ async function renderDashboard(){
     const s=await r.json();
     document.getElementById('s-sessions').textContent=s.total_sessions||0;
     document.getElementById('s-projects').textContent=s.total_projects||0;
-    document.getElementById('s-cost').textContent='¥'+(s.total_cost?Number(s.total_cost).toLocaleString():'0');
-    document.getElementById('s-estimates').textContent=s.total_scores||0;
+    
+    // 计算缺少估算表的项目数
+    const missingEst = projects.filter(p => {
+      const pf = files.filter(f => f.project_id === p.id);
+      return !pf.some(f => f.file_category === 'estimation');
+    }).length;
+    document.getElementById('s-missing').textContent = missingEst;
+    document.getElementById('s-missing').className = 'stat-num ' + (missingEst > 0 ? 'text-danger' : 'text-success');
+    
+    document.getElementById('s-pending').textContent = s.pending_tasks?.length || 0;
+    
     document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>`<div class="small mb-1"><i class="bi bi-circle-fill text-primary me-1"></i>${a}</div>`).join(''):'<p class="text-muted small">暂无活动</p>');
-    document.getElementById('todoList').innerHTML=(s.pending_tasks?.length?s.pending_tasks.map(t=>`<li class="list-group-item small">${t}<span class="badge bg-warning">待审</span></li>`).join(''):'<li class="list-group-item text-muted small">暂无待办</li>');
-  }catch(e){}
+    
+    // 上传进度图
+    renderUploadProgressChart();
+  }catch(e){console.error(e);}
+}
+
+function renderUploadProgressChart(){
+  const ctx=document.getElementById('uploadProgressChart');
+  if(!ctx)return;
+  if(ctx._c)ctx._c.destroy();
+  
+  // 统计各类资料的上传情况
+  const types=['estimation','feasibility','bid','award','contract','profit','subcontract'];
+  const labels=['估算表','可研','招标','中标','合同','利润率','分包'];
+  const uploaded=[0,0,0,0,0,0,0];
+  const total=projects.length||1;
+  
+  types.forEach((type,i)=>{
+    uploaded[i]=files.filter(f=>f.file_category===type).length;
+  });
+  
+  ctx._c=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[{label:'已上传项目数',data:uploaded,backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#10b981','#f59e0b','#ec4899','#6b7280'],borderRadius:4}]
+    },
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:total}}}
+  });
 }
 
 // SESSIONS
@@ -343,25 +421,136 @@ function populateSessionSelect(){
 }
 function renderSessions(){
   const tb=document.getElementById('sessionTbody');if(!tb)return;
-  tb.innerHTML=sessions.map(s=>`<tr><td>${s.id}</td><td>${s.name||s.session_name||'-'}</td><td><span class="badge bg-${{completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary'}">${{completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status}</span></td><td>${s.review_time||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="navigateTo('projects')">查看</button></td></tr>`).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无批此</td></tr>';
+  tb.innerHTML=sessions.map(s=>`<tr>
+    <td>${s.id}</td><td>${s.name||s.session_name||'-'}</td>
+    <td><span class="badge bg-${{completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary'}">${{completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status}</span></td>
+    <td>${s.review_time||'-'}</td>
+    <td>${store?.projects?.filter(p=>p.session_id===s.id).length||0}</td>
+  </tr>`).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无批此</td></tr>';
 }
 
-// PROJECTS
+// PROJECTS - 核心：显示资料上传状态
 function renderProjects(){
   const tb=document.getElementById('projectTbody');if(!tb)return;
-  tb.innerHTML=projects.map(p=>`<tr>
-    <td>${p.id}</td>
-    <td title="${p.project_name||''}">${(p.project_name||'').substring(0,25)}</td>
-    <td>${p.biz_department||'-'}</td>
-    <td>${p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-'}</td>
-    <td><span class="badge bg-${{reviewing:'warning',draft:'secondary',completed:'success'}[p.status]||'secondary'}">${p.status||'-'}</span></td>
-    <td><button class="btn btn-sm btn-info me-1" onclick="goToCost(${p.id})"><i class="bi bi-graph-down"></i>评估</button><button class="btn btn-sm btn-warning" onclick="showUploadModalFor(${p.id})"><i class="bi bi-cloud-upload"></i>资料</button></td>
-  </tr>`).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无项目，请通过Excel导入</td></tr>';
+  
+  // 计算缺少估算表的项目
+  const missingEst=projects.filter(p=>!files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
+  const missingNotice=document.getElementById('missingNotice');
+  const missingText=document.getElementById('missingText');
+  if(missingEst>0){
+    missingNotice.classList.remove('d-none');
+    missingText.textContent=`有${missingEst}个项目尚未上传项目估算表，请及时上传。`;
+  }else{
+    missingNotice.classList.add('d-none');
+  }
+  
+  tb.innerHTML=projects.map(p=>{
+    const pf=files.filter(f=>f.project_id===p.id);
+    const hasEst=pf.some(f=>f.file_category==='estimation');
+    const hasFeasibility=pf.some(f=>f.file_category==='feasibility');
+    const hasBid=pf.some(f=>f.file_category==='bid');
+    const hasContract=pf.some(f=>f.file_category==='contract');
+    
+    return `<tr>
+      <td>${p.id}</td>
+      <td title="${p.project_name||''}">${(p.project_name||'').substring(0,20)}</td>
+      <td>${p.biz_department||'-'}</td>
+      <td>${p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-'}</td>
+      <td><span class="badge bg-${{reviewing:'warning',draft:'secondary',completed:'success'}[p.status]||'secondary'}">${p.status||'-'}</span></td>
+      <td class="text-center">${hasEst?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">✗</span>'}</td>
+      <td class="text-center">${hasFeasibility?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">-</span>'}</td>
+      <td class="text-center">${hasBid?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">-</span>'}</td>
+      <td class="text-center">${hasContract?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">-</span>'}</td>
+      <td>
+        <button class="btn btn-sm btn-danger me-1" title="上传估算表" onclick="goToUpload(${p.id},'estimation')"><i class="bi bi-file-earmark-excel"></i></button>
+        <button class="btn btn-sm btn-info me-1" title="查看所有资料" onclick="goToUpload(${p.id})"><i class="bi bi-folder"></i></button>
+        <button class="btn btn-sm btn-success" title="工作量评估" onclick="goToCost(${p.id})"><i class="bi bi-graph-down"></i></button>
+      </td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="10" class="text-muted text-center">暂无项目</td></tr>';
 }
-function goToCost(pid){currentProjectId=pid;navigateTo('cost-analysis');}
-function showUploadModalFor(pid){currentProjectId=pid;showUploadModal();}
 
-// COST ANALYSIS / WORKLOAD ESTIMATION
+// UPLOAD PAGE
+function goToUpload(projectId, category){
+  currentProjectId=projectId;
+  if(category){
+    uploadingCategory=category;
+    document.getElementById('uploadCategory').value=category;
+    document.getElementById('uploadFileInput').accept=getAcceptForCategory(category);
+  }
+  renderUploadPage();
+  navigateTo('upload');
+}
+function renderUploadPage(){
+  const p=projects.find(x=>x.id===currentProjectId);
+  if(!p)return;
+  document.getElementById('uploadProjectName').textContent='上传资料 - '+p.project_name;
+  document.getElementById('uploadProjectInfo').textContent=`项目编号: ${p.id} | 承建部门: ${p.biz_department||'-'}`;
+  
+  const pf=files.filter(f=>f.project_id===currentProjectId);
+  const listEl=document.getElementById('uploadedFilesList');
+  if(pf.length>0){
+    listEl.innerHTML=pf.map(f=>`
+      <div class="col-md-4">
+        <div class="file-card ${f.file_category==='estimation'?'core':''}">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <i class="bi bi-file-earmark-${getFileIcon(f.file_type)} fs-4 ${f.file_category==='estimation'?'text-danger':'text-primary'}"></i>
+              <span class="ms-2 fw-bold">${f.originalname}</span>
+            </div>
+            <div>
+              <span class="badge bg-${f.file_category==='estimation'?'danger':'secondary'} me-1">${getFileCategoryName(f.file_category)}</span>
+              <a href="${API}${f.url}" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a>
+            </div>
+          </div>
+          <div class="small text-muted mt-1">${f.upload_time?new Date(f.upload_time).toLocaleDateString():'-'}</div>
+        </div>
+      </div>
+    `).join('');
+  }else{
+    listEl.innerHTML='<p class="text-muted small">暂无已上传资料</p>';
+  }
+}
+function triggerUpload(category){
+  uploadingCategory=category;
+  document.getElementById('uploadCategory').value=category;
+  const modal=new bootstrap.Modal(document.getElementById('uploadFileModal'));
+  modal.show();
+}
+function getAcceptForCategory(cat){
+  const map={estimation：'.xlsx,.xls',feasibility：'.pdf,.docx',bid：'.pdf,.docx',award：'.pdf',contract：'.pdf,.docx',profit：'.xlsx,.xls,.pdf',subcontract：'.pdf,.docx'};
+  return map[cat]||'.pdf,.docx,.xlsx,.xls,.jpg,.png';
+}
+
+async function doUploadFile(){
+  const file=document.getElementById('uploadFileInput').files[0];
+  const statusEl=document.getElementById('uploadStatus');
+  if(!file){alert('请选择文件');return;}
+  statusEl.innerHTML='<div class="alert alert-info">正在上传...</div>';
+  try{
+    const boundary='----FormBoundary'+Date.now();
+    const cat=uploadingCategory||document.getElementById('uploadCategory').value||'other';
+    const buf1=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="category"\r\n\r\n${cat}\r\n`);
+    const buf2=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="description"\r\n\r\n${file.name}\r\n`);
+    const buf3=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
+    const buf4=await new Promise(r=>{const reader=new FileReader();reader.onload=e=>r(e.target.result);reader.readAsArrayBuffer(file);});
+    const buf5=Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body=Buffer.concat([buf1,buf2,buf3,Buffer.from(buf4),buf5]);
+    
+    const r=await fetch(`${API}/projects/${currentProjectId}/files`,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+localStorage.getItem('token'),'Content-Type':`multipart/form-data; boundary=${boundary}`},
+      body
+    });
+    const data=await r.json();
+    if(r.ok){
+      statusEl.innerHTML='<div class="alert alert-success">✓ 上传成功！</div>';
+      setTimeout(()=>{bootstrap.Modal.getInstance(document.getElementById('uploadFileModal'))?.hide();renderUploadPage();renderProjects();},800);
+    }else{throw new Error(data.error||'上传失败');}
+  }catch(e){statusEl.innerHTML=`<div class="alert alert-danger">✗ ${e.message}</div>`;}
+}
+
+// COST ANALYSIS
 function updateCostSelect(){
   const sel=document.getElementById('costProjectSelect');
   if(sel)sel.innerHTML='<option value="">-- 请选择项目 --</option>'+projects.map(p=>`<option value="${p.id}">${p.project_name||p.name}</option>`).join('');
@@ -373,87 +562,45 @@ async function renderCostAnalysis(){
 async function loadCostDetail(pid){
   if(!pid)return;
   currentProjectId=pid;
-  document.getElementById('uploadBtn').disabled=false;
-  
-  const [pjR,costR,filesR]=await Promise.all([
+  const [pjR,costR]=await Promise.all([
     fetch(API+'/projects/'+pid,{headers:authH()}),
-    fetch(API+'/projects/'+pid+'/cost',{headers:authH()}),
-    fetch(API+'/projects/'+pid+'/files',{headers:authH()})
+    fetch(API+'/projects/'+pid+'/cost',{headers:authH()})
   ]);
-  const proj=await pjR.json(),cost=await costR.json(),projectFiles=await filesR.json();
+  const proj=await pjR.json(),cost=await costR.json();
   
-  // Header
   const hc=document.getElementById('costHeaderCard'),hb=document.getElementById('costHeaderBody');
   if(hc&&hb){
-    const cs=proj.cost_summary||{};
     hc.classList.remove('d-none');
     hb.innerHTML=`<h5 class="mb-2">${proj.project_name||proj.name}</h5>
       <div class="row g-2 text-muted small">
-        <div class="col-md-3"><strong>项目编号:</strong> ${proj.project_code||'-'}</div>
         <div class="col-md-3"><strong>承建部门:</strong> ${proj.biz_department||'-'}</div>
         <div class="col-md-3"><strong>合同金额:</strong> ¥${Number(proj.contract_amount||0).toLocaleString()}</div>
-        <div class="col-md-3"><strong>总成本:</strong> ¥${Number(cs.total_cost||0).toLocaleString()}</div>
+        <div class="col-md-3"><strong>总成本:</strong> ¥${Number(proj.cost_summary?.total_cost||0).toLocaleString()}</div>
       </div>`;
   }
   
-  // Files
-  const flEl=document.getElementById('projectFilesList');
-  if(flEl){
-    if(projectFiles&&projectFiles.length>0){
-      flEl.innerHTML=projectFiles.map(f=>`<div class="col-md-3"><div class="card card-custom"><div class="card-body p-2"><div class="small fw-bold text-truncate" title="${f.originalname}"><i class="bi bi-file-earmark-${getFileIcon(f.file_type)} text-primary"></i> ${f.originalname}</div><div class="small text-muted">${getFileCategoryName(f.file_category)}</div></div></div></div>`).join('');
-    }else{flEl.innerHTML='<p class="text-muted small">暂无评审资料，请点击"上传资料"按钮</p>';}
-  }
-  
-  // Summary cards
   const cardsEl=document.getElementById('costSummaryCards');
   if(cardsEl){
     const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
     const catSum=cost.category_cost||{};
-    let html='';
-    Object.entries(catSum).forEach(([k,v])=>{html+=`<div class="col-6 col-md-4 col-lg-2"><div class="card card-custom"><div class="card-body p-3 text-center"><div class="text-muted small">${catMap[k]||k}</div><div class="h5 fw-bold">¥${Number(v||0).toLocaleString()}</div></div></div></div>`;});
-    cardsEl.innerHTML=html;
+    cardsEl.innerHTML=Object.entries(catSum).map(([k,v])=>`<div class="col-6 col-md-4 col-lg-2"><div class="card card-custom"><div class="card-body p-3 text-center"><div class="text-muted small">${catMap[k]||k}</div><div class="h5 fw-bold">¥${Number(v||0).toLocaleString()}</div></div></div></div>`).join('');
   }
   
-  // Charts
-  const pieCtx=document.getElementById('costPieChart');
-  if(pieCtx){if(pieCtx._c)pieCtx._c.destroy();
-    const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
-    const catSum=cost.category_cost||{};
-    pieCtx._c=new Chart(pieCtx,{type:'doughnut',data:{labels:Object.keys(catSum).map(k=>catMap[k]||k),datasets:[{data:Object.values(catSum),backgroundColor:['#667eea','#764ba2','#f39c12','#27ae60','#e74c3c'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,plugins:{legend:{position:'right'}}}});
-  }
-  
-  const barCtx=document.getElementById('costBarChart');
-  if(barCtx){if(barCtx._c)barCtx._c.destroy();
-    const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
-    const catSum=cost.category_cost||{};
-    barCtx._c=new Chart(barCtx,{type:'bar',data:{labels:Object.keys(catSum).map(k=>catMap[k]||k),datasets:[{label:'金额(元)',data:Object.values(catSum),backgroundColor:'rgba(102,126,234,.7)',borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}}}});
-  }
-  
-  // Work items table with expert estimation columns
   const wtEl=document.getElementById('workTbody');
   if(wtEl){
     const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
-    const items=cost.work_items||[];
-    
-    // 检查当前用户是否已提交评估
-    const isExpert=user=>['expert','accountant'].includes(user.role);
-    const hasSubmitted=items.some(w=>w.expert_days_list&&w.expert_days_list.includes(currentUser?.id));
-    
-    wtEl.innerHTML=items.map(w=>{
+    const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role);
+    wtEl.innerHTML=(cost.work_items||[]).map(w=>{
       const expDays=w.expert_days_list||[];
       const avg=w.expert_days_avg!=null?w.expert_days_avg:w.person_days;
       const finalCost=w.adjusted_cost||w.cost;
-      // 如果当前是专家且未评估该项，显示输入框
-      let inputCell='';
-      if(isExpert(currentUser)&&expDays.indexOf(currentUser.id)===-1){
-        inputCell=`<input type="number" class="form-control form-control-sm" id="input_${w.id}" placeholder="人天" min="0" step="0.5">`;
-      }else{
-        inputCell=expDays.length>0?`${expDays.join('/')}`:'<span class="text-muted">-</span>';
-      }
+      let inputCell=isExpert&&expDays.indexOf(currentUser.id)===-1
+        ?`<input type="number" class="form-control form-control-sm" id="input_${w.id}" placeholder="?" min="0" step="0.5">`
+        :`${expDays.length>0?expDays.join('/'):'-'}`;
       return `<tr>
         <td><span class="badge bg-secondary">${catMap[w.category]||w.category}</span></td>
-        <td>${(w.work_task||'').substring(0,12)}</td>
-        <td title="${w.work_item||''}">${(w.work_item||'').substring(0,16)}</td>
+        <td>${(w.work_task||'').substring(0,10)}</td>
+        <td title="${w.work_item||''}">${(w.work_item||'').substring(0,14)}</td>
         <td>${w.person_days!=null?w.person_days:'-'}</td>
         <td class="text-muted">¥${Number(w.cost||0).toLocaleString()}</td>
         <td colspan="5">${inputCell}</td>
@@ -462,50 +609,27 @@ async function loadCostDetail(pid){
       </tr>`;
     }).join('')||'<tr><td colspan="12" class="text-muted text-center">暂无工作明细</td></tr>';
     
-    // 添加提交按钮（仅专家可见）
-    if(isExpert(currentUser)){
-      const submitRow=`<tr><td colspan="12" class="text-end p-2"><button class="btn btn-sm btn-success" onclick="submitEstimate(${pid})"><i class="bi bi-check-circle"></i> 提交我的评估</button></td></tr>`;
-      wtEl.insertAdjacentHTML('beforeend',submitRow);
+    if(isExpert){
+      wtEl.insertAdjacentHTML('beforeend',`<tr><td colspan="12" class="text-end p-2"><button class="btn btn-sm btn-success" onclick="submitEstimate(${pid})"><i class="bi bi-check-circle"></i> 提交我的评估</button></td></tr>`);
     }
   }
   
-  // Procurement table
-  const ptEl=document.getElementById('procTbody');
-  if(ptEl){
-    ptEl.innerHTML=(cost.procurement_items||[]).map(p=>`<tr><td><span class="badge bg-${p.type==='hardware'?'primary':'secondary'}">${p.type==='software'?'软件':'硬件'}</span></td><td>${p.name}</td><td class="small text-muted">${(p.spec||'').substring(0,20)}</td><td>${p.unit||'-'}</td><td>${p.quantity??'-'}</td><td>¥${Number(p.unit_price||0).toLocaleString()}</td><td class="fw-semibold">¥${Number(p.subtotal||0).toLocaleString()}</td></tr>`).join('')||'<tr><td colspan="7" class="text-muted text-center">暂无采购明细</td></tr>';
-  }
-  
-  // Travel table
-  const ttEl=document.getElementById('travelTbody');
-  if(ttEl){
-    ttEl.innerHTML=(cost.travel_items||[]).map(t=>`<tr><td>${t.purpose}</td><td>${t.destination||'-'}</td><td>${t.days??'-'}</td><td>¥${Number(t.hotel||0).toLocaleString()}</td><td>¥${Number(t.per_diem||0).toLocaleString()}</td><td>¥${Number(t.transport||0).toLocaleString()}</td><td class="fw-semibold">¥${Number((t.hotel||0)+(t.per_diem||0)+(t.transport||0)).toLocaleString()}</td></tr>`).join('')||'<tr><td colspan="7" class="text-muted text-center">暂无差旅明细</td></tr>';
-  }
-  
-  // Update badge
-  const totalExperts=['expert','accountant'].filter(r=>r).length;
   const badge=document.getElementById('estimateBadge');
   if(badge){
-    const estimateCount=(cost.work_items||[]).filter(w=>w.expert_days_list&&w.expert_days_list.length>0).length;
-    badge.textContent=estimateCount>0?`${estimateCount}项已评估`:'等待评估';
-    badge.className='badge '+(estimateCount>0?'bg-success':'bg-warning');
+    const estCount=(cost.work_items||[]).filter(w=>w.expert_days_list&&w.expert_days_list.length>0).length;
+    badge.textContent=estCount>0?`${estCount}项已评估`:'等待评估';
+    badge.className='badge '+(estCount>0?'bg-success':'bg-warning');
   }
 }
 
-// 提交工作量评估
 async function submitEstimate(projectId){
   const items=currentProjectId?costResult?.work_items:[];
-  if(!items||items.length===0){alert('请先选择项目');return;}
-  
   const estimates=[];
   for(const item of items){
     const input=document.getElementById('input_'+item.id);
-    if(input&&input.value){
-      estimates.push({project_id:projectId,work_item_id:item.id,days:parseFloat(input.value)});
-    }
+    if(input&&input.value)estimates.push({project_id:projectId,work_item_id:item.id,days:parseFloat(input.value)});
   }
-  
   if(estimates.length===0){alert('请填写要评估的人天数');return;}
-  
   try{
     for(const est of estimates){
       await fetch(API+'/estimates',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify(est)});
@@ -515,60 +639,21 @@ async function submitEstimate(projectId){
   }catch(e){alert('提交失败: '+e.message);}
 }
 
-// FILE UPLOAD
-function showUploadModal(){
-  if(!currentProjectId){alert('请先选择项目');return;}
-  document.getElementById('uploadStatus').innerHTML='';
-  document.getElementById('uploadFileInput').value='';
-  new bootstrap.Modal(document.getElementById('uploadFileModal')).show();
-}
-async function doUploadFile(){
-  const file=document.getElementById('uploadFileInput').files[0];
-  const type=document.getElementById('uploadFileType').value;
-  const statusEl=document.getElementById('uploadStatus');
-  if(!file){alert('请选择文件');return;}
-  
-  statusEl.innerHTML='<div class="alert alert-info">正在上传...</div>';
-  
-  try{
-    const boundary='----FormBoundary'+Date.now();
-    const buf1=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="category"\r\n\r\n${type}\r\n`);
-    const buf2=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="description"\r\n\r\n${file.name}\r\n`);
-    const buf3=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
-    const buf4=await new Promise(r=>{const reader=new FileReader();reader.onload=e=>r(e.target.result);reader.readAsArrayBuffer(file);});
-    const buf5=Buffer.from(`\r\n--${boundary}--\r\n`);
-    const body=Buffer.concat([Buffer.from(buf1),Buffer.from(buf2),Buffer.from(buf3),Buffer.from(buf4),buf5]);
-    
-    const r=await fetch(`${API}/projects/${currentProjectId}/files`,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+localStorage.getItem('token'),'Content-Type':`multipart/form-data; boundary=${boundary}`},
-      body
-    });
-    const data=await r.json();
-    if(r.ok){
-      statusEl.innerHTML='<div class="alert alert-success">✓ 上传成功</div>';
-      setTimeout(()=>{bootstrap.Modal.getInstance(document.getElementById('uploadFileModal'))?.hide();loadCostDetail(currentProjectId);},800);
-    }else{throw new Error(data.error||'上传失败');}
-  }catch(e){statusEl.innerHTML=`<div class="alert alert-danger">✗ ${e.message}</div>`;}
-}
-
-function getFileIcon(ext){const m={pdf:'pdf',docx:'word',doc:'word',xlsx:'excel',xls:'excel',jpg:'image',png:'image'};return m[ext?.toLowerCase()]||'file';}
-function getFileCategoryName(cat){const m={feasibility:'可研报告',bid:'招标文件',award:'中标通知',contract:'合同',profit:'利润率评审',subcontract:'分包申请',other:'其他'};return m[cat]||cat;}
-
-// TAB SWITCH
-function switchTab(tab,btn){
-  ['procurement','travel'].forEach(t=>{const el=document.getElementById('tab-'+t);if(el)el.style.display=t===tab?'block':'none';});
-  btn.closest('.card-header').querySelectorAll('.btn').forEach(b=>{b.classList.remove('active','btn-outline-primary');b.classList.add('btn-outline-secondary');});
-  btn.classList.remove('btn-outline-secondary');btn.classList.add('active','btn-outline-primary');
-}
-
 // STATS
 function renderStats(){
-  const ctx=document.getElementById('statsChart');
-  if(ctx){if(ctx._c)ctx._c.destroy();
+  const ctx1=document.getElementById('statsChart');
+  if(ctx1){if(ctx1._c)ctx1._c.destroy();
     fetch(API+'/stats/cost-structure',{headers:authH()}).then(r=>r.json()).then(d=>{
-      ctx._c=new Chart(ctx,{type:'bar',data:{labels:d.labels,datasets:[{label:'成本(元)',data:d.data,backgroundColor:'rgba(102,126,234,.7)',borderRadius:4}]},options:{responsive:true,plugins:{title:{display:true,text:'成本结构汇总（¥'+Number(d.total).toLocaleString()+'）'}}}});
+      ctx1._c=new Chart(ctx1,{type:'bar',data:{labels:d.labels,datasets:[{label:'成本(元)',data:d.data,backgroundColor:'rgba(102,126,234,.7)',borderRadius:4}]},options:{responsive:true}});
     }).catch(()=>{});
+  }
+  
+  const ctx2=document.getElementById('materialChart');
+  if(ctx2){if(ctx2._c)ctx2._c.destroy();
+    const types=['estimation','feasibility','bid','award','contract','profit','subcontract'];
+    const labels=['估算表','可研','招标','中标','合同','利润率','分包'];
+    const data=types.map(t=>files.filter(f=>f.file_category===t).length);
+    ctx2._c=new Chart(ctx2,{type:'doughnut',data:{labels,data,datasets:[{data,backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#10b981','#f59e0b','#ec4899','#6b7280'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,plugins:{legend:{position:'right'}}}});
   }
 }
 
@@ -584,8 +669,7 @@ function saveSession(){
   const time=document.getElementById('sessTime').value;
   if(!name||!time){alert('请填写必填项');return;}
   fetch(API+'/sessions',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({name,review_time:time})})
-    .then(r=>r.json()).then(d=>{sessions.push(d);bootstrap.Modal.getInstance(document.getElementById('addSessionModal')).hide();renderSessions();alert('批次创建成功');})
-    .catch(e=>alert('保存失败: '+e));
+    .then(r=>r.json()).then(d=>{sessions.push(d);bootstrap.Modal.getInstance(document.getElementById('addSessionModal')).hide();renderSessions();});
 }
 function saveProject(){
   const name=document.getElementById('projName').value.trim();
@@ -594,8 +678,7 @@ function saveProject(){
   const amount=document.getElementById('projAmount').value;
   if(!name){alert('请填写项目名称');return;}
   fetch(API+'/projects',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({project_name:name,biz_department:dept,contract_amount:amount?Number(amount):0,session_id:sessionId||null,status:'draft'})})
-    .then(r=>r.json()).then(d=>{projects.push(d);bootstrap.Modal.getInstance(document.getElementById('addProjectModal')).hide();renderProjects();populateSessionSelect();alert('项目创建成功');})
-    .catch(e=>alert('保存失败: '+e));
+    .then(r=>r.json()).then(d=>{projects.push(d);bootstrap.Modal.getInstance(document.getElementById('addProjectModal')).hide();renderProjects();populateSessionSelect();});
 }
 function doImport(){
   const file=document.getElementById('fileInput').files[0];
@@ -608,7 +691,7 @@ function doImport(){
   formData.append('session_id',document.getElementById('importSessionId').value||'');
   fetch(API+'/projects/import-excel',{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:formData})
     .then(r=>r.json()).then(data=>{
-      statusEl.innerHTML='<div class="alert alert-success">✓ 导入成功！项目：'+data.project.project_name+'</div>';
+      statusEl.innerHTML='<div class="alert alert-success">✓ 导入成功！</div>';
       setTimeout(()=>{bootstrap.Modal.getInstance(document.getElementById('importExcelModal')).hide();loadAll();},1500);
     }).catch(e=>{statusEl.innerHTML='<div class="alert alert-danger">✗ '+e.message+'</div>';});
 }
@@ -620,9 +703,12 @@ function saveUser(){
   const bizDept=document.getElementById('newBizDept').value||null;
   if(!username||!realName){alert('请填写用户名和姓名');return;}
   fetch(API+'/users',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({username,real_name:realName,role,department:dept,business_dept:bizDept})})
-    .then(r=>r.json()).then(d=>{users.push(d);bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();renderUsers();alert('用户创建成功');})
-    .catch(e=>alert('保存失败: '+e));
+    .then(r=>r.json()).then(d=>{users.push(d);bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();renderUsers();});
 }
+
+// Helpers
+function getFileIcon(ext){const m={pdf:'pdf',docx:'word',doc:'word',xlsx:'excel',xls:'excel',jpg:'image',png:'image'};return m[ext?.toLowerCase()]||'file';}
+function getFileCategoryName(cat){const m={estimation:'估算表',feasibility:'可研',bid:'招标',award:'中标',contract:'合同',profit:'利润率',subcontract:'分包',other:'其他'};return m[cat]||cat;}
 </script>
 </body>
 </html>
