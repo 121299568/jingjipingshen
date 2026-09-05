@@ -359,7 +359,7 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
     const d=await r.json();
     if(d.token){currentUser=d.user;localStorage.setItem('currentUser',JSON.stringify(currentUser));localStorage.setItem('token',d.token);showMainApp();}
     else{alert('登录失败: '+d.error);}
-  }catch(err){currentUser={username:u,role:'admin',department:'IT部',real_name:u};localStorage.setItem('currentUser',JSON.stringify(currentUser));showMainApp();}
+  }catch(err){alert('登录失败: 无法连接服务器 ('+err.message+')，请确认后端已启动');}
 });
 
 // DASHBOARD
@@ -518,36 +518,35 @@ function triggerUpload(category){
   modal.show();
 }
 function getAcceptForCategory(cat){
-  const map={estimation：'.xlsx,.xls',feasibility：'.pdf,.docx',bid：'.pdf,.docx',award：'.pdf',contract：'.pdf,.docx',profit：'.xlsx,.xls,.pdf',subcontract：'.pdf,.docx'};
+  const map={estimation:'.xlsx,.xls',feasibility:'.pdf,.docx',bid:'.pdf,.docx',award:'.pdf',contract:'.pdf,.docx',profit:'.xlsx,.xls,.pdf',subcontract:'.pdf,.docx'};
   return map[cat]||'.pdf,.docx,.xlsx,.xls,.jpg,.png';
 }
 
 async function doUploadFile(){
-  const file=document.getElementById('uploadFileInput').files[0];
+  const fileInput=document.getElementById('uploadFileInput');
+  const file=fileInput ? fileInput.files[0] : null;
   const statusEl=document.getElementById('uploadStatus');
   if(!file){alert('请选择文件');return;}
-  statusEl.innerHTML='<div class="alert alert-info">正在上传...</div>';
+  if(statusEl)statusEl.innerHTML='<div class="alert alert-info">正在上传...</div>';
+  const fd=new FormData();
+  fd.append('file',file);
+  const cat=uploadingCategory||document.getElementById('uploadCategory').value||'other';
+  fd.append('category',cat);
+  const descEl=document.getElementById('uploadDesc');
+  if(descEl&&descEl.value)fd.append('description',descEl.value);
   try{
-    const boundary='----FormBoundary'+Date.now();
-    const cat=uploadingCategory||document.getElementById('uploadCategory').value||'other';
-    const buf1=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="category"\r\n\r\n${cat}\r\n`);
-    const buf2=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="description"\r\n\r\n${file.name}\r\n`);
-    const buf3=Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
-    const buf4=await new Promise(r=>{const reader=new FileReader();reader.onload=e=>r(e.target.result);reader.readAsArrayBuffer(file);});
-    const buf5=Buffer.from(`\r\n--${boundary}--\r\n`);
-    const body=Buffer.concat([buf1,buf2,buf3,Buffer.from(buf4),buf5]);
-    
     const r=await fetch(`${API}/projects/${currentProjectId}/files`,{
       method:'POST',
-      headers:{'Authorization':'Bearer '+localStorage.getItem('token'),'Content-Type':`multipart/form-data; boundary=${boundary}`},
-      body
+      headers:{'Authorization':'Bearer '+localStorage.getItem('token')},
+      body:fd
     });
     const data=await r.json();
     if(r.ok){
-      statusEl.innerHTML='<div class="alert alert-success">✓ 上传成功！</div>';
-      setTimeout(()=>{bootstrap.Modal.getInstance(document.getElementById('uploadFileModal'))?.hide();renderUploadPage();renderProjects();},800);
+      if(statusEl)statusEl.innerHTML='<div class="alert alert-success">✓ 上传成功！</div>';
+      if(fileInput)fileInput.value='';
+      setTimeout(()=>{const m=document.getElementById('uploadFileModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();renderUploadPage&&renderUploadPage();renderProjects&&renderProjects();},800);
     }else{throw new Error(data.error||'上传失败');}
-  }catch(e){statusEl.innerHTML=`<div class="alert alert-danger">✗ ${e.message}</div>`;}
+  }catch(e){if(statusEl)statusEl.innerHTML=`<div class="alert alert-danger">✗ ${e.message}</div>`;}
 }
 
 // COST ANALYSIS
