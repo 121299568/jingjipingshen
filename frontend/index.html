@@ -25,6 +25,18 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .badge-uploaded{background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:12px;font-size:11px}
 .file-card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:8px;background:#fff}
 .file-card.core{border-left:4px solid var(--danger)}
+.batch-drawer{border:1px solid #e5e7eb;border-radius:10px;margin-bottom:12px;overflow:hidden;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.05)}
+.batch-drawer.archived{background:#fafafa}
+.batch-header{display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;background:#f8f9fb;user-select:none;flex-wrap:wrap}
+.batch-header:hover{background:#eef1f6}
+.batch-drawer.open .batch-header{background:#e8f0fe;border-bottom:1px solid #e5e7eb}
+.batch-arrow{font-size:11px;color:#9ca3af;transition:transform .15s}
+.batch-drawer.open .batch-arrow{transform:rotate(90deg);color:#667eea}
+.batch-title{font-weight:600;color:#1f2937;font-size:14px}
+.batch-body{display:none}
+.batch-drawer.open .batch-body{display:block}
+.batch-empty{padding:20px;text-align:center;color:#9ca3af;font-size:13px}
+.batch-count{background:#fff;border:1px solid #d1d5db;color:#4b5563;padding:2px 8px;border-radius:12px;font-size:11px}
 </style>
 </head>
 <body>
@@ -89,33 +101,25 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     </div>
 
     <!-- PROJECTS - 核心页面：项目资料管理 -->
+    <!-- PROJECTS - 批次抽屉页：按评审批次分组展示项目资料 -->
     <div id="page-projects" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6>项目资料管理</h6>
+        <h6>项目资料管理（按评审批次）</h6>
         <div class="d-flex gap-2">
           <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addProjectModal"><i class="bi bi-plus"></i>新建项目</button>
           <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#importExcelModal"><i class="bi bi-file-earmark-excel"></i>Excel导入</button>
         </div>
       </div>
-      
-      <!-- 资料缺失提醒 -->
+
+      <!-- 缺少估算表提示 -->
       <div id="missingNotice" class="alert alert-warning d-none mb-3">
         <i class="bi bi-exclamation-triangle"></i> <span id="missingText"></span>
       </div>
-      
-      <div class="card card-custom"><div class="card-body p-0">
-        <table class="table table-hover mb-0">
-          <thead class="table-light">
-            <tr>
-              <th>ID</th><th>项目名称</th><th>承建部门</th><th>合同金额</th><th>状态</th>
-              <th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">招标</th><th class="text-center">合同</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="projectTbody"></tbody>
-        </table>
-      </div></div>
+
+      <!-- 批次抽屉列表 -->
+      <div id="batchDrawerList"></div>
     </div>
+
 
     <!-- UPLOAD PAGE - 上传资料专用页面 -->
     <div id="page-upload" class="page">
@@ -424,50 +428,105 @@ function renderSessions(){
   tb.innerHTML=sessions.map(s=>`<tr>
     <td>${s.id}</td><td>${s.name||s.session_name||'-'}</td>
     <td><span class="badge bg-${{completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary'}">${{completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status}</span></td>
-    <td>${s.review_time||'-'}</td>
-    <td>${store?.projects?.filter(p=>p.session_id===s.id).length||0}</td>
+    <td>${fmtTime(s.review_time)||'-'}</td>
+    <td>${projects.filter(p=>p.session_id===s.id).length}</td>
   </tr>`).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无批此</td></tr>';
 }
 
-// PROJECTS - 核心：显示资料上传状态
+// PROJECTS - 批次抽屉：按评审批次分组，归档批次收缩，进行中批次默认展开
+let openBatches=null;
+function batchLabel(n){const c=['一','二','三','四','五','六','七','八','九','十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十'];return '第'+(c[n-1]||n)+'批';}
+function fmtTime(t){if(!t)return'';const s=String(t).replace('T',' ').slice(0,16);return s||t;}
+function sessionStatusBadge(status){
+  const map={completed:['success','已完成·归档'],in_progress:['warning','进行中'],pending:['info','未开始']};
+  const m=map[status];
+  return m?`<span class="badge bg-${m[0]}">${m[1]}</span>`:`<span class="badge bg-secondary">${status||'-'}</span>`;
+}
 function renderProjects(){
-  const tb=document.getElementById('projectTbody');if(!tb)return;
-  
-  // 计算缺少估算表的项目
+  const box=document.getElementById('batchDrawerList');if(!box)return;
+
+  // 缺少估算表统计（全批次合计）
   const missingEst=projects.filter(p=>!files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
   const missingNotice=document.getElementById('missingNotice');
   const missingText=document.getElementById('missingText');
-  if(missingEst>0){
-    missingNotice.classList.remove('d-none');
-    missingText.textContent=`有${missingEst}个项目尚未上传项目估算表，请及时上传。`;
-  }else{
-    missingNotice.classList.add('d-none');
+  if(missingEst>0){missingNotice.classList.remove('d-none');missingText.textContent=`共${missingEst}个项目尚未上传项目估算表，请及时上传。`;}
+  else{missingNotice.classList.add('d-none');}
+
+  // 按评审批次分组（按批次id升序 => 第一批、第二批、第三批...）
+  const sorted=[...sessions].sort((a,b)=>a.id-b.id);
+  const groups=sorted.map((s,idx)=>({
+    key:'s'+s.id,session:s,label:batchLabel(idx+1),
+    items:projects.filter(p=>p.session_id===s.id),
+    archived:s.status==='completed',open:s.status==='in_progress'
+  }));
+  const orphans=projects.filter(p=>!p.session_id||!sessions.some(s=>s.id===p.session_id));
+  if(orphans.length)groups.push({key:'orphan',session:null,label:'未分批次',items:orphans,archived:false,open:false});
+
+  // 展开状态：首次进入时进行中批次默认展开；后续切换保留用户手动状态
+  if(!openBatches)openBatches=new Set();
+  groups.forEach(g=>{if(g.open&&!openBatches.has(g.key))openBatches.add(g.key);});
+
+  if(groups.length===0){
+    box.innerHTML='<div class="card card-custom"><div class="card-body text-muted text-center py-5"><i class="bi bi-folder2-open fs-1 d-block mb-2"></i>暂无评审批次<br><span class="small">请先在「评审批次」页创建批次，再通过 Excel导入 或 新建项目 挂接项目</span></div></div>';
+    return;
   }
-  
-  tb.innerHTML=projects.map(p=>{
-    const pf=files.filter(f=>f.project_id===p.id);
-    const hasEst=pf.some(f=>f.file_category==='estimation');
-    const hasFeasibility=pf.some(f=>f.file_category==='feasibility');
-    const hasBid=pf.some(f=>f.file_category==='bid');
-    const hasContract=pf.some(f=>f.file_category==='contract');
-    
-    return `<tr>
-      <td>${p.id}</td>
-      <td title="${p.project_name||''}">${(p.project_name||'').substring(0,20)}</td>
-      <td>${p.biz_department||'-'}</td>
-      <td>${p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-'}</td>
-      <td><span class="badge bg-${{reviewing:'warning',draft:'secondary',completed:'success'}[p.status]||'secondary'}">${p.status||'-'}</span></td>
-      <td class="text-center">${hasEst?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">✗</span>'}</td>
-      <td class="text-center">${hasFeasibility?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">-</span>'}</td>
-      <td class="text-center">${hasBid?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">-</span>'}</td>
-      <td class="text-center">${hasContract?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">-</span>'}</td>
-      <td>
-        <button class="btn btn-sm btn-danger me-1" title="上传估算表" onclick="goToUpload(${p.id},'estimation')"><i class="bi bi-file-earmark-excel"></i></button>
-        <button class="btn btn-sm btn-info me-1" title="查看所有资料" onclick="goToUpload(${p.id})"><i class="bi bi-folder"></i></button>
-        <button class="btn btn-sm btn-success" title="工作量评估" onclick="goToCost(${p.id})"><i class="bi bi-graph-down"></i></button>
-      </td>
-    </tr>`;
-  }).join('')||'<tr><td colspan="10" class="text-muted text-center">暂无项目</td></tr>';
+
+  box.innerHTML=groups.map(g=>{
+    const isOpen=openBatches.has(g.key);
+    const total=g.items.length;
+    const hasEst=g.items.filter(p=>files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
+    const head=`
+      <div class="batch-header" onclick="toggleBatch('${g.key}')">
+        <i class="bi bi-chevron-right batch-arrow"></i>
+        <span class="batch-title">${g.label}</span>
+        ${g.session?`<span class="text-muted small">${g.session.name||g.session.session_name||''}</span>`:''}
+        ${g.session?sessionStatusBadge(g.session.status):'<span class="badge bg-secondary">待分派</span>'}
+        <span class="batch-count">项目 ${total} 个</span>
+        ${total>0?`<span class="badge bg-${hasEst===total?'success':'danger'}">估算表 ${hasEst}/${total}</span>`:''}
+        ${g.session&&g.session.review_time?`<span class="text-muted small ms-auto">${fmtTime(g.session.review_time)}</span>`:''}
+      </div>`;
+    const ck=c=>v=>v?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">—</span>';
+    const rows=g.items.map(p=>{
+      const pf=files.filter(f=>f.project_id===p.id);
+      const has=c=>pf.some(f=>f.file_category===c);
+      const statusBg={reviewing:'warning',draft:'secondary',completed:'success'}[p.status]||'secondary';
+      return `<tr>
+        <td>${p.id}</td>
+        <td title="${p.project_name||''}">${(p.project_name||'').substring(0,24)}</td>
+        <td>${p.biz_department||'-'}</td>
+        <td>${p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-'}</td>
+        <td><span class="badge bg-${statusBg}">${{reviewing:'评审中',draft:'草稿',completed:'已完成',archived:'已归档'}[p.status]||p.status||'-'}</span></td>
+        <td class="text-center">${ck('estimation')(has('estimation'))}</td>
+        <td class="text-center">${ck('feasibility')(has('feasibility'))}</td>
+        <td class="text-center">${ck('bid')(has('bid'))}</td>
+        <td class="text-center">${ck('contract')(has('contract'))}</td>
+        <td>
+          <button class="btn btn-sm btn-danger me-1" title="上传估算表" onclick="goToUpload(${p.id},'estimation')"><i class="bi bi-file-earmark-excel"></i></button>
+          <button class="btn btn-sm btn-info me-1" title="查看/上传资料" onclick="goToUpload(${p.id})"><i class="bi bi-folder"></i></button>
+          <button class="btn btn-sm btn-success" title="工作量评估" onclick="goToCost(${p.id})"><i class="bi bi-graph-down"></i></button>
+        </td>
+      </tr>`;
+    }).join('');
+    const body=`
+      <div class="batch-body">
+        ${total>0?`<div class="table-responsive"><table class="table table-hover mb-0">
+          <thead class="table-light"><tr>
+            <th>ID</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th>
+            <th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">投标</th><th class="text-center">合同</th>
+            <th>操作</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`:'<div class="batch-empty">该批次暂无项目，请通过「Excel导入」或「新建项目」挂接到本批次</div>'}
+      </div>`;
+    return `<div class="batch-drawer ${isOpen?'open':''} ${g.archived?'archived':''}" data-batch="${g.key}">${head}${body}</div>`;
+  }).join('');
+}
+function toggleBatch(key){
+  const drawer=document.querySelector(`.batch-drawer[data-batch="${key}"]`);
+  if(!drawer)return;
+  const open=drawer.classList.toggle('open');
+  if(!openBatches)return;
+  if(open)openBatches.add(key);else openBatches.delete(key);
 }
 
 // UPLOAD PAGE
