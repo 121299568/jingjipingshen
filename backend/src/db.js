@@ -24,7 +24,7 @@ const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const COLLECTIONS = [
   'users', 'reviewSessions', 'projects', 'workItems', 'procurementItems',
   'travelItems', 'expertEstimates', 'confirmations', 'files', 'workflowLogs',
-  'userGroups', 'userPermissions'
+  'userGroups', 'userPermissions', 'projectAssignments'
 ];
 
 // ---------- 密码 ----------
@@ -76,7 +76,7 @@ function defaultStore() {
     }],
     projects: [], workItems: [], procurementItems: [], travelItems: [],
     expertEstimates: [], confirmations: [], files: [], workflowLogs: [],
-    userGroups: [], userPermissions: []
+    userGroups: [], userPermissions: [], projectAssignments: []
   };
 }
 
@@ -214,9 +214,10 @@ function filterByDept(key, user) {
     return list.filter(item => item.biz_department === user.business_dept);
   }
   if (user.role === 'expert' || user.role === 'accountant') {
-    const assigned = new Set(
-      store.expertEstimates.filter(e => e.expert_id === user.id).map(e => e.project_id)
-    );
+    const assigned = new Set([
+      ...store.expertEstimates.filter(e => e.expert_id === user.id).map(e => e.project_id),
+      ...(store.projectAssignments || []).filter(a => a.user_id === user.id).map(a => a.project_id)
+    ]);
     return list.filter(item => assigned.has(item.id));
   }
   return [];

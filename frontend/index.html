@@ -459,12 +459,40 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
   </div></div>
 </div>
 
+<!-- 分配评审人员 -->
+<div class="modal fade" id="assignModal" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5>分配评审人员</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <p class="text-muted small mb-3">为该项目分配评审专家与会计师事务所（可多选）。保存后将覆盖原分配。被分配到项目的专家/会计师才能在「工作量评估」页提交人天评估。</p>
+      <div class="mb-3">
+        <label class="form-label fw-bold">评审专家</label>
+        <div id="assignExpertList" class="row g-2"></div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label fw-bold">会计师事务所</label>
+        <div id="assignAccountantList" class="row g-2"></div>
+      </div>
+    </div>
+    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-primary" onclick="saveAssign()">保存分配</button></div>
+  </div></div>
+</div>
+
+<!-- 项目评审流程 -->
+<div class="modal fade" id="flowModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5>项目评审流程</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body" id="flowModalBody"></div>
+  </div></div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // API地址配置：本地开发自动使用localhost，生产环境需指向已部署的后端
 const API=window.location.hostname.endsWith('github.io')?'https://jingjipingshen-api.onrender.com/api':window.location.origin+'/api';
 let currentUser=null, sessions=[], projects=[], users=[], files=[], userGroups=[], permissionOptions=[], currentReportContent='';
 let currentProjectId=null, uploadingCategory='', editingUserId=null, costResult=null, selectedCostCategory=null;
+let currentProjectAssignments=[];
 let openBatches=null;
 
 document.addEventListener('DOMContentLoaded',()=>{
@@ -660,14 +688,14 @@ function renderProjects(){
     const rows=g.items.map(p=>{
       const pf=files.filter(f=>f.project_id===p.id);
       const has=c=>pf.some(f=>f.file_category===c);
-      const statusBg={reviewing:'warning',draft:'secondary',completed:'success'}[p.status]||'secondary';
+      const statusBg=statusBadgeClass(p.status);
       const lastOp=p.last_operation_at?new Date(p.last_operation_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
       return '<tr>'+
         '<td>'+p.id+'</td>'+
         '<td title="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+'</td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
         '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
-        '<td><span class="badge bg-'+statusBg+'">'+({reviewing:'评审中',draft:'草稿',completed:'已完成',archived:'已归档'}[p.status]||p.status||'-')+'</span></td>'+
+        '<td><span class="badge '+statusBg+'">'+projectStatusLabel(p.status)+'</span></td>'+
         '<td class="small text-muted">'+lastOp+'</td>'+
         '<td class="text-center">'+ck('estimation')(has('estimation'))+'</td>'+
         '<td class="text-center">'+ck('feasibility')(has('feasibility'))+'</td>'+
@@ -676,6 +704,8 @@ function renderProjects(){
         '<td>'+
           '<button class="btn btn-sm btn-info me-1" title="查看/上传资料" onclick="goToUpload('+p.id+')"><i class="bi bi-folder"></i></button>'+
           '<button class="btn btn-sm btn-success me-1" title="工作量评估" onclick="goToCost('+p.id+')"><i class="bi bi-graph-down"></i></button>'+
+          '<button class="btn btn-sm btn-primary me-1" title="评审流程" onclick="openFlowModal('+p.id+')"><i class="bi bi-list-check"></i></button>'+
+          (canAssignProject(p)?'<button class="btn btn-sm btn-outline-primary" title="分配评审人员" onclick="openAssignModal('+p.id+')"><i class="bi bi-people"></i></button>':'')+
           (canDeleteProject(p)?'<button class="btn btn-sm btn-outline-danger" title="删除项目" onclick="deleteProject('+p.id+')"><i class="bi bi-trash"></i></button>':'')+
         '</td>'+
       '</tr>';
@@ -703,6 +733,12 @@ function canDeleteProject(p){
   if(currentUser.role==='biz')return p.biz_department===currentUser.business_dept;
   return false;
 }
+function canAssignProject(p){
+  return currentUser && (currentUser.role==='admin'||currentUser.role==='rd');
+}
+// 项目状态展示
+function projectStatusLabel(s){return {draft:'草稿',reviewing:'评审中',rejected:'已退回',pending_confirm:'待确认',completed:'已完成',in_review:'评审中',archived:'已归档'}[s]||s||'-';}
+function statusBadgeClass(s){return {draft:'bg-secondary',reviewing:'bg-warning text-dark',rejected:'bg-danger',pending_confirm:'bg-info text-dark',completed:'bg-success',in_review:'bg-warning text-dark',archived:'bg-secondary'}[s]||'bg-secondary';}
 async function deleteProject(pid){
   if(!confirm('确定删除该项目？该项目及其资料、成本明细、专家评估将一并删除，且不可恢复！'))return;
   try{
@@ -864,18 +900,12 @@ function downloadSessionEstimation(sessionId){
 function updateCostSelect(){
   const sel=document.getElementById('costProjectSelect');
   if(!sel) return;
-  const reviewingIds = sessions.filter(s => s.status === 'in_progress').map(s => s.id);
-  const filteredProjects = projects.filter(p => reviewingIds.includes(p.session_id));
   const currentVal = sel.value;
-  sel.innerHTML='<option value="">-- 请选择项目 --</option>'+filteredProjects.map(p=>'<option value="'+p.id+'">'+esc(p.project_name||p.name)+'</option>').join('');
-  // 如果当前选中的项目已不在评审中批次，清空选择
-  if(currentVal && !reviewingIds.includes(projects.find(p => p.id == currentVal)?.session_id)){
-    sel.value = '';
-    currentProjectId = null;
-    document.getElementById('costHeaderCard')?.classList.add('d-none');
-    document.getElementById('costSummaryCards').innerHTML = '';
-    document.getElementById('workTbody').innerHTML = '';
-    document.getElementById('downloadCostBtn').style.display = 'none';
+  sel.innerHTML='<option value="">-- 请选择项目 --</option>'+projects.map(p=>'<option value="'+p.id+'">'+esc(p.project_name||p.name)+'</option>').join('');
+  if(currentVal){
+    const p=projects.find(x=>x.id==currentVal);
+    if(p)sel.value=currentVal;
+    else{sel.value='';currentProjectId=null;document.getElementById('costHeaderCard')?.classList.add('d-none');document.getElementById('costSummaryCards').innerHTML='';document.getElementById('downloadCostBtn').style.display='none';}
   }
 }
 async function renderCostAnalysis(){
@@ -892,16 +922,21 @@ async function loadCostDetail(pid){
   ]);
   const proj=await pjR.json(),cost=await costR.json();
   costResult=cost;
+  currentProjectAssignments=proj.assignments||[];
   const hc=document.getElementById('costHeaderCard'),hb=document.getElementById('costHeaderBody');
   if(hc&&hb){
     hc.classList.remove('d-none');
     const profitRate=(cost.cost_summary?.profit_rate!=null?Math.round(cost.cost_summary.profit_rate*10000)/100:0);
+    const isAssignedExp=(['expert','accountant'].includes(currentUser.role))&&currentProjectAssignments.some(a=>a.user_id===currentUser.id);
     hb.innerHTML='<h5 class="mb-2">'+esc(proj.project_name||proj.name)+'</h5>'+
       '<div class="row g-2 text-muted small">'+
         '<div class="col-md-3"><strong>承建部门:</strong> '+esc(proj.biz_department||'-')+'</div>'+
         '<div class="col-md-3"><strong>合同金额:</strong> ¥'+Number(proj.contract_amount||0).toLocaleString()+'</div>'+
         '<div class="col-md-3"><strong>总成本:</strong> ¥'+Number(cost.cost_summary?.total_cost||0).toLocaleString()+'</div>'+
         '<div class="col-md-3"><strong>预估利润率:</strong> '+profitRate+'%</div>'+
+        '<div class="col-12"><strong>评审状态:</strong> <span class="badge '+statusBadgeClass(proj.status||'draft')+'">'+projectStatusLabel(proj.status||'draft')+'</span>'+
+          (['expert','accountant'].includes(currentUser.role)?' <span class="badge '+(isAssignedExp?'bg-success':'bg-secondary')+'">'+(isAssignedExp?'您已分配，可评估':'未分配，暂不能评估')+'</span>':'')+
+        '</div>'+
       '</div>';
   }
   renderCostSummaryCards(cost);
@@ -979,7 +1014,8 @@ function renderCostDetail(cost){
   }
   if(catKey){
     const items=(cost.work_items||[]).filter(w=>w.category===catKey);
-    const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role);
+    // 专家/会计师只有被分配到该项目才能提交评估
+    const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role)&&(currentProjectAssignments||[]).some(a=>a.user_id===currentUser.id);
     const showExpert=catKey==='outsourcing'||catKey==='subcontract';
     db.innerHTML=renderWorkItemsTable(items, showExpert, isExpert);
     updateEstimateBadge(cost);
@@ -1452,6 +1488,128 @@ function updateSessionStatus(sessionId,newStatus){
 // HELPERS
 function getFileIcon(ext){const m={pdf:'pdf',docx:'word',doc:'word',xlsx:'excel',xls:'excel',jpg:'image',png:'image'};return m[(ext||'').toLowerCase()]||'file';}
 function getFileCategoryName(cat){const m={estimation:'估算表',feasibility:'可研',bid:'招标',award:'中标',contract:'合同',profit:'利润率',subcontract:'分包',tech_spec:'技术规范书',other:'其他'};return m[cat]||cat||'其他';}
+
+// ==================== 分配评审人员 ====================
+let currentFlowProjectId=null;
+async function openAssignModal(pid){
+  currentFlowProjectId=pid;
+  const p=projects.find(x=>x.id===pid);if(!p)return;
+  let assigned=[];
+  try{const r=await fetch(API+'/projects/'+pid+'/assignments',{headers:authH()});if(r.ok)assigned=await r.json();}catch(e){}
+  const aExp=new Set(assigned.filter(a=>a.user_role==='expert').map(a=>a.user_id));
+  const aAcc=new Set(assigned.filter(a=>a.user_role==='accountant').map(a=>a.user_id));
+  const experts=users.filter(u=>u.role==='expert');
+  const accs=users.filter(u=>u.role==='accountant');
+  document.getElementById('assignExpertList').innerHTML=experts.map(u=>
+    '<div class="col-md-6"><div class="permission-check"><input class="form-check-input" type="checkbox" id="aexp_'+u.id+'" '+(aExp.has(u.id)?'checked':'')+'><label class="form-check-label" for="aexp_'+u.id+'">'+esc(u.real_name)+'</label></div></div>'
+  ).join('')||'<div class="text-muted small">暂无专家账号</div>';
+  document.getElementById('assignAccountantList').innerHTML=accs.map(u=>
+    '<div class="col-md-6"><div class="permission-check"><input class="form-check-input" type="checkbox" id="aacc_'+u.id+'" '+(aAcc.has(u.id)?'checked':'')+'><label class="form-check-label" for="aacc_'+u.id+'">'+esc(u.real_name)+'</label></div></div>'
+  ).join('')||'<div class="text-muted small">暂无会计师事务所账号</div>';
+  new bootstrap.Modal(document.getElementById('assignModal')).show();
+}
+async function saveAssign(){
+  const pid=currentFlowProjectId;if(!pid)return;
+  const expert_ids=users.filter(u=>u.role==='expert'&&document.getElementById('aexp_'+u.id)?.checked).map(u=>u.id);
+  const accountant_ids=users.filter(u=>u.role==='accountant'&&document.getElementById('aacc_'+u.id)?.checked).map(u=>u.id);
+  try{
+    const r=await fetch(API+'/projects/'+pid+'/assign',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({expert_ids,accountant_ids})});
+    const d=await r.json();
+    if(r.ok){
+      bootstrap.Modal.getInstance(document.getElementById('assignModal'))?.hide();
+      alert('分配已保存');
+      await loadProjects();
+      openFlowModal(pid);
+    }else alert('保存失败: '+(d.error||'未知错误'));
+  }catch(e){alert('出错: '+e.message);}
+}
+
+// ==================== 项目评审流程弹窗 ====================
+async function openFlowModal(pid){
+  currentFlowProjectId=pid;
+  const p=projects.find(x=>x.id===pid);if(!p)return;
+  let detail=null,assignments=[];
+  try{
+    const r=await fetch(API+'/projects/'+pid,{headers:authH()});detail=await r.json();
+    const ar=await fetch(API+'/projects/'+pid+'/assignments',{headers:authH()});if(ar.ok)assignments=await ar.json();
+  }catch(e){}
+  if(!detail||detail.error)return;
+  const role=currentUser.role;
+  const isRdAdmin=role==='admin'||role==='rd';
+  const isBizSame=role==='biz'&&currentUser.business_dept===detail.biz_department;
+  const assHtml=assignments.length?assignments.map(a=>'<span class="badge '+(a.user_role==='accountant'?'bg-info text-dark':'bg-secondary')+' me-1">'+esc(a.user_name)+'（'+(a.user_role==='accountant'?'会计师':'专家')+'）</span>').join(''):'<span class="text-muted small">尚未分配</span>';
+  let actions='';
+  if(isRdAdmin){
+    if(detail.status==='draft'||detail.status==='rejected'){
+      actions+='<button class="btn btn-success btn-sm me-2" onclick="doPreReview('+pid+',true)"><i class="bi bi-check-circle"></i> 预审通过</button>'+
+        '<button class="btn btn-warning btn-sm" onclick="doPreReview('+pid+',false)"><i class="bi bi-arrow-return-left"></i> 退回</button>';
+    }else if(detail.status==='reviewing'){
+      actions+='<button class="btn btn-primary btn-sm" onclick="doInitiate('+pid+')"><i class="bi bi-send-check"></i> 发起成果确认</button>';
+    }else if(detail.status==='pending_confirm'){
+      actions+='<button class="btn btn-success btn-sm" onclick="doFinalize('+pid+')"><i class="bi bi-archive-fill"></i> 复核并归档</button>';
+    }else if(detail.status==='completed'){
+      actions+='<span class="badge bg-success">已完成并归档</span>';
+    }
+  }
+  if(isBizSame&&detail.status==='pending_confirm'){
+    const confirmed=detail.biz_confirmed;
+    actions+='<div class="mt-2">'+(confirmed?'<span class="badge bg-success">贵事业部已确认成果</span>':'<button class="btn btn-success btn-sm me-2" onclick="doBizConfirm('+pid+',true)"><i class="bi bi-check-circle"></i> 确认成果</button><button class="btn btn-outline-warning btn-sm" onclick="doBizConfirm('+pid+',false)"><i class="bi bi-arrow-return-left"></i> 退回</button>')+'</div>';
+  }
+  let expertNote='';
+  const amAssigned=['expert','accountant'].includes(role)&&assignments.some(a=>a.user_id===currentUser.id);
+  if(['expert','accountant'].includes(role)){
+    expertNote=amAssigned
+      ?'<div class="alert alert-success small mb-0">您已被分配参与此项目，请到「工作量评估」页提交人天评估。</div>'
+      :'<div class="alert alert-warning small mb-0">您尚未被分配到此项目，暂不能提交评估。</div>';
+  }
+  const rejectNote=(detail.status==='rejected'&&detail.review_note)?'<div class="alert alert-danger small">研发中心退回原因：'+esc(detail.review_note)+'</div>':'';
+  const bizRejectNote=(detail.biz_confirmed===false&&detail.biz_confirm_note)?'<div class="alert alert-warning small">事业部退回：'+esc(detail.biz_confirm_note)+'</div>':'';
+  document.getElementById('flowModalBody').innerHTML=
+    '<div class="mb-2"><strong>项目：</strong>'+esc(detail.project_name||'')+' <span class="badge '+statusBadgeClass(detail.status||'draft')+'">'+projectStatusLabel(detail.status||'draft')+'</span></div>'+
+    '<div class="mb-3"><strong>承接事业部：</strong>'+esc(detail.biz_department||'-')+' <strong class="ms-3">合同金额：</strong>¥'+(detail.contract_amount?Number(detail.contract_amount).toLocaleString():'-')+'</div>'+
+    rejectNote+bizRejectNote+
+    '<div class="card mb-3"><div class="card-header bg-light small fw-bold">已分配评审人员</div><div class="card-body">'+assHtml+(isRdAdmin?' <button class="btn btn-sm btn-outline-primary mt-2" onclick="openAssignModal('+pid+')"><i class="bi bi-people"></i> '+(assignments.length?'重分配':'分配')+'</button>':'')+'</div></div>'+
+    expertNote+
+    '<div class="card"><div class="card-header bg-light small fw-bold">流程操作</div><div class="card-body">'+ (actions||'<span class="text-muted small">当前状态暂无可用操作</span>') +'</div></div>';
+  new bootstrap.Modal(document.getElementById('flowModal')).show();
+}
+async function doPreReview(pid,approve){
+  let reason='';
+  if(!approve){reason=prompt('请输入退回原因（必填）');if(!reason)return;}
+  try{
+    const r=await fetch(API+'/projects/'+pid+'/pre-review',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({approve,reason})});
+    const d=await r.json();
+    if(r.ok){bootstrap.Modal.getInstance(document.getElementById('flowModal'))?.hide();await loadProjects();alert(approve?'预审通过，项目进入评审':'已退回');}
+    else alert(d.error||'操作失败');
+  }catch(e){alert('出错: '+e.message);}
+}
+async function doInitiate(pid){
+  try{
+    const r=await fetch(API+'/projects/'+pid+'/initiate-confirmation',{method:'POST',headers:authH()});
+    const d=await r.json();
+    if(r.ok){bootstrap.Modal.getInstance(document.getElementById('flowModal'))?.hide();await loadProjects();alert('已发起成果确认，等待事业部确认');}
+    else alert(d.error||'操作失败');
+  }catch(e){alert('出错: '+e.message);}
+}
+async function doFinalize(pid){
+  if(!confirm('确认复核无误并归档该项目？'))return;
+  try{
+    const r=await fetch(API+'/projects/'+pid+'/finalize',{method:'POST',headers:authH()});
+    const d=await r.json();
+    if(r.ok){bootstrap.Modal.getInstance(document.getElementById('flowModal'))?.hide();await loadProjects();alert('项目已归档完成');}
+    else alert(d.error||'操作失败');
+  }catch(e){alert('出错: '+e.message);}
+}
+async function doBizConfirm(pid,confirmed){
+  let comment='';
+  if(!confirmed){comment=prompt('请输入退回原因（必填）');if(!comment)return;}
+  try{
+    const r=await fetch(API+'/projects/'+pid+'/confirm',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({confirmed,comment})});
+    const d=await r.json();
+    if(r.ok){bootstrap.Modal.getInstance(document.getElementById('flowModal'))?.hide();await loadProjects();alert(confirmed?'已确认成果':'已退回成果');}
+    else alert(d.error||'操作失败');
+  }catch(e){alert('出错: '+e.message);}
+}
 </script>
 </body>
 </html>

@@ -156,6 +156,35 @@ function enrichProject(p) {
   return { ...p, last_operation_at: lastOperationAt(p.id) || p.updated_at || p.created_at || null };
 }
 
+// ==================== 审批流辅助 ====================
+// 项目状态流转允许的方向（draft→reviewing→pending_confirm→completed，rejected 为退回分支）
+const PROJECT_STATUS_FLOW = {
+  draft: ['reviewing', 'rejected'],
+  rejected: ['reviewing', 'draft'],
+  reviewing: ['pending_confirm', 'rejected'],
+  pending_confirm: ['completed', 'reviewing'],
+  completed: []
+};
+function canTransition(from, to) {
+  if (from === to) return true;
+  return (PROJECT_STATUS_FLOW[from] || []).includes(to);
+}
+
+// 取项目已分配的评审专家/会计师
+function getAssignments(projectId) {
+  return (db.store.projectAssignments || []).filter(a => a.project_id === projectId);
+}
+// 判断某专家/会计师是否被分配到该项目（兼容已提交过评估的旧数据）
+function isAssignedToProject(user, projectId) {
+  if (user.role === 'expert' || user.role === 'accountant') {
+    const assigned = (db.store.projectAssignments || []).some(a => a.project_id === projectId && a.user_id === user.id);
+    if (assigned) return true;
+    const estimated = db.store.expertEstimates.some(e => e.project_id === projectId && e.expert_id === user.id);
+    return estimated;
+  }
+  return true;
+}
+
 // Multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
@@ -187,8 +216,7 @@ function authorizeFile(req, res, next) {
   if (!proj) return res.status(403).json({ error: '无权访问' });
   if (user.role === 'biz' && user.business_dept && user.business_dept === proj.biz_department) return next();
   if (user.role === 'expert' || user.role === 'accountant') {
-    const assigned = db.store.expertEstimates.some(e => e.project_id === file.project_id && e.expert_id === user.id);
-    if (assigned) return next();
+    if (isAssignedToProject(user, file.project_id)) return next();
   }
   return res.status(403).json({ error: '无权访问该文件' });
 }
@@ -382,8 +410,7 @@ app.get('/api/projects/:id', auth(), (req, res) => {
   }
   // 专家/会计师只能看被分配到评估的项目
   if (req.user.role === 'expert' || req.user.role === 'accountant') {
-    const assigned = db.store.expertEstimates.some(e => e.project_id === p.id && e.expert_id === req.user.id);
-    if (!assigned) return res.status(403).json({ error: '无权查看该项目' });
+    if (!isAssignedToProject(req.user, p.id)) return res.status(403).json({ error: '无权查看该项目' });
   }
   res.json({
     ...enrichProject(p),
@@ -392,7 +419,8 @@ app.get('/api/projects/:id', auth(), (req, res) => {
     travel_items: db.store.travelItems.filter(t => t.project_id === p.id),
     files: db.store.files.filter(f => f.project_id === p.id),
     expert_estimates: db.store.expertEstimates.filter(e => e.project_id === p.id),
-    confirmations: db.store.confirmations.filter(c => c.project_id === p.id)
+    confirmations: db.store.confirmations.filter(c => c.project_id === p.id),
+    assignments: getAssignments(p.id)
   });
 });
 
@@ -427,6 +455,17 @@ app.patch('/api/projects/:id', auth(['admin', 'rd', 'biz']), (req, res) => {
     return res.status(403).json({ error: '无权修改该项目' });
   }
   const body = pick(req.body, PROJECT_FIELDS);
+  // 允许研发中心/管理员通过 PATCH 推进项目状态（受状态机约束）
+  if (req.body.status !== undefined) {
+    if (req.user.role !== 'admin' && req.user.role !== 'rd') {
+      return res.status(403).json({ error: '无权限修改项目状态' });
+    }
+    const to = String(req.body.status);
+    if (!canTransition(p.status, to)) {
+      return res.status(400).json({ error: `状态流转不允许：${p.status} → ${to}` });
+    }
+    p.status = to;
+  }
   if (body.session_id !== undefined) body.session_id = body.session_id ? parseInt(body.session_id) || null : null;
   if (body.contract_amount !== undefined) body.contract_amount = Number(body.contract_amount) || 0;
   if (body.biz_department !== undefined) p.biz_department = body.biz_department;
@@ -463,6 +502,7 @@ function deleteProjectAndChildren(projectId) {
   db.store.expertEstimates = db.store.expertEstimates.filter(e => e.project_id !== projectId);
   db.store.confirmations = db.store.confirmations.filter(c => c.project_id !== projectId);
   db.store.workflowLogs = db.store.workflowLogs.filter(l => l.project_id !== projectId);
+  db.store.projectAssignments = (db.store.projectAssignments || []).filter(a => a.project_id !== projectId);
   db.store.projects = db.store.projects.filter(p => p.id !== projectId);
 }
 
@@ -608,8 +648,7 @@ app.get('/api/projects/:id/files', auth(), (req, res) => {
   const project = db.store.projects.find(p => p.id === projectId);
   if (!project) return res.status(404).json({ error: '项目不存在' });
   if (req.user.role === 'expert' || req.user.role === 'accountant') {
-    const assigned = db.store.expertEstimates.some(e => e.project_id === projectId && e.expert_id === req.user.id);
-    if (!assigned) return res.status(403).json({ error: '无权查看该项目文件' });
+    if (!isAssignedToProject(req.user, projectId)) return res.status(403).json({ error: '无权查看该项目文件' });
   }
   res.json(db.store.files.filter(f => f.project_id === projectId));
 });
@@ -659,25 +698,37 @@ app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
   if (!isFinite(daysNum) || daysNum <= 0) {
     return res.status(400).json({ error: '评估人天必须为大于 0 的数字' });
   }
-  const project = db.store.projects.find(p => p.id === parseInt(project_id));
+  const pid = parseInt(project_id);
+  const project = db.store.projects.find(p => p.id === pid);
   if (!project) return res.status(404).json({ error: '项目不存在' });
-  const existing = db.store.expertEstimates.find(e => e.expert_id === req.user.id && e.project_id === parseInt(project_id) && e.work_item_id === parseInt(work_item_id));
+  // P0-2：校验评估人已被分配到该项目（会计师事务所同样以专家身份参与评估）
+  if (!isAssignedToProject(req.user, pid)) {
+    return res.status(403).json({ error: '您未被分配到该项目，无法提交评估' });
+  }
+  // 校验工作项属于该项目
+  const wi = db.store.workItems.find(w => w.id === parseInt(work_item_id));
+  if (!wi || wi.project_id !== pid) {
+    return res.status(400).json({ error: '工作项不存在或不属于该项目' });
+  }
+  const existing = db.store.expertEstimates.find(e => e.expert_id === req.user.id && e.project_id === pid && e.work_item_id === parseInt(work_item_id));
   if (existing) return res.status(400).json({ error: '您已经提交过该项评估' });
   const estimate = {
     id: db.nextId(db.store.expertEstimates),
-    project_id: parseInt(project_id),
+    project_id: pid,
     work_item_id: parseInt(work_item_id),
     expert_id: req.user.id,
     expert_name: req.user.real_name,
+    expert_role: req.user.role,
     days: daysNum,
     comment: comment || '',
     submitted_at: new Date().toISOString()
   };
   db.store.expertEstimates.push(estimate);
-  const pj = db.store.projects.find(p => p.id === parseInt(project_id));
+  const pj = db.store.projects.find(p => p.id === pid);
   if (pj) pj.updated_at = new Date().toISOString();
   db.save();
-  db.logWorkflow(parseInt(project_id), 'submit_estimate', `专家${estimate.expert_name}评估工作项${work_item_id}: ${daysNum}人天`, req.user.id);
+  const roleLabel = req.user.role === 'accountant' ? '会计师事务所' : '专家';
+  db.logWorkflow(pid, 'submit_estimate', `${roleLabel}${estimate.expert_name}评估工作项${work_item_id}: ${daysNum}人天`, req.user.id);
   res.json(estimate);
 });
 
@@ -733,6 +784,132 @@ app.get('/api/projects/:id/confirmations', auth(), (req, res) => {
     return res.json(confirmations.filter(c => c.expert_id === req.user.id));
   }
   res.json(confirmations);
+});
+
+// ==================== 评审人员分配 ====================
+// 查看某项目已分配的评审专家/会计师（研发中心/管理员）
+app.get('/api/projects/:id/assignments', auth(['admin', 'rd']), (req, res) => {
+  const projectId = parseInt(req.params.id);
+  const project = db.store.projects.find(p => p.id === projectId);
+  if (!project) return res.status(404).json({ error: '项目不存在' });
+  const assignments = getAssignments(projectId).map(a => {
+    const u = db.store.users.find(x => x.id === a.user_id) || {};
+    return { ...a, user_name: u.real_name || a.user_name, user_role: u.role || a.user_role };
+  });
+  res.json(assignments);
+});
+
+// 分配/重分配评审专家与会计师（研发中心/管理员）。替换式：提交即覆盖该项目原有分配。
+app.post('/api/projects/:id/assign', auth(['admin', 'rd']), (req, res) => {
+  const projectId = parseInt(req.params.id);
+  const project = db.store.projects.find(p => p.id === projectId);
+  if (!project) return res.status(404).json({ error: '项目不存在' });
+  const expertIds = (Array.isArray(req.body.expert_ids) ? req.body.expert_ids : []).map(Number).filter(Boolean);
+  const accountantIds = (Array.isArray(req.body.accountant_ids) ? req.body.accountant_ids : []).map(Number).filter(Boolean);
+  for (const id of [...expertIds, ...accountantIds]) {
+    const u = db.store.users.find(x => x.id === id);
+    if (!u) return res.status(400).json({ error: '存在无效的用户ID: ' + id });
+  }
+  const make = (uid, role) => ({
+    id: db.nextId(db.store.projectAssignments),
+    project_id: projectId,
+    user_id: uid,
+    user_role: role,
+    user_name: (db.store.users.find(x => x.id === uid) || {}).real_name,
+    assigned_by: req.user.id,
+    assigned_at: new Date().toISOString()
+  });
+  const newOnes = [];
+  expertIds.forEach(id => newOnes.push(make(id, 'expert')));
+  accountantIds.forEach(id => newOnes.push(make(id, 'accountant')));
+  db.store.projectAssignments = (db.store.projectAssignments || []).filter(a => a.project_id !== projectId);
+  db.store.projectAssignments.push(...newOnes);
+  db.save();
+  db.logWorkflow(projectId, 'assign_expert', `分配评审人员：${newOnes.map(a => a.user_name).join('、') || '无'}`, req.user.id);
+  res.json({ success: true, assignments: newOnes });
+});
+
+// ==================== 评审流程节点 ====================
+// 研发中心预审：通过(draft/rejected → reviewing) 或 退回(draft/rejected → rejected)
+app.post('/api/projects/:id/pre-review', auth(['admin', 'rd']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  if (!['draft', 'rejected'].includes(p.status)) {
+    return res.status(400).json({ error: '当前状态（' + p.status + '）不可进行预审' });
+  }
+  const approve = !!req.body.approve;
+  const reason = (req.body.reason || '').toString();
+  if (!approve && !reason.trim()) return res.status(400).json({ error: '退回时必须填写退回原因' });
+  p.status = approve ? 'reviewing' : 'rejected';
+  if (!approve) p.review_note = reason;
+  p.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(p.id, approve ? 'pre_review_pass' : 'pre_review_reject',
+    approve ? '研发中心预审通过，进入评审' : '研发中心预审退回：' + reason, req.user.id);
+  res.json(p);
+});
+
+// 研发中心汇总结果并发起成果确认（reviewing → pending_confirm）
+app.post('/api/projects/:id/initiate-confirmation', auth(['admin', 'rd']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  if (p.status !== 'reviewing') return res.status(400).json({ error: '仅评审中项目可发起确认（当前：' + p.status + '）' });
+  const estCount = db.store.expertEstimates.filter(e => e.project_id === p.id).length;
+  if (estCount === 0) return res.status(400).json({ error: '尚无专家/会计师评估数据，请先组织评审会并收集评估' });
+  p.status = 'pending_confirm';
+  p.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(p.id, 'initiate_confirmation', '研发中心汇总结果并发起成果确认', req.user.id);
+  res.json(p);
+});
+
+// 研发中心复核后完成结果导入（pending_confirm → completed）
+app.post('/api/projects/:id/finalize', auth(['admin', 'rd']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  if (p.status !== 'pending_confirm') return res.status(400).json({ error: '仅待确认项目可归档（当前：' + p.status + '）' });
+  if (!p.biz_confirmed) return res.status(400).json({ error: '请先由事业部确认成果后再归档' });
+  p.status = 'completed';
+  p.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(p.id, 'finalize', '研发中心复核并导入结果，项目完成', req.user.id);
+  // 联动批次：本项目所属批次下所有项目均完成时，批次自动归档
+  if (p.session_id) {
+    const sess = db.store.reviewSessions.find(s => s.id === p.session_id);
+    if (sess) {
+      const ps = db.store.projects.filter(x => x.session_id === sess.id);
+      if (ps.length && ps.every(x => x.status === 'completed')) {
+        sess.status = 'completed';
+        sess.completed_at = new Date().toISOString();
+        db.save();
+      }
+    }
+  }
+  res.json(p);
+});
+
+// 事业部确认成果（项目级；pending_confirm 阶段，biz 限本事业部，rd/admin 可代确认）
+app.post('/api/projects/:id/confirm', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  if (req.user.role === 'biz' && req.user.business_dept !== p.biz_department) {
+    return res.status(403).json({ error: '无权确认非本事业部的项目' });
+  }
+  if (p.status !== 'pending_confirm') return res.status(400).json({ error: '当前状态（' + p.status + '）无需事业部确认' });
+  const confirmed = !!req.body.confirmed;
+  const comment = (req.body.comment || '').toString();
+  if (!confirmed && !comment.trim()) return res.status(400).json({ error: '退回时必须填写退回原因' });
+  p.biz_confirmed = confirmed;
+  p.biz_confirmed_by = req.user.id;
+  p.biz_confirmed_name = req.user.real_name;
+  p.biz_confirmed_at = new Date().toISOString();
+  p.biz_confirm_note = comment;
+  if (!confirmed) p.status = 'reviewing'; // 事业部退回则回到评审中
+  p.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(p.id, confirmed ? 'biz_confirm' : 'biz_reject',
+    (req.user.real_name || '事业部') + (confirmed ? '确认成果' : '退回成果：' + comment), req.user.id);
+  res.json(p);
 });
 
 // ==================== 成本明细 ====================

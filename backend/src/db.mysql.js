@@ -82,6 +82,10 @@ const COL_TYPE = {
   operator_name: 'VARCHAR(64) DEFAULT NULL',
   action: 'VARCHAR(64) DEFAULT NULL',
   user_id: 'INT NOT NULL DEFAULT 0',
+  user_role: 'VARCHAR(32) DEFAULT NULL',
+  user_name: 'VARCHAR(64) DEFAULT NULL',
+  assigned_by: 'INT DEFAULT NULL',
+  assigned_at: 'VARCHAR(32) DEFAULT NULL',
   permissions: 'JSON DEFAULT NULL',
   extra: 'JSON DEFAULT NULL'
 };
@@ -160,6 +164,12 @@ const SCHEMA = {
     cols: ['id', 'user_id', 'permissions'],
     bool: [], num: ['id', 'user_id'], json: ['permissions'],
     indexes: ['KEY `idx_user_id` (`user_id`)']
+  },
+  projectAssignments: {
+    table: 'projectAssignments',
+    cols: ['id', 'project_id', 'user_id', 'user_role', 'user_name', 'assigned_by', 'assigned_at'],
+    bool: [], num: ['id', 'project_id', 'user_id', 'assigned_by'],
+    indexes: ['KEY `idx_project_id` (`project_id`)', 'KEY `idx_user_id` (`user_id`)']
   }
 };
 
