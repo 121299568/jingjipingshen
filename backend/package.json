@@ -1,6 +1,6 @@
 {
   "name": "economic-review-backend",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "经济评审系统后端API（含Excel导入）",
   "main": "server.js",
   "engines": {
@@ -9,16 +9,22 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "migrate": "node migrate.js",
     "parse": "node parse-excel.js <file.xlsx>",
-    "gen-seed": "node gen-seed.js"
+    "gen-seed": "node gen-seed.js <file.xlsx>"
   },
   "dependencies": {
     "archiver": "^5.3.1",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
     "express": "^4.18.2",
-    "form-data": "^4.0.6",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
     "multer": "^1.4.5-lts.1",
-    "uuid": "^9.0.0",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "mysql2": "^3.9.0"
   }
 }

@@ -6,6 +6,7 @@ services:
     region: singapore
     buildCommand: cd backend && npm install
     startCommand: cd backend && node server.js
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -13,3 +14,9 @@ services:
         value: 10000
       - key: JWT_SECRET
         generateValue: true
+      # 当前默认使用 JSON 文件存储；接入 MySQL 时改为 mysql 并确保变量齐全
+      - key: DB_DRIVER
+        value: json
+      # 前端托管在 GitHub Pages，需允许其跨域访问 API
+      - key: CORS_ORIGINS
+        value: https://121299568.github.io

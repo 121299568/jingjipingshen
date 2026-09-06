@@ -53,7 +53,7 @@ async function main() {
     console.log(`   - 用户数: ${store.users?.length || 0}`);
     console.log(`   - 项目数: ${store.projects?.length || 0}`);
     console.log(`   - 批次数: ${store.reviewSessions?.length || 0}`);
-    console.log(`   - 文件数: ${store.projectFiles?.length || 0}\n`);
+    console.log(`   - 文件数: ${store.files?.length || 0}\n`);
   } catch (error) {
     console.error('   ✗ 读取失败:', error.message);
     console.log('\n请检查：');
@@ -248,9 +248,9 @@ async function main() {
   
   // 9. 插入文件记录
   console.log('9. 迁移文件记录...');
-  if (store.projectFiles && store.projectFiles.length > 0) {
+  if (store.files && store.files.length > 0) {
     let successCount = 0;
-    for (const file of store.projectFiles) {
+    for (const file of store.files) {
       try {
         await connection.execute(
           `INSERT INTO project_files (id, project_id, file_name, file_path, file_type, file_category, uploader_id, upload_time)

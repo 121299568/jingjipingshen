@@ -47,6 +47,25 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .drop-zone.dragover .drop-icon{color:#667eea}
 .permission-check{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:4px}
 .permission-check input{margin:0}
+.menu-toggle{display:none;position:fixed;top:12px;left:12px;z-index:200;width:42px;height:42px;border:none;border-radius:10px;background:var(--primary);color:#fff;font-size:20px;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+.sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99}
+.sidebar-backdrop.show{display:block}
+/* ===== 移动端适配 ===== */
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%);transition:transform .25s ease;box-shadow:4px 0 16px rgba(0,0,0,.25);width:240px}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0;padding:14px 12px;margin-top:56px}
+  .menu-toggle{display:inline-flex}
+  .card-body{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{min-width:680px;font-size:13px}
+  .stat-card{padding:14px}
+  .row.g-3>.col-md-3{flex:0 0 50%;max-width:50%}
+  .modal-dialog{margin:10px}
+  #pageTitle{font-size:16px}
+  .batch-header{font-size:13px}
+  .login-card{width:90%;padding:24px}
+  .nav-item{font-size:15px;padding:14px 20px}
+}
 </style>
 </head>
 <body>
@@ -77,6 +96,9 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div class="nav-item" data-page="users"><i class="bi bi-people"></i>用户管理</div>
     <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>退出登录</div>
   </aside>
+
+  <button class="menu-toggle" onclick="toggleSidebar()" aria-label="菜单"><i class="bi bi-list"></i></button>
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()"></div>
 
   <main class="main">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -446,10 +468,16 @@ function showMainApp(){
 function doLogout(){localStorage.clear();location.reload();}
 function getRoleName(r){return{admin:'管理员',biz:'事业部',rd:'研发',expert:'专家',accountant:'会计师'}[r]||r;}
 function authH(){const t=localStorage.getItem('token');return t?{Authorization:'Bearer '+t}:{};}
+// XSS 转义：所有插入 innerHTML 的用户可控字符串都必须经过它
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 function bindNav(){
-  document.querySelectorAll('.nav-item[data-page]').forEach(el=>el.addEventListener('click',()=>navigateTo(el.dataset.page)));
+  document.querySelectorAll('.nav-item[data-page]').forEach(el=>el.addEventListener('click',()=>{
+    navigateTo(el.dataset.page);
+    if(window.innerWidth<=768){document.querySelector('.sidebar')?.classList.remove('open');document.getElementById('sidebarBackdrop')?.classList.remove('show');}
+  }));
 }
+function toggleSidebar(){document.querySelector('.sidebar')?.classList.toggle('open');document.getElementById('sidebarBackdrop')?.classList.toggle('show');}
 function navigateTo(page){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
@@ -525,7 +553,7 @@ async function renderDashboard(){
     document.getElementById('s-missing').textContent=missingEst;
     document.getElementById('s-missing').className='stat-num '+(missingEst>0?'text-danger':'text-success');
     document.getElementById('s-pending').textContent=s.pending_tasks?.length||0;
-    document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>'<div class="small mb-1"><i class="bi bi-circle-fill text-primary me-1"></i>'+a+'</div>').join(''):'<p class="text-muted small">暂无活动</p>');
+    document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>'<div class="small mb-1"><i class="bi bi-circle-fill text-primary me-1"></i>'+esc(a)+'</div>').join(''):'<p class="text-muted small">暂无活动</p>');
     renderUploadProgressChart();
   }catch(e){console.error(e);}
 }
@@ -545,7 +573,7 @@ function renderUploadProgressChart(){
 function populateSessionSelect(){
   ['projSessionId','importSessionId'].forEach(id=>{
     const el=document.getElementById(id);
-    if(el)el.innerHTML='<option value="">（不关联）</option>'+sessions.map(s=>'<option value="'+s.id+'">'+(s.name||s.session_name)+'</option>').join('');
+    if(el)el.innerHTML='<option value="">（不关联）</option>'+sessions.map(s=>'<option value="'+s.id+'">'+esc(s.name||s.session_name)+'</option>').join('');
   });
 }
 function renderSessions(){
@@ -554,7 +582,7 @@ function renderSessions(){
   tb.innerHTML=sessions.map(s=>{
     const sFiles=files.filter(f=>projects.some(p=>p.id===f.project_id&&p.session_id===s.id));
     return '<tr>'+
-      '<td>'+s.id+'</td><td>'+(s.name||s.session_name||'-')+'</td>'+
+      '<td>'+s.id+'</td><td>'+esc(s.name||s.session_name||'-')+'</td>'+
       '<td><span class="badge bg-'+({completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary')+'">'+({completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status)+'</span></td>'+
       '<td>'+fmtTime(s.review_time)+'</td>'+
       '<td>'+projects.filter(p=>p.session_id===s.id).length+'</td>'+
@@ -616,7 +644,7 @@ function renderProjects(){
       const statusBg={reviewing:'warning',draft:'secondary',completed:'success'}[p.status]||'secondary';
       return '<tr>'+
         '<td>'+p.id+'</td>'+
-        '<td title="'+(p.project_name||'')+'">'+(p.project_name||'').substring(0,24)+'</td>'+
+        '<td title="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+'</td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
         '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
         '<td><span class="badge bg-'+statusBg+'">'+({reviewing:'评审中',draft:'草稿',completed:'已完成',archived:'已归档'}[p.status]||p.status||'-')+'</span></td>'+
@@ -731,11 +759,11 @@ function renderUploadPage(){
       return '<div class="col-md-4"><div class="file-card '+(f.file_category==='estimation'?'core':'')+'">'+
         '<div class="d-flex justify-content-between align-items-center">'+
           '<div><i class="bi bi-file-earmark-'+getFileIcon(f.file_type)+' fs-4 '+(f.file_category==='estimation'?'text-danger':'text-primary')+'"></i>'+
-          '<span class="ms-2 fw-bold">'+f.originalname+'</span></div>'+
+          '<span class="ms-2 fw-bold">'+esc(f.originalname)+'</span></div>'+
           '<div>'+seqTag+autoTag+'<span class="badge bg-'+(f.file_category==='estimation'?'danger':'secondary')+' me-1">'+catName+'</span>'+
           '<a href="'+API.replace('/api','')+f.url+'" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a>'+delBtn+'</div>'+
         '</div>'+
-        '<div class="small text-muted mt-1">'+(f.upload_time?new Date(f.upload_time).toLocaleDateString():'-')+(f.uploader_name?' | '+f.uploader_name:'')+'</div>'+
+        '<div class="small text-muted mt-1">'+(f.upload_time?new Date(f.upload_time).toLocaleDateString():'-')+(f.uploader_name?' | '+esc(f.uploader_name):'')+'</div>'+
       '</div></div>';
     }).join('');
   }else{
@@ -791,7 +819,7 @@ function updateCostSelect(){
   const reviewingIds = sessions.filter(s => s.status === 'in_progress').map(s => s.id);
   const filteredProjects = projects.filter(p => reviewingIds.includes(p.session_id));
   const currentVal = sel.value;
-  sel.innerHTML='<option value="">-- 请选择项目 --</option>'+filteredProjects.map(p=>'<option value="'+p.id+'">'+(p.project_name||p.name)+'</option>').join('');
+  sel.innerHTML='<option value="">-- 请选择项目 --</option>'+filteredProjects.map(p=>'<option value="'+p.id+'">'+esc(p.project_name||p.name)+'</option>').join('');
   // 如果当前选中的项目已不在评审中批次，清空选择
   if(currentVal && !reviewingIds.includes(projects.find(p => p.id == currentVal)?.session_id)){
     sel.value = '';
@@ -818,9 +846,9 @@ async function loadCostDetail(pid){
   const hc=document.getElementById('costHeaderCard'),hb=document.getElementById('costHeaderBody');
   if(hc&&hb){
     hc.classList.remove('d-none');
-    hb.innerHTML='<h5 class="mb-2">'+(proj.project_name||proj.name)+'</h5>'+
+    hb.innerHTML='<h5 class="mb-2">'+esc(proj.project_name||proj.name)+'</h5>'+
       '<div class="row g-2 text-muted small">'+
-        '<div class="col-md-3"><strong>承建部门:</strong> '+(proj.biz_department||'-')+'</div>'+
+        '<div class="col-md-3"><strong>承建部门:</strong> '+esc(proj.biz_department||'-')+'</div>'+
         '<div class="col-md-3"><strong>合同金额:</strong> ¥'+Number(proj.contract_amount||0).toLocaleString()+'</div>'+
         '<div class="col-md-3"><strong>总成本:</strong> ¥'+Number(proj.cost_summary?.total_cost||0).toLocaleString()+'</div>'+
       '</div>';
@@ -846,8 +874,8 @@ async function loadCostDetail(pid){
         :(expDays.length>0?expDays.join('/'):'-');
       return '<tr>'+
         '<td><span class="badge bg-secondary">'+(catMap[w.category]||w.category)+'</span></td>'+
-        '<td>'+(w.work_task||'')+'</td>'+
-        '<td title="'+(w.work_item||'')+'">'+(w.work_item||'')+'</td>'+
+        '<td>'+esc(w.work_task||'')+'</td>'+
+        '<td title="'+esc(w.work_item||'')+'">'+esc(w.work_item||'')+'</td>'+
         '<td>'+(w.person_days!=null?w.person_days:'-')+'</td>'+
         '<td class="text-muted">¥'+Number(w.cost||0).toLocaleString()+'</td>'+
         '<td>'+inputCell+'</td>'+
@@ -960,7 +988,7 @@ function renderFileChart(cats){
 function renderSessionChart(sessions){
   const ctx=document.getElementById('sessionChart');if(!ctx)return;
   if(sessionChartInstance)sessionChartInstance.destroy();
-  sessionChartInstance=new Chart(ctx,{type:'bar',data:{labels:sessions.map(s=>s.name||s.session_name||'批次'+s.id),datasets:[{label:'总项目数',data:sessions.map(s=>s.project_count),backgroundColor:'#667eea'},{label:'已完成',data:sessions.map(s=>s.completed_projects),backgroundColor:'#10b981'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{boxWidth:10,padding:5}}},scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}}});
+  sessionChartInstance=new Chart(ctx,{type:'bar',data:{labels:sessions.map(s=>esc(s.name||s.session_name||'批次'+s.id)),datasets:[{label:'总项目数',data:sessions.map(s=>s.project_count),backgroundColor:'#667eea'},{label:'已完成',data:sessions.map(s=>s.completed_projects),backgroundColor:'#10b981'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{boxWidth:10,padding:5}}},scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}}});
 }
 function renderDeptTable(depts){
   const tbody=document.getElementById('deptStatsBody');if(!tbody)return;
@@ -968,12 +996,12 @@ function renderDeptTable(depts){
   tbody.innerHTML=depts.map((d,i)=>{
     const pct=(d.completeness*100).toFixed(1);
     const pctColor=d.completeness>=0.8?'text-success':d.completeness>=0.5?'text-warning':'text-danger';
-    return '<tr><td>'+(i+1)+'</td><td>'+d.name+'</td><td>'+d.count+'</td><td>'+(d.complete_count||0)+'</td><td class="'+pctColor+' fw-bold">'+pct+'%</td><td>'+d.total_amount.toLocaleString()+'</td><td>'+d.avg_amount.toLocaleString()+'</td><td>'+(totalAmount>0?((d.total_amount/totalAmount)*100).toFixed(1):0)+'%</td></tr>';
+    return '<tr><td>'+(i+1)+'</td><td>'+esc(d.name)+'</td><td>'+d.count+'</td><td>'+(d.complete_count||0)+'</td><td class="'+pctColor+' fw-bold">'+pct+'%</td><td>'+d.total_amount.toLocaleString()+'</td><td>'+d.avg_amount.toLocaleString()+'</td><td>'+(totalAmount>0?((d.total_amount/totalAmount)*100).toFixed(1):0)+'%</td></tr>';
   }).join('')||'<tr><td colspan="8" class="text-muted text-center">暂无数据</td></tr>';
 }
 function populateDeptSelect(depts){
   const select=document.getElementById('statsDepartment');if(!select)return;
-  select.innerHTML='<option value="">全部事业部</option>'+depts.map(d=>'<option value="'+d.name+'">'+d.name+'</option>').join('');
+  select.innerHTML='<option value="">全部事业部</option>'+depts.map(d=>'<option value="'+d.name+'">'+esc(d.name)+'</option>').join('');
 }
 function generateReport(){
   const type=document.getElementById('statsReportType').value;
@@ -1018,7 +1046,7 @@ function renderUsers(){
   tb.innerHTML=users.map(u=>{
     const group=userGroups.find(g=>g.id===u.group_id);
     return '<tr>'+
-      '<td>'+u.username+'</td><td>'+(u.real_name||'-')+'</td>'+
+      '<td>'+esc(u.username)+'</td><td>'+esc(u.real_name||'-')+'</td>'+
       '<td>'+getRoleName(u.role)+'</td><td>'+(u.department||'-')+'</td><td>'+(u.business_dept||'-')+'</td>'+
       '<td>'+(group?'<span class="badge bg-info">'+group.name+'</span>':'-')+'</td>'+
       '<td>'+(isAdmin?
@@ -1031,7 +1059,7 @@ function renderUsers(){
 
 function populateUserSelects(){
   const permSelect=document.getElementById('permUserSelect');
-  if(permSelect)permSelect.innerHTML='<option value="">-- 选择用户 --</option>'+users.map(u=>'<option value="'+u.id+'">'+u.username+' ('+(u.real_name||'')+')</option>').join('');
+  if(permSelect)permSelect.innerHTML='<option value="">-- 选择用户 --</option>'+users.map(u=>'<option value="'+u.id+'">'+esc(u.username)+' ('+esc(u.real_name||'')+')</option>').join('');
   const userGroupSelect=document.getElementById('newUserGroup');
   if(userGroupSelect)userGroupSelect.innerHTML='<option value="">（无）</option>'+userGroups.map(g=>'<option value="'+g.id+'">'+g.name+'</option>').join('');
   const editUserGroup=document.getElementById('editUserGroup');
@@ -1053,7 +1081,7 @@ function populateUserGroupSelects(){
 
 function populatePermUserSelect(){
   const permSelect=document.getElementById('permUserSelect');
-  if(permSelect)permSelect.innerHTML='<option value="">-- 选择用户 --</option>'+users.map(u=>'<option value="'+u.id+'">'+u.username+' ('+(u.real_name||'')+')</option>').join('');
+  if(permSelect)permSelect.innerHTML='<option value="">-- 选择用户 --</option>'+users.map(u=>'<option value="'+u.id+'">'+esc(u.username)+' ('+esc(u.real_name||'')+')</option>').join('');
 }
 
 function saveUser(){
@@ -1205,10 +1233,11 @@ function doImport(){
   formData.append('file',file);
   formData.append('session_id',document.getElementById('importSessionId').value||'');
   fetch(API+'/projects/import-excel',{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:formData})
-    .then(r=>r.json()).then(data=>{
+    .then(r=>r.json().then(data=>({ok:r.ok,data}))).then(({ok,data})=>{
+      if(!ok||data.error){statusEl.innerHTML='<div class="alert alert-danger">导入失败：'+(esc(data.error)||'未知错误')+'</div>';return;}
       statusEl.innerHTML='<div class="alert alert-success">导入成功！</div>';
       setTimeout(()=>{bootstrap.Modal.getInstance(document.getElementById('importExcelModal')).hide();loadAll();},1500);
-    }).catch(e=>{statusEl.innerHTML='<div class="alert alert-danger">'+e.message+'</div>';});
+    }).catch(e=>{statusEl.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';});
 }
 
 function updateSessionStatus(sessionId,newStatus){

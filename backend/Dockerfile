@@ -12,8 +12,8 @@ COPY . .
 # 创建上传目录
 RUN mkdir -p uploads
 
-# 暴露端口
-EXPOSE 3001
+# 暴露端口（与 server.js 默认 PORT=3000 及 render.yaml 对齐）
+EXPOSE 3000
 
 # 启动应用
 CMD ["node", "server.js"]
