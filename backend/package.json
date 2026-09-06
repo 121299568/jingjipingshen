@@ -3,6 +3,9 @@
   "version": "1.1.0",
   "description": "经济评审系统后端API（含Excel导入）",
   "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",

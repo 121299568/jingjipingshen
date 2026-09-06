@@ -3,15 +3,13 @@ services:
     name: jingjipingshen-api
     runtime: node
     plan: free
-    buildCommand: npm install
-    startCommand: node server.js
-    rootDir: backend
+    region: singapore
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && node server.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 3000
-      - key: CORS_ORIGIN
-        value: https://121299568.github.io
+        value: 10000
       - key: JWT_SECRET
         generateValue: true
