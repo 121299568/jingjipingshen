@@ -185,6 +185,14 @@ function getPool() {
 }
 
 // ---------- 类型转换 ----------
+// 关键兜底：MySQL 部分列声明为 NOT NULL（如 contract_amount DOUBLE NOT NULL DEFAULT 0）。
+// 若应用层未给值而直接 REPLACE NULL，会触发 "Column ... cannot be null" 并让整批保存失败、
+// 被 .catch 吞掉 -> 数据只存在于内存、重启即丢。
+// 因此：缺失值时，对 NOT NULL 列按类型补 0 / ''，对可空列保持 NULL。
+function isNotNull(col) {
+  const t = COL_TYPE[col];
+  return !!(t && t.includes('NOT NULL'));
+}
 function toVal(col, def, row) {
   const v = row == null ? null : row[col];
   if (def.json && def.json.includes(col)) {
@@ -192,8 +200,13 @@ function toVal(col, def, row) {
     return typeof v === 'string' ? v : JSON.stringify(v);
   }
   if (def.bool.includes(col)) return v ? 1 : 0;
-  if (def.num.includes(col)) return v == null ? null : Number(v);
-  if (v === null || v === undefined) return null;
+  if (def.num.includes(col)) {
+    if (v == null) return isNotNull(col) ? 0 : null;
+    const n = Number(v);
+    return isFinite(n) ? n : (isNotNull(col) ? 0 : null);
+  }
+  // 其余按字符串处理：NOT NULL 列给空串兜底，避免 cannot be null
+  if (v === null || v === undefined) return isNotNull(col) ? '' : null;
   return String(v);
 }
 function fromVal(col, def, raw) {
@@ -302,25 +315,30 @@ async function doSave(p, store) {
     const rows = store[name] || [];
     const snap = JSON.stringify(rows);
     if (savedSnap[name] === snap) continue; // 无变化则跳过，减少 DB 压力
-    const def = SCHEMA[name];
-    const table = def.table;
-    const cols = [...def.cols, 'extra'];
-    const colList = cols.map(c => `\`${c}\``).join(',');
-    const placeholders = cols.map(() => '?').join(',');
-    const sql = `REPLACE INTO \`${table}\` (${colList}) VALUES (${placeholders})`;
-    for (const row of rows) {
-      const vals = def.cols.map(c => toVal(c, def, row));
-      vals.push(extraOf(def, row));
-      await p.query(sql, vals);
+    try {
+      const def = SCHEMA[name];
+      const table = def.table;
+      const cols = [...def.cols, 'extra'];
+      const colList = cols.map(c => `\`${c}\``).join(',');
+      const placeholders = cols.map(() => '?').join(',');
+      const sql = `REPLACE INTO \`${table}\` (${colList}) VALUES (${placeholders})`;
+      for (const row of rows) {
+        const vals = def.cols.map(c => toVal(c, def, row));
+        vals.push(extraOf(def, row));
+        await p.query(sql, vals);
+      }
+      // 删除内存中已不存在的孤儿行（支持删项目/删用户等真正落库）
+      const ids = rows.map(r => r.id).filter(id => id != null);
+      if (ids.length === 0) {
+        await p.query(`DELETE FROM \`${table}\``);
+      } else {
+        await p.query(`DELETE FROM \`${table}\` WHERE id NOT IN (?)`, [ids]);
+      }
+      savedSnap[name] = snap;
+    } catch (e) {
+      // 单个集合保存失败不应连累其他集合；记录后继续，下一轮 save 会重试
+      console.error(`[db.mysql] 集合 ${name} 保存失败（已跳过，下一轮重试）:`, e.message);
     }
-    // 删除内存中已不存在的孤儿行（支持删项目/删用户等真正落库）
-    const ids = rows.map(r => r.id).filter(id => id != null);
-    if (ids.length === 0) {
-      await p.query(`DELETE FROM \`${table}\``);
-    } else {
-      await p.query(`DELETE FROM \`${table}\` WHERE id NOT IN (?)`, [ids]);
-    }
-    savedSnap[name] = snap;
   }
 }
 
