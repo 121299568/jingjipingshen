@@ -1,4 +1,4 @@
-// 经济评审管理系统后端 v3 (工作量评估流程)
+﻿// 经济评审管理系统后端 v3 (工作量评估流程)
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -675,6 +675,9 @@ app.get('/api/stats/detailed', auth(), (req, res) => {
     if (!deptMap[dept]) deptMap[dept] = { count: 0, total_amount: 0, complete_count: 0 };
     deptMap[dept].count++;
     deptMap[dept].total_amount += Number(p.contract_amount) || 0;
+    if (files.some(f => f.project_id === p.id && f.file_category === 'estimation')) {
+      deptMap[dept].est_count++;
+    }
     // 判断该项目资料是否齐全：核心4类文件都有
     const projFiles = files.filter(f => f.project_id === p.id);
     const hasAll = requiredCategories.every(cat => projFiles.some(f => f.file_category === cat));
@@ -683,6 +686,7 @@ app.get('/api/stats/detailed', auth(), (req, res) => {
   const deptStats = Object.entries(deptMap).map(([name, data]) => ({
     name, ...data,
     avg_amount: data.count > 0 ? data.total_amount / data.count : 0,
+    completeness: data.count > 0 ? Math.round(data.est_count / data.count * 100) : 0,
     completeness: data.count > 0 ? (data.complete_count / data.count) : 0
   })).sort((a, b) => b.completeness - a.completeness || b.total_amount - a.total_amount);
   
