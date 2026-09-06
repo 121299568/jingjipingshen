@@ -597,11 +597,9 @@ function populateSessionSelect(){
 function renderSessions(){
   const tb=document.getElementById('sessionTbody');if(!tb)return;
   const isAdmin=currentUser&&currentUser.role==='admin';
-  const canBatchDelete=currentUser&&(['admin','rd'].includes(currentUser.role)||currentUser.role==='biz');
   tb.innerHTML=sessions.map(s=>{
     const sFiles=files.filter(f=>projects.some(p=>p.id===f.project_id&&p.session_id===s.id));
     const sProjects=projects.filter(p=>p.session_id===s.id);
-    const canDeleteThis=canBatchDelete&&(isAdmin||currentUser.role==='rd'||sProjects.some(p=>p.biz_department===currentUser.business_dept));
     return '<tr>'+
       '<td>'+s.id+'</td><td>'+esc(s.name||s.session_name||'-')+'</td>'+
       '<td><span class="badge bg-'+({completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary')+'">'+({completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status)+'</span></td>'+
@@ -612,18 +610,8 @@ function renderSessions(){
         (s.status==='in_progress'?'<button class="btn btn-sm btn-success me-1" onclick="updateSessionStatus('+s.id+',\'completed\')"><i class="bi bi-archive-fill"></i>归档</button>':'')+
         (s.status==='completed'?'<span class="text-muted small"><i class="bi bi-archive"></i>已归档</span>':'')+
         (isAdmin&&sFiles.length>0?'<button class="btn btn-sm btn-outline-primary me-1" title="全量下载" onclick="downloadSessionFiles('+s.id+')"><i class="bi bi-download"></i>全部文件</button><button class="btn btn-sm btn-outline-success me-1" title="下载估算表" onclick="downloadSessionEstimation('+s.id+')"><i class="bi bi-file-earmark-excel"></i>估算表</button>':'')+
-        (canDeleteThis&&sProjects.length>0?'<button class="btn btn-sm btn-outline-danger" title="删除本批次全部项目" onclick="deleteSessionProjects('+s.id+')"><i class="bi bi-trash"></i>删除项目</button>':'')+
       '</td></tr>';
   }).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无批次</td></tr>';
-}
-async function deleteSessionProjects(sessionId){
-  if(!confirm('确定删除该批次下的全部项目？此操作不可恢复！'))return;
-  try{
-    const r=await fetch(API+'/sessions/'+sessionId+'/projects',{method:'DELETE',headers:authH()});
-    const d=await r.json();
-    if(r.ok){alert('已删除 '+d.deleted+' 个项目');await loadAll();}
-    else{alert('删除失败: '+(d.error||'未知错误'));}
-  }catch(e){alert('删除出错: '+e.message);}
 }
 function fmtTime(t){if(!t)return'';return String(t).replace('T',' ').slice(0,16);}
 function sessionStatusBadge(status){
@@ -688,7 +676,8 @@ function renderProjects(){
         '<td>'+
           '<button class="btn btn-sm btn-danger me-1" title="上传估算表" onclick="goToUpload('+p.id+',\'estimation\')"><i class="bi bi-file-earmark-excel"></i></button>'+
           '<button class="btn btn-sm btn-info me-1" title="查看/上传资料" onclick="goToUpload('+p.id+')"><i class="bi bi-folder"></i></button>'+
-          '<button class="btn btn-sm btn-success" title="工作量评估" onclick="goToCost('+p.id+')"><i class="bi bi-graph-down"></i></button>'+
+          '<button class="btn btn-sm btn-success me-1" title="工作量评估" onclick="goToCost('+p.id+')"><i class="bi bi-graph-down"></i></button>'+
+          (canDeleteProject(p)?'<button class="btn btn-sm btn-outline-danger" title="删除项目" onclick="deleteProject('+p.id+')"><i class="bi bi-trash"></i></button>':'')+
         '</td>'+
       '</tr>';
     }).join('');
@@ -707,6 +696,26 @@ function toggleBatch(key){
   const open=drawer.classList.toggle('open');
   if(!openBatches)return;
   if(open)openBatches.add(key);else openBatches.delete(key);
+}
+
+function canDeleteProject(p){
+  if(!currentUser)return false;
+  if(currentUser.role==='admin'||currentUser.role==='rd')return true;
+  if(currentUser.role==='biz')return p.biz_department===currentUser.business_dept;
+  return false;
+}
+async function deleteProject(pid){
+  if(!confirm('确定删除该项目？该项目及其资料、成本明细、专家评估将一并删除，且不可恢复！'))return;
+  try{
+    const r=await fetch(API+'/projects/'+pid,{method:'DELETE',headers:authH()});
+    const d=await r.json();
+    if(r.ok){
+      const idx=projects.findIndex(x=>x.id===pid);
+      if(idx>=0)projects.splice(idx,1);
+      alert('项目已删除');
+      renderProjects();
+    }else{alert('删除失败: '+(d.error||'未知错误'));}
+  }catch(e){alert('删除出错: '+e.message);}
 }
 
 // UPLOAD - drag & drop

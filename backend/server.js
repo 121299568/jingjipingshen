@@ -437,10 +437,14 @@ app.patch('/api/projects/:id', auth(['admin', 'rd', 'biz']), (req, res) => {
   res.json(p);
 });
 
-app.delete('/api/projects/:id', auth(['admin', 'rd']), (req, res) => {
+app.delete('/api/projects/:id', auth(['admin', 'rd', 'biz']), (req, res) => {
   const projectId = parseInt(req.params.id);
-  const idx = db.store.projects.findIndex(x => x.id === projectId);
-  if (idx < 0) return res.status(404).json({ error: '项目不存在' });
+  const project = db.store.projects.find(x => x.id === projectId);
+  if (!project) return res.status(404).json({ error: '项目不存在' });
+  // 事业部经办人只能删除本事业部的项目
+  if (req.user.role === 'biz' && req.user.business_dept !== project.biz_department) {
+    return res.status(403).json({ error: '无权删除该项目' });
+  }
   deleteProjectAndChildren(projectId);
   db.save();
   res.json({ success: true });
@@ -461,23 +465,6 @@ function deleteProjectAndChildren(projectId) {
   db.store.workflowLogs = db.store.workflowLogs.filter(l => l.project_id !== projectId);
   db.store.projects = db.store.projects.filter(p => p.id !== projectId);
 }
-
-// 批次级项目整体删除：管理员或对应事业部可删除某批次下全部项目
-app.delete('/api/sessions/:id/projects', auth(['admin', 'rd', 'biz']), (req, res) => {
-  const sessionId = parseInt(req.params.id);
-  const session = db.store.reviewSessions.find(s => s.id === sessionId);
-  if (!session) return res.status(404).json({ error: '批次不存在' });
-  let targets = db.store.projects.filter(p => p.session_id === sessionId);
-  if (req.user.role === 'biz') {
-    targets = targets.filter(p => p.biz_department === req.user.business_dept);
-    if (targets.length === 0) return res.status(403).json({ error: '该批次下没有属于您事业部的项目' });
-  }
-  const count = targets.length;
-  targets.forEach(p => deleteProjectAndChildren(p.id));
-  db.save();
-  db.logWorkflow(null, 'delete_session_projects', `删除批次${sessionId}下${count}个项目`, req.user.id);
-  res.json({ success: true, deleted: count });
-});
 
 // ==================== Excel 导入 ====================
 app.post('/api/projects/import-excel', auth(['admin', 'rd', 'biz']), upload.single('file'), (req, res) => {
