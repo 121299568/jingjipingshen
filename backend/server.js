@@ -667,17 +667,24 @@ app.get('/api/stats/detailed', auth(), (req, res) => {
     files_count: files.filter(f => projects.some(p => p.id === f.project_id && p.session_id === s.id)).length
   }));
   
-  // 2. 事业部统计
+  // 2. 事业部统计（含资料完整度，按完整度从高到低排名）
+  const requiredCategories = ['estimation', 'feasibility', 'bid', 'contract'];
   const deptMap = {};
   projects.forEach(p => {
     const dept = p.biz_department || '未分类';
-    if (!deptMap[dept]) deptMap[dept] = { count: 0, total_amount: 0 };
+    if (!deptMap[dept]) deptMap[dept] = { count: 0, total_amount: 0, complete_count: 0 };
     deptMap[dept].count++;
     deptMap[dept].total_amount += Number(p.contract_amount) || 0;
+    // 判断该项目资料是否齐全：核心4类文件都有
+    const projFiles = files.filter(f => f.project_id === p.id);
+    const hasAll = requiredCategories.every(cat => projFiles.some(f => f.file_category === cat));
+    if (hasAll) deptMap[dept].complete_count++;
   });
   const deptStats = Object.entries(deptMap).map(([name, data]) => ({
-    name, ...data, avg_amount: data.count > 0 ? data.total_amount / data.count : 0
-  })).sort((a, b) => b.total_amount - a.total_amount);
+    name, ...data,
+    avg_amount: data.count > 0 ? data.total_amount / data.count : 0,
+    completeness: data.count > 0 ? (data.complete_count / data.count) : 0
+  })).sort((a, b) => b.completeness - a.completeness || b.total_amount - a.total_amount);
   
   // 3. 资料上传统计
   const categories = ['estimation', 'feasibility', 'bid', 'award', 'contract', 'profit', 'subcontract'];

@@ -39,7 +39,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .batch-drawer.open .batch-body{display:block}
 .batch-empty{padding:20px;text-align:center;color:#9ca3af;font-size:13px}
 .batch-count{background:#fff;border:1px solid #d1d5db;color:#4b5563;padding:2px 8px;border-radius:12px;font-size:11px}
-.card-body canvas{max-height:200px !important;width:100% !important}
+.card-body canvas{max-height:100px !important;width:100% !important}
 .drop-zone{border:2px dashed #cbd5e1;border-radius:12px;padding:30px;text-align:center;transition:all .2s;cursor:pointer;background:#f8fafc}
 .drop-zone:hover{border-color:#667eea;background:#eef2ff}
 .drop-zone.dragover{border-color:#667eea;background:#e0e7ff;transform:scale(1.01)}
@@ -245,12 +245,12 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         <div class="col-md-3"><div class="card bg-warning text-white h-100"><div class="card-body text-center"><h2 class="display-4" id="statTotalSessions">0</h2><p class="mb-0">评审批次</p></div></div></div>
       </div>
       <div class="row g-3 mb-4">
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-pie-chart"></i> 事业部分布</h6></div><div class="card-body"><canvas id="deptChart" height="150"></canvas></div></div></div>
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-bar-chart"></i> 月度趋势</h6></div><div class="card-body"><canvas id="monthlyChart" height="150"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-pie-chart"></i> 事业部分布</h6></div><div class="card-body"><canvas id="deptChart" height="80"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-bar-chart"></i> 月度趋势</h6></div><div class="card-body"><canvas id="monthlyChart" height="80"></canvas></div></div></div>
       </div>
       <div class="row g-3 mb-4">
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-file-earmark"></i> 资料上传情况</h6></div><div class="card-body"><canvas id="fileChart" height="150"></canvas></div></div></div>
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-calendar3"></i> 批次完成进度</h6></div><div class="card-body"><canvas id="sessionChart" height="150"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-file-earmark"></i> 资料上传情况</h6></div><div class="card-body"><canvas id="fileChart" height="80"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-calendar3"></i> 批次完成进度</h6></div><div class="card-body"><canvas id="sessionChart" height="80"></canvas></div></div></div>
       </div>
       <div class="row g-3">
         <div class="col-12"><div class="card card-custom">
@@ -261,7 +261,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
           <div class="card-body p-0">
             <div class="table-responsive">
               <table class="table table-hover mb-0" id="deptStatsTable">
-                <thead class="table-light"><tr><th>序号</th><th>事业部</th><th>项目数</th><th>合同金额(元)</th><th>平均金额(元)</th><th>占比</th></tr></thead>
+                <thead class="table-light"><tr><th>排名</th><th>事业部</th><th>项目数</th><th>资料齐全</th><th>资料完整度</th><th>合同金额(元)</th><th>平均金额(元)</th><th>占比</th></tr></thead>
                 <tbody id="deptStatsBody"></tbody>
               </table>
             </div>
@@ -914,28 +914,32 @@ function renderStatsOverview(data){
 function renderDeptChart(depts){
   const ctx=document.getElementById('deptChart');if(!ctx)return;
   if(deptChartInstance)deptChartInstance.destroy();
-  deptChartInstance=new Chart(ctx,{type:'doughnut',data:{labels:depts.map(d=>d.name),datasets:[{data:depts.map(d=>d.total_amount),backgroundColor:['#667eea','#764ba2','#f093fb','#f5576c','#4fac00','#00f2fe']}]},options:{responsive:true,plugins:{legend:{position:'right'},tooltip:{callbacks:{label:c=>' ¥'+c.parsed.toLocaleString()}}}}});
+  deptChartInstance=new Chart(ctx,{type:'doughnut',data:{labels:depts.map(d=>d.name),datasets:[{data:depts.map(d=>d.total_amount),backgroundColor:['#667eea','#764ba2','#f093fb','#f5576c','#4fac00','#00f2fe']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,padding:5}},tooltip:{callbacks:{label:c=>' ¥'+c.parsed.toLocaleString()}}}}});
 }
 function renderMonthlyChart(trend){
   const ctx=document.getElementById('monthlyChart');if(!ctx)return;
   if(monthlyChartInstance)monthlyChartInstance.destroy();
-  monthlyChartInstance=new Chart(ctx,{type:'line',data:{labels:trend.map(t=>t.month),datasets:[{label:'项目数量',data:trend.map(t=>t.projects),borderColor:'#667eea',backgroundColor:'rgba(102,126,234,0.1)',fill:true,tension:0.4},{label:'合同金额(万)',data:trend.map(t=>(t.total_amount/10000).toFixed(1)),borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.1)',fill:true,tension:0.4,yAxisID:'y1'}]},options:{responsive:true,interaction:{intersect:false},scales:{y:{beginAtZero:true},y1:{position:'right',beginAtZero:true}}}});
+  monthlyChartInstance=new Chart(ctx,{type:'line',data:{labels:trend.map(t=>t.month),datasets:[{label:'项目数量',data:trend.map(t=>t.projects),borderColor:'#667eea',backgroundColor:'rgba(102,126,234,0.1)',fill:true,tension:0.4},{label:'合同金额(万)',data:trend.map(t=>(t.total_amount/10000).toFixed(1)),borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.1)',fill:true,tension:0.4,yAxisID:'y1'}]},options:{responsive:true,maintainAspectRatio:false,interaction:{intersect:false},plugins:{legend:{labels:{boxWidth:10,padding:5}}},scales:{y:{beginAtZero:true},y1:{position:'right',beginAtZero:true}}}});
 }
 function renderFileChart(cats){
   const ctx=document.getElementById('fileChart');if(!ctx)return;
   if(fileChartInstance)fileChartInstance.destroy();
   const labels={estimation:'估算表',feasibility:'可研报告',bid:'招标文件',award:'中标文件',contract:'合同',profit:'利润评审',subcontract:'分包申请',tech_spec:'技术规范书'};
-  fileChartInstance=new Chart(ctx,{type:'bar',data:{labels:Object.keys(cats).map(k=>labels[k]||k),datasets:[{label:'上传数量',data:Object.values(cats).map(c=>c.count),backgroundColor:'#667eea'},{label:'覆盖项目数',data:Object.values(cats).map(c=>c.projects_with_file),backgroundColor:'#10b981'}]},options:{responsive:true,plugins:{legend:{position:'top'}}}});
+  fileChartInstance=new Chart(ctx,{type:'bar',data:{labels:Object.keys(cats).map(k=>labels[k]||k),datasets:[{label:'上传数量',data:Object.values(cats).map(c=>c.count),backgroundColor:'#667eea'},{label:'覆盖项目数',data:Object.values(cats).map(c=>c.projects_with_file),backgroundColor:'#10b981'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{boxWidth:10,padding:5}}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
 }
 function renderSessionChart(sessions){
   const ctx=document.getElementById('sessionChart');if(!ctx)return;
   if(sessionChartInstance)sessionChartInstance.destroy();
-  sessionChartInstance=new Chart(ctx,{type:'bar',data:{labels:sessions.map(s=>s.name||s.session_name||'批次'+s.id),datasets:[{label:'总项目数',data:sessions.map(s=>s.project_count),backgroundColor:'#667eea'},{label:'已完成',data:sessions.map(s=>s.completed_projects),backgroundColor:'#10b981'}]},options:{responsive:true,plugins:{legend:{position:'top'}},scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}}}});
+  sessionChartInstance=new Chart(ctx,{type:'bar',data:{labels:sessions.map(s=>s.name||s.session_name||'批次'+s.id),datasets:[{label:'总项目数',data:sessions.map(s=>s.project_count),backgroundColor:'#667eea'},{label:'已完成',data:sessions.map(s=>s.completed_projects),backgroundColor:'#10b981'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{boxWidth:10,padding:5}}},scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}}});
 }
 function renderDeptTable(depts){
   const tbody=document.getElementById('deptStatsBody');if(!tbody)return;
   const totalAmount=depts.reduce((s,d)=>s+d.total_amount,0);
-  tbody.innerHTML=depts.map((d,i)=>'<tr><td>'+(i+1)+'</td><td>'+d.name+'</td><td>'+d.count+'</td><td>'+d.total_amount.toLocaleString()+'</td><td>'+d.avg_amount.toLocaleString()+'</td><td>'+(totalAmount>0?((d.total_amount/totalAmount)*100).toFixed(1):0)+'%</td></tr>').join('')||'<tr><td colspan="6" class="text-muted text-center">暂无数据</td></tr>';
+  tbody.innerHTML=depts.map((d,i)=>{
+    const pct=(d.completeness*100).toFixed(1);
+    const pctColor=d.completeness>=0.8?'text-success':d.completeness>=0.5?'text-warning':'text-danger';
+    return '<tr><td>'+(i+1)+'</td><td>'+d.name+'</td><td>'+d.count+'</td><td>'+(d.complete_count||0)+'</td><td class="'+pctColor+' fw-bold">'+pct+'%</td><td>'+d.total_amount.toLocaleString()+'</td><td>'+d.avg_amount.toLocaleString()+'</td><td>'+(totalAmount>0?((d.total_amount/totalAmount)*100).toFixed(1):0)+'%</td></tr>';
+  }).join('')||'<tr><td colspan="8" class="text-muted text-center">暂无数据</td></tr>';
 }
 function populateDeptSelect(depts){
   const select=document.getElementById('statsDepartment');if(!select)return;
