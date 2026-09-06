@@ -659,6 +659,22 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
   const newPath = path.join(UPLOAD_DIR, newFilename);
   if (fs.existsSync(oldPath)) fs.renameSync(oldPath, newPath);
 
+  // 任何 .xlsx 都先尝试解析成本估算表；即使文件名不含「成本/估算」字样，
+  // 只要真抽出了工作项/成本数据，就自动当成估算表处理（避免按文件名误判为「其他资料」而漏解析）
+  const isExcel = /\.(xlsx|xls)$/i.test(realOriginalName);
+  let parsed = null;
+  if (isExcel) {
+    try {
+      const { parseProjectExcel } = require('./parse-excel');
+      parsed = parseProjectExcel(newPath);
+    } catch (ex) {
+      parsed = { __parseError: ex && ex.message };
+    }
+  }
+  const looksLikeEstimation = autoCategory === 'estimation'
+    || (parsed && !parsed.__parseError && (parsed.work_items.length > 0 || Object.keys(parsed.cost_summary || {}).length > 0));
+  const finalCategory = looksLikeEstimation ? 'estimation' : autoCategory;
+
   const file = {
     id: db.nextId(db.store.files),
     project_id: projectId,
@@ -666,7 +682,7 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     originalname: realOriginalName,
     file_seq: seq,
     file_type: ext.slice(1),
-    file_category: autoCategory,
+    file_category: finalCategory,
     auto_detected: !clientCategory || clientCategory === 'auto',
     uploader_id: req.user.id,
     uploader_name: req.user.real_name || req.user.username,
@@ -676,10 +692,8 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
   };
   db.store.files.push(file);
   // 若上传的是成本估算表（xlsx），自动抽取工作明细与成本项，供工作量评估页使用
-  if (autoCategory === 'estimation' && /\.(xlsx|xls)$/i.test(realOriginalName)) {
+  if (finalCategory === 'estimation' && parsed && !parsed.__parseError) {
     try {
-      const { parseProjectExcel } = require('./parse-excel');
-      const parsed = parseProjectExcel(newPath);
       // 先清掉该项目已有的明细，避免重复累加
       db.store.workItems = db.store.workItems.filter(w => w.project_id !== projectId);
       db.store.procurementItems = db.store.procurementItems.filter(x => x.project_id !== projectId);
@@ -709,6 +723,9 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
       console.error('估算表解析失败:', ex && ex.message);
       file.parse_error = ex && ex.message;
     }
+  } else if (parsed && parsed.__parseError) {
+    console.error('估算表解析失败:', parsed.__parseError);
+    file.parse_error = parsed.__parseError;
   }
   project.updated_at = new Date().toISOString();
   db.save();

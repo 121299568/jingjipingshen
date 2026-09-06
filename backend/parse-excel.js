@@ -66,6 +66,10 @@ const SHEET_RULES = [
   { key: '华兆职工成本估算', kws: ['华兆职工', '华兆'] },
   { key: '人员外包成本估算', kws: ['人员外包', '外包'] },
   { key: '专业分包成本估算', kws: ['专业分包', '分包'] },
+  { key: '开发工作量成本估算', kws: ['开发工作量', '开发'] },
+  { key: '实施工作量成本估算', kws: ['实施工作量', '实施'] },
+  { key: '运维工作量成本估算', kws: ['运维工作量', '运维'] },
+  { key: '咨询工作量成本估算', kws: ['咨询工作量', '咨询'] },
   { key: '采购成本估算', kws: ['采购'] },
   { key: '差旅费估算', kws: ['差旅'] }
 ];
@@ -223,6 +227,69 @@ function parseProjectExcel(filePath) {
         expert_days: expertDays,
         expert_days_avg: avg,
         adjusted_cost: adjusted !== null ? adjusted : cost,
+        source_sheet: key,
+        row: r + 1
+      });
+    }
+  }
+
+  // ===== 3.5 通用工作量成本估算（开发 / 实施 / 运维 / 咨询 等表头不统一的表）=====
+  // 这些表的「工作项」列名各异（最小功能名称 / 实施工作项 / 涉及到的子任务 / 工作任务…），
+  // 不要求固定列位，按列名动态定位工作项列与工作量列，凡是含「工作量/人天」的表都尝试抽取。
+  const genericWorkSheets = [
+    { key: '开发工作量成本估算', category: 'dev' },
+    { key: '实施工作量成本估算', category: 'impl' },
+    { key: '运维工作量成本估算', category: 'ops' },
+    { key: '咨询工作量成本估算', category: 'consult' }
+  ];
+  const ITEM_COL_CANDIDATES = ['工作项', '最小功能名称', '实施工作项', '涉及到的子任务', '工作任务简述', '任务环节', '工作任务'];
+  const TASK_COL_CANDIDATES = ['一级菜单', '模块', '咨询设计任务', '实施工作任务', '工作任务'];
+  const DESC_COL_CANDIDATES = ['工作说明', '工作任务描述', '工作任务简述', '涉及到的子任务'];
+  for (const { key, category } of genericWorkSheets) {
+    const ws = sheets[key];
+    if (!ws) continue;
+    const fill = expandGrid(ws, true).grid;
+    const raw = expandGrid(ws, false).grid;
+    const lastRow = XLSX.utils.decode_range(ws['!ref']).e.r;
+    // 表头行：首个含「工作量/人天」的行
+    let hr = -1;
+    for (let r = 0; r <= Math.min(lastRow, 14); r++) {
+      const rowStr = (fill[r] || []).map(c => str(c)).join('|');
+      if (/工作量估算|工作量（人天）|工作量（人天|人天|工作量$/.test(rowStr)) { hr = r; break; }
+    }
+    if (hr < 0) continue;
+    const header = (fill[hr] || []).map(c => str(c));
+    const findCol = (cands) => {
+      for (const cand of cands) {
+        const idx = header.findIndex(h => h && h.includes(cand));
+        if (idx >= 0) return idx;
+      }
+      return -1;
+    };
+    const itemCol = findCol(ITEM_COL_CANDIDATES);
+    if (itemCol < 0) continue;            // 认不出工作项列则不抽，避免误抽
+    const taskCol = (() => { const i = findCol(TASK_COL_CANDIDATES); return i >= 0 && i !== itemCol ? i : -1; })();
+    const descCol = (() => { const i = findCol(DESC_COL_CANDIDATES); return i >= 0 && i !== itemCol ? i : -1; })();
+    const workloadCol = header.findIndex(h => h && /工作量估算|工作量（人天）|人天|工作量$/.test(h));
+    let task = '';
+    for (let r = hr + 1; r <= lastRow; r++) {
+      const aVal = str(gv(fill, r, 0));
+      if (aVal.includes('合计') || aVal.includes('说明')) continue;
+      const item = str(gv(fill, r, itemCol));
+      if (!item || item === header[itemCol]) continue;   // 空行 / 表头重复
+      if (taskCol >= 0) { const tv = str(gv(fill, r, taskCol)); if (tv && tv !== header[taskCol]) task = tv; }
+      const days = workloadCol >= 0 ? num(gv(raw, r, workloadCol)) : null;
+      const desc = descCol >= 0 ? str(gv(raw, r, descCol)) : '';
+      if (days === null && !desc) {
+        // 没有工作量也没有说明的行，多半是占位空行，跳过
+        if (!item) continue;
+      }
+      result.work_items.push({
+        category,
+        work_task: task,
+        work_item: item,
+        description: desc,
+        person_days: days,
         source_sheet: key,
         row: r + 1
       });
