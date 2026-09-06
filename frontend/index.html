@@ -566,7 +566,7 @@ async function renderDashboard(){
     document.getElementById('s-projects').textContent=s.total_projects||0;
     const missingEst=projects.filter(p=>!files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
     document.getElementById('s-missing').textContent=missingEst;
-    document.getElementById('s-missing').className='stat-num '+(missingEst>0?'text-danger':'text-success');
+    document.getElementById('s-missing').className='stat-num';
     document.getElementById('s-pending').textContent=s.pending_tasks?.length||0;
     document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>{
       const t=a.at?new Date(a.at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
