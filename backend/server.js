@@ -399,6 +399,9 @@ app.post('/api/projects', auth(['admin', 'rd', 'biz']), (req, res) => {
     creator_id: req.user.id,
     ...pick(req.body, PROJECT_FIELDS)
   };
+  // 前端表单 select 传的是字符串，转成数值避免后续 session_id === s.id 严格相等失败
+  if (p.session_id !== undefined) p.session_id = p.session_id ? parseInt(p.session_id) || null : null;
+  if (p.contract_amount !== undefined) p.contract_amount = Number(p.contract_amount) || 0;
   if (!p.project_name) return res.status(400).json({ error: '项目名称不能为空' });
   db.store.projects.push(p);
   db.save();
@@ -414,6 +417,8 @@ app.patch('/api/projects/:id', auth(['admin', 'rd', 'biz']), (req, res) => {
     return res.status(403).json({ error: '无权修改该项目' });
   }
   const body = pick(req.body, PROJECT_FIELDS);
+  if (body.session_id !== undefined) body.session_id = body.session_id ? parseInt(body.session_id) || null : null;
+  if (body.contract_amount !== undefined) body.contract_amount = Number(body.contract_amount) || 0;
   if (body.biz_department !== undefined) p.biz_department = body.biz_department;
   Object.keys(body).forEach(k => { if (k !== 'biz_department') p[k] = body[k]; });
   p.updated_at = new Date().toISOString();
