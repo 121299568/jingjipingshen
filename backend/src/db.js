@@ -91,6 +91,7 @@ function migrate(s) {
 
 let store = null;
 let isMemory = false; // 虚拟数据模式：数据只活在内存，不落盘
+let mysqlAdapter = null; // mysql 驱动适配器（懒加载，仅在 DB_DRIVER=mysql 时 require）
 
 function ensureDirs() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -111,7 +112,23 @@ function load() {
     migrate(store);
     isMemory = true;
     console.log('[db] 已加载内存虚拟数据集（DB_DRIVER=memory），不落盘，仅用于测试');
-    return;
+    return Promise.resolve();
+  }
+  // MySQL 模式：启动时从数据库整表载入内存；save() 异步刷回。load 为异步，server.js 需 await 后再 listen
+  if (config.dbDriver === 'mysql') {
+    mysqlAdapter = require('./db.mysql');
+    return Promise.resolve()
+      .then(() => mysqlAdapter.load())
+      .then(s => {
+        store = s;
+        migrate(store);
+        console.log('[db] 已从 MySQL 载入数据（DB_DRIVER=mysql）');
+        return;
+      })
+      .catch(err => {
+        console.error('[db] MySQL 载入失败:', err && err.message);
+        throw err; // 交由 server.js 启动逻辑决定退出
+      });
   }
   ensureDirs();
   if (!fs.existsSync(STORE_FILE)) {
@@ -142,6 +159,7 @@ function load() {
   }
   // 启动后落盘一次，确保明文密码已完成迁移
   persist(store);
+  return Promise.resolve();
 }
 
 function persist(s) {
@@ -171,6 +189,12 @@ function persist(s) {
 function save() {
   // 虚拟数据模式不落盘（数据只在内存，重启复原）
   if (isMemory) return;
+  // MySQL 模式：异步刷回数据库；串行化与错误吞掉都在适配器内处理，这里只 fire-and-forget，
+  // 避免阻塞请求；若真写库失败，适配器会 console.error 报警，不崩进程。
+  if (config.dbDriver === 'mysql' && mysqlAdapter) {
+    mysqlAdapter.save(store).catch(e => console.error('[db.mysql] 保存失败:', e && e.message));
+    return;
+  }
   // 单进程下同步写入即可保证原子性；多实例部署请切换 DB_DRIVER=mysql
   persist(store);
 }

@@ -24,7 +24,11 @@ const UPLOAD_DIR = config.uploadDir;
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-db.load();
+// 数据载入（json/memory 同步完成，mysql 异步从库载入）。载入成功后再启动 HTTP 监听。
+db.load().then(startServer).catch(err => {
+  console.error('[启动失败] 数据加载出错，服务未启动:', err && err.message);
+  process.exit(1);
+});
 
 // ==================== 中间件 ====================
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
@@ -898,4 +902,6 @@ app.get('*', (req, res) => {
   else res.status(404).json({ error: 'Not found' });
 });
 
-app.listen(PORT, () => console.log(`✅ 经济评审后端 v4 已启动 (端口 ${PORT}, 驱动 ${config.dbDriver})`));
+function startServer() {
+  app.listen(PORT, () => console.log(`✅ 经济评审后端 v4 已启动 (端口 ${PORT}, 驱动 ${config.dbDriver})`));
+}

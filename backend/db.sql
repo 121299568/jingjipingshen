@@ -1,207 +1,182 @@
--- 经济评审管理系统数据库设计 v3（含权限+文件表）
+-- 经济评审管理系统 —— MySQL 表结构
+-- 字符集 utf8mb4；引擎 InnoDB。
+-- 时间戳字段统一用 VARCHAR(32) 存 ISO 字符串，避免时区/格式转换坑，应用侧自行解析。
+-- 布尔用 TINYINT(1)（0/1）。金额/数量用 DOUBLE，ID 用 INT。
+-- 每张表额外有一个 extra JSON 列，用于承载应用层写入的“未预定义字段”，绝不静默丢失数据。
+-- 注意：db.mysql.js 的 ensureSchema() 会在服务启动时自动按本结构建表（CREATE TABLE IF NOT EXISTS），
+--       因此生产部署通常无需手动执行本文件；本文件仅作参考与离线初始化之用。
 
--- 用户表（新增business_dept字段，角色枚举按权限文档扩展）
-CREATE TABLE users (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    real_name VARCHAR(50),
-    email VARCHAR(100),
-    phone VARCHAR(20),
-    role ENUM('admin', 'biz', 'rd', 'expert', 'accountant') NOT NULL DEFAULT 'expert',
-    department VARCHAR(100),
-    business_dept VARCHAR(50),  -- 事业部归属：电网/系统集成/电力气象/人工智能/管理/能源
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
-);
+SET NAMES utf8mb4;
 
--- 评审批次表
-CREATE TABLE review_sessions (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    session_name VARCHAR(200) NOT NULL,
-    session_code VARCHAR(50) UNIQUE,
-    status ENUM('pending', 'in_progress', 'completed', 'cancelled') DEFAULT 'pending',
-    review_time DATETIME,
-    start_time DATETIME,
-    end_time DATETIME,
-    creator_id INT,
-    note TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (creator_id) REFERENCES users(id)
-);
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `username` VARCHAR(64) NOT NULL,
+  `password` VARCHAR(255) NOT NULL,
+  `real_name` VARCHAR(64) NOT NULL DEFAULT '',
+  `role` VARCHAR(32) NOT NULL DEFAULT 'rd',
+  `department` VARCHAR(64) NOT NULL DEFAULT '',
+  `business_dept` VARCHAR(64) DEFAULT NULL,
+  `created_at` VARCHAR(32) DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 项目主表（新增business_dept）
-CREATE TABLE projects (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    project_name VARCHAR(300) NOT NULL,
-    project_code VARCHAR(50),
-    biz_department VARCHAR(100),
-    business_dept VARCHAR(50),       -- 事业部：电网事业部/系统集成事业部等
-    rd_department VARCHAR(100),
-    project_type VARCHAR(50),
-    business_direction VARCHAR(100),
-    business_sub_direction VARCHAR(100),
-    product_direction VARCHAR(100),
-    contract_amount DECIMAL(12,2),
-    source_file VARCHAR(255),
-    cost_summary JSON,
-    submission_date DATE,
-    status ENUM('draft', 'submitted', 'pre_review', 'reviewing', 'completed', 'rejected') DEFAULT 'draft',
-    reviewer_id INT,
-    session_id INT,
-    note TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (reviewer_id) REFERENCES users(id),
-    FOREIGN KEY (session_id) REFERENCES review_sessions(id)
-);
+CREATE TABLE IF NOT EXISTS `reviewSessions` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(128) NOT NULL DEFAULT '',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'pending',
+  `review_time` VARCHAR(64) DEFAULT NULL,
+  `creator_id` INT DEFAULT NULL,
+  `note` VARCHAR(255) DEFAULT NULL,
+  `created_at` VARCHAR(32) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 工作明细表
-CREATE TABLE work_items (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    project_id INT NOT NULL,
-    category ENUM('long_term', 'zhongshi', 'huazhao', 'outsourcing', 'subcontract'),
-    work_task VARCHAR(200),
-    work_item VARCHAR(200),
-    description TEXT,
-    person_days DECIMAL(10,2),
-    person VARCHAR(50),
-    cost DECIMAL(12,2),
-    expert_days JSON,
-    expert_days_avg DECIMAL(10,2),
-    adjusted_cost DECIMAL(12,2),
-    source_sheet VARCHAR(100),
-    row_idx INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
+CREATE TABLE IF NOT EXISTS `projects` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_name` VARCHAR(255) NOT NULL DEFAULT '',
+  `project_code` VARCHAR(64) DEFAULT NULL,
+  `project_type` VARCHAR(64) DEFAULT NULL,
+  `business_direction` VARCHAR(64) DEFAULT NULL,
+  `product_direction` VARCHAR(64) DEFAULT NULL,
+  `is_digital` TINYINT(1) NOT NULL DEFAULT 0,
+  `business_sub_direction` VARCHAR(64) DEFAULT NULL,
+  `contract_amount` DOUBLE NOT NULL DEFAULT 0,
+  `biz_department` VARCHAR(64) DEFAULT NULL,
+  `session_id` INT DEFAULT NULL,
+  `description` TEXT,
+  `contract_party` VARCHAR(255) DEFAULT NULL,
+  `remark` TEXT,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'draft',
+  `created_at` VARCHAR(32) DEFAULT NULL,
+  `creator_id` INT DEFAULT NULL,
+  `updated_at` VARCHAR(32) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_biz_department` (`biz_department`),
+  KEY `idx_session_id` (`session_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 采购明细表
-CREATE TABLE procurement_items (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    project_id INT NOT NULL,
-    type ENUM('software', 'hardware'),
-    name VARCHAR(200),
-    spec TEXT,
-    unit VARCHAR(20),
-    quantity DECIMAL(12,2),
-    unit_price DECIMAL(12,2),
-    subtotal DECIMAL(12,2),
-    remark VARCHAR(500),
-    source_sheet VARCHAR(100),
-    row_idx INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
+CREATE TABLE IF NOT EXISTS `workItems` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT DEFAULT NULL,
+  `work_task` VARCHAR(128) DEFAULT NULL,
+  `work_item` VARCHAR(255) DEFAULT NULL,
+  `category` VARCHAR(32) DEFAULT NULL,
+  `cost` DOUBLE NOT NULL DEFAULT 0,
+  `person_days` DOUBLE NOT NULL DEFAULT 0,
+  `unit_price` DOUBLE NOT NULL DEFAULT 0,
+  `quantity` DOUBLE NOT NULL DEFAULT 0,
+  `remark` VARCHAR(255) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_project_id` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 差旅明细表
-CREATE TABLE travel_items (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    project_id INT NOT NULL,
-    purpose VARCHAR(200),
-    destination VARCHAR(200),
-    days DECIMAL(5,2),
-    hotel DECIMAL(10,2),
-    per_diem DECIMAL(10,2),
-    transport DECIMAL(10,2),
-    source_sheet VARCHAR(100),
-    row_idx INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
+CREATE TABLE IF NOT EXISTS `procurementItems` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT DEFAULT NULL,
+  `item_name` VARCHAR(255) DEFAULT NULL,
+  `spec` VARCHAR(128) DEFAULT NULL,
+  `amount` DOUBLE NOT NULL DEFAULT 0,
+  `supplier` VARCHAR(128) DEFAULT NULL,
+  `remark` VARCHAR(255) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_project_id` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 项目评审资料附件表（核心新增）
-CREATE TABLE project_files (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    project_id INT NOT NULL,
-    file_name VARCHAR(255) NOT NULL,
-    file_path VARCHAR(500) NOT NULL,
-    file_type VARCHAR(50),         -- pdf/docx/xls/jpg/png等
-    file_category VARCHAR(50),      -- feasibility/bid/award/contract/profit/subcontract
-    uploader_id INT,
-    upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    description VARCHAR(500),
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (uploader_id) REFERENCES users(id)
-);
+CREATE TABLE IF NOT EXISTS `travelItems` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT DEFAULT NULL,
+  `purpose` VARCHAR(128) DEFAULT NULL,
+  `person` VARCHAR(64) DEFAULT NULL,
+  `days` DOUBLE NOT NULL DEFAULT 0,
+  `amount` DOUBLE NOT NULL DEFAULT 0,
+  `remark` VARCHAR(255) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_project_id` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 专家评审打分表
-CREATE TABLE expert_scores (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    session_id INT NOT NULL,
-    project_id INT NOT NULL,
-    expert_id INT NOT NULL,
-    workload_score DECIMAL(5,2),
-    quality_score DECIMAL(5,2),
-    difficulty_score DECIMAL(5,2),
-    innovation_score DECIMAL(5,2),
-    total_score DECIMAL(5,2),
-    comment TEXT,
-    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES review_sessions(id),
-    FOREIGN KEY (project_id) REFERENCES projects(id),
-    FOREIGN KEY (expert_id) REFERENCES users(id)
-);
+CREATE TABLE IF NOT EXISTS `expertEstimates` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT DEFAULT NULL,
+  `work_item_id` INT DEFAULT NULL,
+  `expert_id` INT DEFAULT NULL,
+  `expert_name` VARCHAR(64) DEFAULT NULL,
+  `days` DOUBLE NOT NULL DEFAULT 0,
+  `comment` VARCHAR(255) DEFAULT NULL,
+  `created_at` VARCHAR(32) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_project_id` (`project_id`),
+  KEY `idx_expert_id` (`expert_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 批注表
-CREATE TABLE review_comments (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    session_id INT NOT NULL,
-    project_id INT NOT NULL,
-    expert_id INT NOT NULL,
-    content TEXT NOT NULL,
-    comment_type ENUM('text', 'highlight', 'stamping', 'annotation') DEFAULT 'text',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES review_sessions(id),
-    FOREIGN KEY (project_id) REFERENCES projects(id),
-    FOREIGN KEY (expert_id) REFERENCES users(id)
-);
+CREATE TABLE IF NOT EXISTS `confirmations` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT DEFAULT NULL,
+  `work_item_id` INT DEFAULT NULL,
+  `expert_id` INT DEFAULT NULL,
+  `expert_name` VARCHAR(64) DEFAULT NULL,
+  `confirmed` TINYINT(1) NOT NULL DEFAULT 0,
+  `comment` VARCHAR(255) DEFAULT NULL,
+  `created_at` VARCHAR(32) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_project_id` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 工作流日志表（全链路操作审计）
-CREATE TABLE workflow_logs (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    project_id INT NOT NULL,
-    session_id INT,
-    operator_id INT NOT NULL,
-    operator_role VARCHAR(50),
-    action VARCHAR(100) NOT NULL,
-    from_status VARCHAR(50),
-    to_status VARCHAR(50),
-    remark TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id),
-    FOREIGN KEY (operator_id) REFERENCES users(id)
-);
+CREATE TABLE IF NOT EXISTS `files` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT DEFAULT NULL,
+  `filename` VARCHAR(255) DEFAULT NULL,
+  `originalname` VARCHAR(255) DEFAULT NULL,
+  `file_seq` INT DEFAULT NULL,
+  `file_type` VARCHAR(16) DEFAULT NULL,
+  `file_category` VARCHAR(32) DEFAULT NULL,
+  `auto_detected` TINYINT(1) NOT NULL DEFAULT 0,
+  `uploader_id` INT DEFAULT NULL,
+  `uploader_name` VARCHAR(64) DEFAULT NULL,
+  `description` VARCHAR(255) DEFAULT NULL,
+  `upload_time` VARCHAR(32) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_project_id` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 系统配置表
-CREATE TABLE system_config (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    config_key VARCHAR(100) UNIQUE NOT NULL,
-    config_value TEXT,
-    description VARCHAR(255),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+CREATE TABLE IF NOT EXISTS `workflowLogs` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT DEFAULT NULL,
+  `operator_id` INT DEFAULT NULL,
+  `operator_role` VARCHAR(32) DEFAULT NULL,
+  `operator_name` VARCHAR(64) DEFAULT NULL,
+  `action` VARCHAR(64) DEFAULT NULL,
+  `remark` VARCHAR(255) DEFAULT NULL,
+  `created_at` VARCHAR(32) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_project_id` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ==================== 初始化数据 ====================
+CREATE TABLE IF NOT EXISTS `userGroups` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(128) NOT NULL DEFAULT '',
+  `description` VARCHAR(255) DEFAULT NULL,
+  `created_at` VARCHAR(32) DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO users (username, password, real_name, role, department, business_dept) VALUES
-('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '系统管理员', 'admin', 'IT部', NULL),
-('biz_gdw', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '电网事业部经办人', 'biz', '电网事业部', '电网事业部'),
-('biz_xt', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '系统集成事业部经办人', 'biz', '系统集成事业部', '系统集成事业部'),
-('rd_staff', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '研发中心员工', 'rd', '研发中心', NULL),
-('expert01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '评审专家A', 'expert', '评审专家库', NULL),
-('expert02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '评审专家B', 'expert', '评审专家库', NULL),
-('cpa01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '会计师事务所专家甲', 'accountant', '外部会计师事务所', NULL);
-
-INSERT INTO review_sessions (session_name, session_code, status, review_time, creator_id) VALUES
-('2026年度Q3经济评审', '2026-Q3', 'in_progress', '2026-09-15 09:00:00', 1);
-
-INSERT INTO system_config (config_key, config_value, description) VALUES
-('review_score_weight_workload', '0.4', '工作量权重'),
-('review_score_weight_quality', '0.3', '质量权重'),
-('review_score_weight_difficulty', '0.2', '难度权重'),
-('review_score_weight_innovation', '0.1', '创新权重'),
-('allowed_file_extensions', 'pdf,docx,xlsx,xls,jpg,png', '允许上传的文件类型'),
-('max_upload_size_mb', '50', '单个文件大小限制(MB)');
+CREATE TABLE IF NOT EXISTS `userPermissions` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `user_id` INT NOT NULL DEFAULT 0,
+  `permissions` JSON DEFAULT NULL,
+  `extra` JSON DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
