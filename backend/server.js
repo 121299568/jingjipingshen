@@ -158,12 +158,11 @@ function enrichProject(p) {
 
 // ==================== 审批流辅助 ====================
 // 项目状态流转允许的方向：
-// draft(草稿) → submitted(已提交申请) → reviewing(评审中) → pending_confirm(待确认) → completed(已完成)
-// rejected 为退回分支，退回后事业部可补充材料重新提交
+// draft(草稿) → reviewing(评审中) → pending_confirm(待确认) → completed(已完成)
+// rejected 为退回分支，退回后可重新预审
 const PROJECT_STATUS_FLOW = {
-  draft: ['submitted', 'rejected'],
-  submitted: ['reviewing', 'rejected'],
-  rejected: ['submitted', 'draft'],
+  draft: ['reviewing', 'rejected'],
+  rejected: ['reviewing', 'draft'],
   reviewing: ['pending_confirm', 'rejected'],
   pending_confirm: ['completed', 'reviewing'],
   completed: []
@@ -750,7 +749,7 @@ app.get('/api/projects/:id/estimates', auth(), (req, res) => {
   res.json(Object.entries(summary).map(([workItemId, d]) => ({
     work_item_id: parseInt(workItemId),
     avg_days: d.count > 0 ? Math.round(d.total / d.count * 10) / 10 : 0,
-    submitted_count: d.count
+    estimate_count: d.count
   })));
 });
 
@@ -898,37 +897,13 @@ app.post('/api/projects/:id/assign', auth(['admin', 'rd']), (req, res) => {
 });
 
 // ==================== 评审流程节点 ====================
-// 事业部提交经济评审申请（draft/rejected → submitted）
-app.post('/api/projects/:id/submit', auth(['admin', 'rd', 'biz']), (req, res) => {
-  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
-  if (!p) return res.status(404).json({ error: '项目不存在' });
-  if (req.user.role === 'biz' && req.user.business_dept !== p.biz_department) {
-    return res.status(403).json({ error: '无权提交非本事业部的项目申请' });
-  }
-  if (!['draft', 'rejected'].includes(p.status)) {
-    return res.status(400).json({ error: '当前状态（' + p.status + '）无需提交申请' });
-  }
-  p.status = 'submitted';
-  p.applicant_id = req.user.id;
-  p.applicant_name = req.user.real_name;
-  p.applied_at = new Date().toISOString();
-  p.apply_note = (req.body.note || '').toString();
-  p.updated_at = new Date().toISOString();
-  db.save();
-  db.logWorkflow(p.id, 'submit_application', (req.user.real_name || '事业部') + '提交经济评审申请' + (p.apply_note ? '：' + p.apply_note : ''), req.user.id);
-  res.json(p);
-});
-
-// 研发中心预审：通过(submitted/rejected → reviewing) 或 退回(→ rejected)
+// 研发中心预审：通过(draft/rejected → reviewing) 或 退回(→ rejected)
+// 注：评审项目清单由管理员/研发中心通过 Excel 导入或新建项目录入，无需事业部提交申请，草稿即可预审
 app.post('/api/projects/:id/pre-review', auth(['admin', 'rd']), (req, res) => {
   const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '项目不存在' });
-  if (!['submitted', 'rejected'].includes(p.status)) {
-    return res.status(400).json({
-      error: p.status === 'draft'
-        ? '事业部尚未提交评审申请，请先由事业部提交申请后再预审'
-        : '当前状态（' + p.status + '）不可进行预审'
-    });
+  if (!['draft', 'rejected'].includes(p.status)) {
+    return res.status(400).json({ error: '当前状态（' + p.status + '）不可进行预审' });
   }
   const approve = !!req.body.approve;
   const reason = (req.body.reason || '').toString();
