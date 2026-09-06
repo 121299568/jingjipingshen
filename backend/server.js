@@ -15,6 +15,7 @@ const rateLimit = require('express-rate-limit');
 
 const config = require('./src/config');
 const db = require('./src/db');
+const workReport = require('./work-report');
 
 const app = express();
 const PORT = config.port;
@@ -503,7 +504,21 @@ app.post('/api/projects/import-excel', auth(['admin', 'rd', 'biz']), upload.sing
   }
 });
 
-// ==================== 项目文件 ====================
+// ==================== Excel 导入模板下载 ====================
+app.get('/api/template/import-xlsx', auth(['admin', 'rd', 'biz']), (req, res) => {
+  try {
+    const { buildImportTemplate } = require('./template-xlsx');
+    const buf = buildImportTemplate();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent('经济评审项目导入模板.xlsx')}`);
+    res.send(buf);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== 年终工作汇报（供统计分析页查看 / 报告生成引用）====================
+app.get('/api/work-report', auth(), (req, res) => res.json(workReport));
 app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: '请选择文件' });
   const projectId = parseInt(req.params.id);
@@ -805,7 +820,7 @@ app.post('/api/reports/generate', auth(['admin', 'rd']), async (req, res) => {
     const { type, format } = req.body;
     const stats = getDetailedStats(req.user);
     let content = '', mimeType = 'text/html';
-    if (type === 'summary') { content = generateSummaryReport(stats); mimeType = 'text/html'; }
+    if (type === 'summary') { content = generateSummaryReport(stats, !!req.body.includeWorkReport); mimeType = 'text/html'; }
     else if (type === 'department') { content = generateDepartmentReport(stats, req.body.params); mimeType = 'text/html'; }
     else if (type === 'expert') { content = generateExpertReport(stats); mimeType = 'text/html'; }
     else return res.status(400).json({ error: '未知的报告类型' });
@@ -813,11 +828,11 @@ app.post('/api/reports/generate', auth(['admin', 'rd']), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-function generateSummaryReport(stats) {
+function generateSummaryReport(stats, includeWorkReport) {
   const { projects, sessions, files } = stats;
   const totalAmt = projects.reduce((s, p) => s + Number(p.contract_amount || 0), 0);
-  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>经济评审汇总报告</title>' +
-    '<style>body{font-family:Arial,sans-serif;margin:40px;}h1{color:#333;border-bottom:2px solid #667eea;padding-bottom:10px;}table{border-collapse:collapse;width:100%;margin:20px 0;}th,td{border:1px solid #ddd;padding:12px;text-align:left;}th{background:#667eea;color:white;}.metric{display:inline-block;margin:10px 20px;padding:15px 25px;background:#f0f4ff;border-radius:8px;}.metric-value{font-size:24px;font-weight:bold;color:#667eea;}</style>' +
+  let html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>经济评审汇总报告</title>' +
+    '<style>body{font-family:Arial,sans-serif;margin:40px;}h1{color:#333;border-bottom:2px solid #667eea;padding-bottom:10px;}h2{margin-top:30px;color:#444;}h3{margin-top:20px;color:#555;}table{border-collapse:collapse;width:100%;margin:20px 0;}th,td{border:1px solid #ddd;padding:12px;text-align:left;}th{background:#667eea;color:white;}.metric{display:inline-block;margin:10px 20px;padding:15px 25px;background:#f0f4ff;border-radius:8px;}.metric-value{font-size:24px;font-weight:bold;color:#667eea;}.wr-table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px;}.wr-table th{border:1px solid #ccc;padding:6px;background:#667eea;color:#fff;}.wr-table td{border:1px solid #ccc;padding:6px;}</style>' +
     '</head><body><h1>经济评审汇总报告</h1><p>生成时间: ' + new Date().toLocaleString('zh-CN') + '</p>' +
     '<div class="metrics"><div class="metric"><div class="metric-value">' + projects.length + '</div><div>项目总数</div></div>' +
     '<div class="metric"><div class="metric-value">' + (totalAmt / 10000).toFixed(2) + '万</div><div>合同总金额</div></div>' +
@@ -825,7 +840,13 @@ function generateSummaryReport(stats) {
     '<div class="metric"><div class="metric-value">' + files.length + '</div><div>上传文件</div></div></div>' +
     '<h2>批次列表</h2><table><tr><th>ID</th><th>名称</th><th>状态</th><th>项目数</th></tr>' +
     sessions.map(s => '<tr><td>' + esc(s.id) + '</td><td>' + esc(s.name || s.session_name || '-') + '</td><td>' + esc(s.status) + '</td><td>' + projects.filter(p => p.session_id === s.id).length + '</td></tr>').join('') +
-    '</table></body></html>';
+    '</table>';
+  if (includeWorkReport) {
+    html += '<div style="margin-top:40px;border-top:2px dashed #ccc;padding-top:20px">' +
+      renderWorkReportHtml(workReport) + '</div>';
+  }
+  html += '</body></html>';
+  return html;
 }
 function generateDepartmentReport(stats, params) {
   const { projects } = stats;
@@ -851,6 +872,44 @@ function generateExpertReport(stats) {
     '<table><tr><th>专家ID</th><th>姓名</th><th>项目数</th><th>总人天</th><th>平均人天</th></tr>' +
     Object.values(expertMap).map(e => '<tr><td>-</td><td>' + esc(e.name) + '</td><td>' + e.projects.size + '</td><td>' + e.days.toFixed(2) + '</td><td>' + (e.days / e.projects.size).toFixed(2) + '</td></tr>').join('') +
     '</table></body></html>';
+}
+
+// 将年终工作汇报（文字 + 7 张表）渲染为 HTML，按原文顺序把「表N 标题」与对应表格交错插入。
+function renderWorkReportHtml(wr) {
+  if (!wr || !wr.title) return '';
+  const tablesByIndex = {};
+  (wr.tables || []).forEach(t => { if (t && t.index != null) tablesByIndex[t.index] = t; });
+  let html = '<h2>年终工作汇报（' + esc(wr.title) + '）</h2>';
+  html += '<p style="color:#666">' + esc(wr.department || '') + ' ' + esc(wr.date || '') + '</p>';
+  const cls = (wr.paragraphs || []).find(p => /商密/.test(p));
+  if (cls) html += '<p style="color:#c00;font-size:12px">密级：' + esc(cls) + '</p>';
+  html += '<hr>';
+  (wr.paragraphs || []).forEach(p => {
+    if (/商密/.test(p)) return;
+    if (p === wr.title || p === wr.department || p === wr.date) return;
+    const m = p.trim().match(/^表(\d+)/);
+    if (m) {
+      const idx = parseInt(m[1], 10);
+      html += '<h3>' + esc(p.trim()) + '</h3>';
+      if (tablesByIndex[idx]) { html += renderWorkReportTable(tablesByIndex[idx]); delete tablesByIndex[idx]; }
+    } else if (p.trim()) {
+      html += '<p style="line-height:1.8;margin:8px 0">' + esc(p) + '</p>';
+    }
+  });
+  // 兜底：未被段落引用到的表也补渲染
+  Object.keys(tablesByIndex).forEach(k => { html += '<h3>表' + esc(k) + '</h3>' + renderWorkReportTable(tablesByIndex[k]); });
+  return html;
+}
+function renderWorkReportTable(t) {
+  if (!t || !Array.isArray(t.rows) || !t.rows.length) return '';
+  let h = '<table class="wr-table"><thead><tr>';
+  (t.rows[0] || []).forEach(c => h += '<th>' + esc(String(c == null ? '' : c).split('\n').join('<br>')) + '</th>');
+  h += '</tr></thead><tbody>';
+  t.rows.slice(1).forEach(row => {
+    h += '<tr>' + (row || []).map(c => '<td>' + esc(String(c == null ? '' : c).split('\n').join('<br>')) + '</td>').join('') + '</tr>';
+  });
+  h += '</tbody></table>';
+  return h;
 }
 
 app.get('/api/stats/summary', auth(), (req, res) => {

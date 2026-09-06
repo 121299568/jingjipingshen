@@ -247,7 +247,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div id="page-stats" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6>综合统计分析</h6>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 align-items-center flex-wrap">
           <select id="statsReportType" class="form-select form-select-sm" style="width:150px">
             <option value="summary">汇总报告</option>
             <option value="department">事业部分析</option>
@@ -256,8 +256,13 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
           <select id="statsDepartment" class="form-select form-select-sm" style="width:150px">
             <option value="">全部事业部</option>
           </select>
+          <div class="form-check form-check-inline m-0">
+            <input class="form-check-input" type="checkbox" id="includeWorkReport" checked>
+            <label class="form-check-label small" for="includeWorkReport">含年终工作汇报</label>
+          </div>
           <button class="btn btn-primary btn-sm" onclick="generateReport()"><i class="bi bi-file-earmark-text"></i>生成报告</button>
           <button class="btn btn-success btn-sm" onclick="downloadReport()"><i class="bi bi-download"></i>下载报告</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="viewWorkReport()"><i class="bi bi-journal-text"></i>年终工作汇报</button>
         </div>
       </div>
       <div class="row g-3 mb-4" id="statsOverview">
@@ -380,7 +385,11 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
       <div class="mb-3"><label class="form-label">上传Excel</label><input type="file" class="form-control" id="fileInput" accept=".xlsx,.xls"></div>
       <div id="importStatus"></div>
     </div>
-    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-primary" onclick="doImport()">导入</button></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline-secondary" onclick="downloadTemplate()"><i class="bi bi-download"></i>下载导入模板</button>
+      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+      <button type="button" class="btn btn-primary" onclick="doImport()">导入</button>
+    </div>
   </div></div>
 </div>
 
@@ -1006,7 +1015,8 @@ function populateDeptSelect(depts){
 function generateReport(){
   const type=document.getElementById('statsReportType').value;
   const dept=document.getElementById('statsDepartment').value;
-  fetch(API+'/reports/generate',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({type,params:{department:dept}})})
+  const inclWR=document.getElementById('includeWorkReport')?document.getElementById('includeWorkReport').checked:false;
+  fetch(API+'/reports/generate',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({type,params:{department:dept},includeWorkReport:inclWR})})
   .then(r=>r.json()).then(data=>{
     if(data.success){currentReportContent=data.content;showReportPreview(data.content);}
     else{alert('生成报告失败: '+(data.error||'未知错误'));}
@@ -1026,6 +1036,42 @@ function downloadReport(){
   a.href=url;a.download='经济评审分析报告_'+type+'_'+new Date().toISOString().slice(0,10)+'.html';
   document.body.appendChild(a);a.click();document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+function downloadTemplate(){
+  fetch(API+'/template/import-xlsx',{headers:authH()})
+  .then(r=>{if(!r.ok)return r.json().then(e=>Promise.reject(e));return r.blob();})
+  .then(b=>{const url=URL.createObjectURL(b);const a=document.createElement('a');a.href=url;a.download='经济评审项目导入模板.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);})
+  .catch(e=>alert('下载模板失败: '+(e&&e.error||e&&e.message||'未知错误')));
+}
+function viewWorkReport(){
+  fetch(API+'/work-report',{headers:authH()}).then(r=>r.json()).then(wr=>{
+    if(!wr||!wr.title){alert('未找到工作汇报数据');return;}
+    showReportPreview(renderWorkReportHtml(wr));
+  }).catch(e=>alert('加载工作汇报失败: '+e.message));
+}
+function escHtml(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function renderWorkReportTable(t){
+  if(!t||!Array.isArray(t.rows)||!t.rows.length)return '';
+  let h='<table style="border-collapse:collapse;width:100%;margin:10px 0;font-size:13px"><thead><tr>';
+  (t.rows[0]||[]).forEach(c=>h+='<th style="border:1px solid #ccc;padding:6px;background:#667eea;color:#fff">'+escHtml(String(c==null?'':c).split('\n').join('<br>'))+'</th>');
+  h+='</tr></thead><tbody>';
+  t.rows.slice(1).forEach(row=>{h+='<tr>'+(row||[]).map(c=>'<td style="border:1px solid #ccc;padding:6px">'+escHtml(String(c==null?'':c).split('\n').join('<br>'))+'</td>').join('')+'</tr>';});
+  h+='</tbody></table>';return h;
+}
+function renderWorkReportHtml(wr){
+  const tables={};(wr.tables||[]).forEach(t=>{if(t&&t.index!=null)tables[t.index]=t;});
+  let h='<div style="font-family:system-ui;padding:20px;max-width:1040px;margin:auto">';
+  h+='<h2>'+escHtml(wr.title||'')+'</h2>';
+  h+='<p style="color:#666">'+escHtml(wr.department||'')+' '+escHtml(wr.date||'')+'</p>';
+  (wr.paragraphs||[]).forEach(p=>{
+    if(/商密/.test(p))return;
+    if(p===wr.title||p===wr.department||p===wr.date)return;
+    const m=p.trim().match(/^表(\d+)/);
+    if(m){const i=parseInt(m[1],10);h+='<h3>'+escHtml(p.trim())+'</h3>';if(tables[i]){h+=renderWorkReportTable(tables[i]);delete tables[i];}}
+    else if(p.trim())h+='<p style="line-height:1.8;margin:8px 0">'+escHtml(p)+'</p>';
+  });
+  Object.keys(tables).forEach(k=>{h+='<h3>表'+escHtml(k)+'</h3>'+renderWorkReportTable(tables[k]);});
+  h+='</div>';return h;
 }
 function exportTableToCSV(){
   const table=document.getElementById('deptStatsTable');if(!table)return;
