@@ -61,7 +61,7 @@
               <h6 class="mb-0"><i class="bi bi-pie-chart"></i> 事业部分布</h6>
             </div>
             <div class="card-body">
-              <canvas id="deptChart" height="250"></canvas>
+              <canvas id="deptChart" height="150"></canvas>
             </div>
           </div>
         </div>
@@ -71,7 +71,7 @@
               <h6 class="mb-0"><i class="bi bi-bar-chart"></i> 月度趋势</h6>
             </div>
             <div class="card-body">
-              <canvas id="monthlyChart" height="250"></canvas>
+              <canvas id="monthlyChart" height="150"></canvas>
             </div>
           </div>
         </div>
@@ -84,7 +84,7 @@
               <h6 class="mb-0"><i class="bi bi-file-earmark"></i> 资料上传情况</h6>
             </div>
             <div class="card-body">
-              <canvas id="fileChart" height="250"></canvas>
+              <canvas id="fileChart" height="150"></canvas>
             </div>
           </div>
         </div>
@@ -94,7 +94,7 @@
               <h6 class="mb-0"><i class="bi bi-calendar3"></i> 批次完成进度</h6>
             </div>
             <div class="card-body">
-              <canvas id="sessionChart" height="250"></canvas>
+              <canvas id="sessionChart" height="150"></canvas>
             </div>
           </div>
         </div>
@@ -182,7 +182,16 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .batch-drawer.open .batch-body{display:block}
 .batch-empty{padding:20px;text-align:center;color:#9ca3af;font-size:13px}
 .batch-count{background:#fff;border:1px solid #d1d5db;color:#4b5563;padding:2px 8px;border-radius:12px;font-size:11px}
-</style>
+
+<style>
+.card-body canvas {
+  max-height: 200px !important;
+  width: 100% !important;
+}
+#statsChart {
+  height: 150px !important;
+}
+</style></style>
 </head>
 <body>
 
@@ -556,6 +565,9 @@ function renderUploadProgressChart(){
   });
   
   ctx._c=new Chart(ctx,{
+    responsive: true,
+        maintainAspectRatio: false,
+        new Chart(ctx,{
     type:'bar',
     data:{
       labels,
