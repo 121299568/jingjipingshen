@@ -788,7 +788,7 @@ function downloadSessionEstimation(sessionId){
 function updateCostSelect(){
   const sel=document.getElementById('costProjectSelect');
   if(!sel) return;
-  const reviewingIds = sessions.filter(s => s.status === 'reviewing').map(s => s.id);
+  const reviewingIds = sessions.filter(s => s.status === 'in_progress').map(s => s.id);
   const filteredProjects = projects.filter(p => reviewingIds.includes(p.session_id));
   const currentVal = sel.value;
   sel.innerHTML='<option value="">-- 请选择项目 --</option>'+filteredProjects.map(p=>'<option value="'+p.id+'">'+(p.project_name||p.name)+'</option>').join('');
