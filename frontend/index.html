@@ -843,7 +843,8 @@ async function doUploadFile(){
     const r=await fetch(API+'/projects/'+currentProjectId+'/files',{method:'POST',headers:{'Authorization':'Bearer '+localStorage.getItem('token')},body:fd});
     const data=await r.json();
     if(r.ok){
-      if(statusEl)statusEl.innerHTML='<div class="alert alert-success">上传成功！'+(data.auto_detected?'<br>系统自动识别类型：'+getFileCategoryName(data.file_category):'')+'<br>文件序号：'+(data.file_seq||'-')+'</div>';
+      const extractTip = data.file_category==='estimation' ? '<br><b>已自动抽取成本明细，可在「工作量评估」页查看</b>' : '';
+      if(statusEl)statusEl.innerHTML='<div class="alert alert-success">上传成功！'+(data.auto_detected?'<br>系统自动识别类型：'+getFileCategoryName(data.file_category):'')+'<br>文件序号：'+(data.file_seq||'-')+extractTip+'</div>';
       if(fileInput)fileInput.value='';
       await refreshProjectFiles();
       setTimeout(()=>{const m=document.getElementById('uploadFileModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();renderUploadPage();renderProjects();},1500);

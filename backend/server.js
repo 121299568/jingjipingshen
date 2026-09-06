@@ -571,6 +571,32 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     upload_time: new Date().toISOString()
   };
   db.store.files.push(file);
+  // 若上传的是成本估算表（xlsx），自动抽取工作明细与成本项，供工作量评估页使用
+  if (autoCategory === 'estimation' && /\.(xlsx|xls)$/i.test(realOriginalName)) {
+    try {
+      const { parseProjectExcel } = require('./parse-excel');
+      const parsed = parseProjectExcel(newPath);
+      // 先清掉该项目已有的明细，避免重复累加
+      db.store.workItems = db.store.workItems.filter(w => w.project_id !== projectId);
+      db.store.procurementItems = db.store.procurementItems.filter(x => x.project_id !== projectId);
+      db.store.travelItems = db.store.travelItems.filter(t => t.project_id !== projectId);
+      parsed.work_items.forEach(w => db.store.workItems.push({ id: db.nextId(db.store.workItems), project_id: projectId, ...w }));
+      parsed.procurement_items.forEach(x => db.store.procurementItems.push({
+        id: db.nextId(db.store.procurementItems), project_id: projectId,
+        item_name: x.name, spec: x.spec, amount: x.subtotal, supplier: x.supplier, remark: x.remark, ...x
+      }));
+      parsed.travel_items.forEach(t => db.store.travelItems.push({
+        id: db.nextId(db.store.travelItems), project_id: projectId,
+        purpose: t.purpose, person: t.person, days: t.days,
+        amount: (Number(t.hotel) || 0) + (Number(t.per_diem) || 0) + (Number(t.transport) || 0),
+        remark: t.remark, ...t
+      }));
+      project.cost_summary = parsed.cost_summary;
+      db.logWorkflow(projectId, 'extract_cost', `解析成本估算表，抽取工作项${parsed.work_items.length}条、采购${parsed.procurement_items.length}条、差旅${parsed.travel_items.length}条`, req.user.id);
+    } catch (ex) {
+      console.error('估算表解析失败:', ex && ex.message);
+    }
+  }
   project.updated_at = new Date().toISOString();
   db.save();
   db.logWorkflow(projectId, 'upload_file', `上传${getFileCategoryName(autoCategory)}文件[${seq}]: ${file.originalname}`, req.user.id);
