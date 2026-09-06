@@ -538,7 +538,7 @@ function renderUploadProgressChart(){
   const labels=['估算表','可研','招标','中标','合同','利润率','分包','技术规范'];
   const uploaded=types.map(t=>files.filter(f=>f.file_category===t).length);
   const total=projects.length||1;
-  ctx._c=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'已上传文件数',data:uploaded,backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#10b981','#f59e0b','#ec4899','#6b7280','#0ea5e9'],borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+  ctx._c=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'已上传文件数',data:uploaded,backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#10b981','#f59e0b','#ec4899','#6b7280','#0ea5e9'],borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:total,ticks:{precision:0}}}}});
 }
 
 // SESSIONS
