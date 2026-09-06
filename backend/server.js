@@ -175,7 +175,8 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
   if (!user || !user.is_active) return res.status(401).json({ error: '用户不存在或已停用' });
   if (!db.verifyPassword(password, user.password)) return res.status(401).json({ error: '密码错误' });
   const token = sign({
-    id: user.id, username: user.username, role: user.role, business_dept: user.business_dept
+    id: user.id, username: user.username, role: user.role,
+    real_name: user.real_name, business_dept: user.business_dept
   });
   res.json({
     token,
@@ -446,8 +447,20 @@ app.post('/api/projects/import-excel', auth(['admin', 'rd', 'biz']), upload.sing
     if (!p.project_name) return res.status(400).json({ error: 'Excel 中未解析到项目名称' });
     db.store.projects.push(p);
     parsed.work_items.forEach(w => db.store.workItems.push({ id: db.nextId(db.store.workItems), project_id: p.id, ...w }));
-    parsed.procurement_items.forEach(x => db.store.procurementItems.push({ id: db.nextId(db.store.procurementItems), project_id: p.id, ...x }));
-    parsed.travel_items.forEach(t => db.store.travelItems.push({ id: db.nextId(db.store.travelItems), project_id: p.id, ...t }));
+    // 字段名对齐：解析器输出 name/subtotal，数据库列为 item_name/amount
+    parsed.procurement_items.forEach(x => db.store.procurementItems.push({
+      id: db.nextId(db.store.procurementItems), project_id: p.id,
+      item_name: x.name, spec: x.spec, amount: x.subtotal, supplier: x.supplier, remark: x.remark,
+      ...x
+    }));
+    // 差旅费：金额列 amount = 住宿+补助+交通；解析器原始分项落入 extra
+    parsed.travel_items.forEach(t => db.store.travelItems.push({
+      id: db.nextId(db.store.travelItems), project_id: p.id,
+      purpose: t.purpose, person: t.person, days: t.days,
+      amount: (Number(t.hotel) || 0) + (Number(t.per_diem) || 0) + (Number(t.transport) || 0),
+      remark: t.remark,
+      ...t
+    }));
     db.save();
     db.logWorkflow(p.id, 'excel_import', `Excel导入项目：${p.project_name}`, req.user.id);
     res.json({
