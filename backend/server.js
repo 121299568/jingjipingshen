@@ -506,6 +506,26 @@ app.get('/api/projects/:id/files', auth(), (req, res) => {
   res.json(fileData);
 });
 
+// 删除文件接口
+app.delete('/api/files/:id', auth(), (req, res) => {
+  const fileId = parseInt(req.params.id);
+  const fileIndex = store.files.findIndex(f => f.id === fileId);
+  if (fileIndex === -1) return res.status(404).json({ error: '文件不存在' });
+  const file = store.files[fileIndex];
+  // 权限检查：admin 或文件上传者本人可删除
+  if (req.user.role !== 'admin' && file.uploader_id !== req.user.id) {
+    return res.status(403).json({ error: '无权删除该文件' });
+  }
+  // 删除物理文件
+  const filePath = path.join(UPLOAD_DIR, file.filename);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  // 从数据库移除
+  store.files.splice(fileIndex, 1);
+  saveStore(store);
+  logWorkflow(file.project_id, 'delete_file', `删除文件: ${file.originalname}`, req.user.id);
+  res.json({ success: true, message: '文件已删除' });
+});
+
 // ==================== 工作量评估接口 ====================
 
 app.get('/api/projects/:id/estimates', auth(), (req, res) => {
