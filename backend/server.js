@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
+const archiver = require('archiver');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,7 +39,9 @@ function defaultStore() {
     expertEstimates: [],
     confirmations: [],
     files: [],
-    workflowLogs: []
+    workflowLogs: [],
+    userGroups: [],
+    userPermissions: []
   };
 }
 
@@ -48,7 +51,17 @@ function loadStore() {
     saveStore(s);
     return s;
   }
-  return JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+  const loaded = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+  const defaults = defaultStore();
+  // 合并缺失的字段（兼容旧版 store.json）
+  const merged = { ...defaults, ...loaded };
+  // 确保数组字段存在
+  if (!Array.isArray(merged.userGroups)) merged.userGroups = [];
+  if (!Array.isArray(merged.userPermissions)) merged.userPermissions = [];
+  if (!Array.isArray(merged.files)) merged.files = [];
+  if (!Array.isArray(merged.users)) merged.users = defaults.users;
+  if (!Array.isArray(merged.reviewSessions)) merged.reviewSessions = defaults.reviewSessions;
+  return merged;
 }
 
 function saveStore(s) { fs.writeFileSync(STORE_FILE, JSON.stringify(s, null, 2), 'utf8'); }
@@ -105,7 +118,7 @@ function filterByDept(store, key, user) {
 function logWorkflow(projectId, action, remark, userId) {
   const user = store.users.find(u => u.id === userId);
   store.workflowLogs.push({
-    id: store.workflowLogs.length + 1,
+    id: store.workflowLogs.length > 0 ? Math.max(...store.workflowLogs.map(l => l.id)) + 1 : 1,
     project_id: projectId,
     operator_id: userId,
     operator_role: user?.role || 'unknown',
@@ -116,18 +129,63 @@ function logWorkflow(projectId, action, remark, userId) {
   saveStore(store);
 }
 
+// ==================== 文件类型自动识别 ====================
+function inferFileCategory(filename) {
+  const name = filename || '';
+  // 注意：优先级从特殊到一般，避免"投标利润率"被"投标"先匹配
+  // 估算表/概算/预算
+  if (/估算|概算|预算|成本.*表|cost.*estimat|estimat/i.test(name)) return 'estimation';
+  // 可研报告
+  if (/可研|可行性|研究报|feasib/i.test(name)) return 'feasibility';
+  // 投标利润率评审表（必须先于"招标/投标"匹配）
+  if (/利润|利润率|profit/i.test(name)) return 'profit';
+  // 招投标文件
+  if (/招标|投标|bid|tender/i.test(name)) return 'bid';
+  // 中标通知书
+  if (/中标|中选|award|winning/i.test(name)) return 'award';
+  // 合同文件
+  if (/合同|协议|contract|agreement/i.test(name)) return 'contract';
+  // 分包申请表
+  if (/分包|subcontract|外包/i.test(name)) return 'subcontract';
+  // 技术规范书
+  if (/技术.*规范|规范.*书|技术.*规格|tech.*spec|specif/i.test(name)) return 'tech_spec';
+  return 'other';
+}
+
+// ==================== 项目文件自动序号 ====================
+function generateFileSeq(projectId) {
+  const count = store.files.filter(f => f.project_id === projectId).length + 1;
+  return String(count).padStart(2, '0');
+}
+
+// ==================== 安全ID生成 ====================
+function nextId(arr) {
+  if (arr.length === 0) return 1;
+  return Math.max(...arr.map(x => x.id || 0)) + 1;
+}
+
 // Multer配置
+function decodeFilename(name) {
+  // multer 默认用 latin1 编码文件名，需转回 UTF-8
+  try {
+    return Buffer.from(name, 'latin1').toString('utf8');
+  } catch(e) {
+    return name;
+  }
+}
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
+    const realName = decodeFilename(file.originalname);
+    const ext = path.extname(realName);
     cb(null, `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`);
   }
 });
 const fileFilter = (req, file, cb) => {
-  const allowed = /\.(xlsx|xls|pdf|docx?|jpg|jpeg|png)$/i;
-  if (allowed.test(file.originalname)) cb(null, true);
-  else cb(new Error('不支持的文件类型'));
+  const realName = decodeFilename(file.originalname);
+  const allowed = /\.(xlsx|xls|pdf|docx?|jpg|jpeg|png|txt|csv|zip|rar|7z)$/i;
+  if (allowed.test(realName)) cb(null, true);
+  else cb(new Error('不支持的文件类型: ' + realName));
 };
 const upload = multer({ storage, fileFilter, limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -148,10 +206,131 @@ app.get('/api/users', auth(), (req, res) => {
   res.json(store.users.map(({ password, ...u }) => u));
 });
 app.post('/api/users', auth(['admin']), (req, res) => {
-  const u = { id: store.users.length + 1, ...req.body, password: req.body.password || '123456' };
+  const { username, real_name, role, department, business_dept, password, group_id } = req.body;
+  if (!username || !real_name) return res.status(400).json({ error: '用户名和姓名为必填' });
+  if (store.users.some(u => u.username === username)) return res.status(400).json({ error: '用户名已存在' });
+  const u = {
+    id: nextId(store.users),
+    username,
+    real_name,
+    role: role || 'expert',
+    department: department || '',
+    business_dept: business_dept || null,
+    password: password || '123456',
+    group_id: group_id || null,
+    created_at: new Date().toISOString()
+  };
   store.users.push(u);
   saveStore(store);
   res.json({ ...u, password: undefined });
+});
+
+// 编辑用户
+app.patch('/api/users/:id', auth(['admin']), (req, res) => {
+  const userId = parseInt(req.params.id);
+  const user = store.users.find(u => u.id === userId);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  const allowedFields = ['real_name', 'role', 'department', 'business_dept', 'group_id', 'is_active'];
+  allowedFields.forEach(f => {
+    if (req.body[f] !== undefined) user[f] = req.body[f];
+  });
+  if (req.body.password) user.password = req.body.password;
+  saveStore(store);
+  res.json({ ...user, password: undefined });
+});
+
+// 删除用户
+app.delete('/api/users/:id', auth(['admin']), (req, res) => {
+  const userId = parseInt(req.params.id);
+  const idx = store.users.findIndex(u => u.id === userId);
+  if (idx < 0) return res.status(404).json({ error: '用户不存在' });
+  store.users.splice(idx, 1);
+  saveStore(store);
+  res.json({ success: true });
+});
+
+// ==================== 用户分组管理 ====================
+app.get('/api/user-groups', auth(), (req, res) => {
+  res.json(store.userGroups.map(g => ({
+    ...g,
+    member_count: store.users.filter(u => u.group_id === g.id).length
+  })));
+});
+
+app.post('/api/user-groups', auth(['admin']), (req, res) => {
+  const { name, description } = req.body;
+  if (!name) return res.status(400).json({ error: '分组名称为必填' });
+  const g = { id: nextId(store.userGroups), name, description: description || '', created_at: new Date().toISOString() };
+  store.userGroups.push(g);
+  saveStore(store);
+  res.json(g);
+});
+
+app.patch('/api/user-groups/:id', auth(['admin']), (req, res) => {
+  const groupId = parseInt(req.params.id);
+  const g = store.userGroups.find(x => x.id === groupId);
+  if (!g) return res.status(404).json({ error: '分组不存在' });
+  if (req.body.name !== undefined) g.name = req.body.name;
+  if (req.body.description !== undefined) g.description = req.body.description;
+  saveStore(store);
+  res.json(g);
+});
+
+app.delete('/api/user-groups/:id', auth(['admin']), (req, res) => {
+  const groupId = parseInt(req.params.id);
+  const idx = store.userGroups.findIndex(x => x.id === groupId);
+  if (idx < 0) return res.status(404).json({ error: '分组不存在' });
+  store.userGroups.splice(idx, 1);
+  // 解除该分组下用户的分组关联
+  store.users.forEach(u => { if (u.group_id === groupId) u.group_id = null; });
+  saveStore(store);
+  res.json({ success: true });
+});
+
+// ==================== 用户权限配置 ====================
+app.get('/api/permissions', auth(['admin']), (req, res) => {
+  res.json(store.userPermissions || []);
+});
+
+app.put('/api/users/:id/permissions', auth(['admin']), (req, res) => {
+  const userId = parseInt(req.params.id);
+  const user = store.users.find(u => u.id === userId);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  const { permissions } = req.body;
+  // 权限数组，如 ['view_projects', 'upload_files', 'download_batch', 'manage_users']
+  if (!Array.isArray(permissions)) return res.status(400).json({ error: '权限必须是数组' });
+  // 更新或创建权限记录
+  let perm = store.userPermissions.find(p => p.user_id === userId);
+  if (perm) {
+    perm.permissions = permissions;
+  } else {
+    perm = { id: nextId(store.userPermissions), user_id: userId, permissions };
+    store.userPermissions.push(perm);
+  }
+  saveStore(store);
+  res.json(perm);
+});
+
+app.get('/api/users/:id/permissions', auth(['admin']), (req, res) => {
+  const userId = parseInt(req.params.id);
+  const perm = store.userPermissions.find(p => p.user_id === userId);
+  res.json(perm ? perm.permissions : []);
+});
+
+// 可配置的权限项列表
+app.get('/api/permission-options', auth(), (req, res) => {
+  res.json([
+    { code: 'view_projects', name: '查看项目', default_roles: ['admin', 'biz', 'rd', 'expert', 'accountant'] },
+    { code: 'upload_files', name: '上传资料', default_roles: ['admin', 'biz', 'rd'] },
+    { code: 'download_files', name: '下载单文件', default_roles: ['admin', 'biz', 'rd', 'expert', 'accountant'] },
+    { code: 'download_batch', name: '批次全量下载', default_roles: ['admin'] },
+    { code: 'import_excel', name: 'Excel导入项目', default_roles: ['admin', 'biz', 'rd'] },
+    { code: 'manage_sessions', name: '管理评审批次', default_roles: ['admin', 'rd'] },
+    { code: 'submit_estimate', name: '提交工作量评估', default_roles: ['expert', 'accountant'] },
+    { code: 'confirm_estimate', name: '确认/驳回评估', default_roles: ['expert', 'accountant'] },
+    { code: 'manage_users', name: '用户管理', default_roles: ['admin'] },
+    { code: 'view_stats', name: '查看统计分析', default_roles: ['admin', 'rd', 'biz'] }
+  ]);
 });
 
 // 评审批次
@@ -163,7 +342,7 @@ app.get('/api/sessions', auth(), (req, res) => {
   res.json(list);
 });
 app.post('/api/sessions', auth(['admin', 'rd']), (req, res) => {
-  const s = { id: store.reviewSessions.length + 1, status: 'pending', created_at: new Date().toISOString(), creator_id: req.user.id, ...req.body };
+  const s = { id: nextId(store.reviewSessions), status: 'pending', created_at: new Date().toISOString(), creator_id: req.user.id, ...req.body };
   store.reviewSessions.push(s);
   saveStore(store);
   res.json(s);
@@ -211,7 +390,7 @@ app.get('/api/projects/:id', auth(), (req, res) => {
 });
 
 app.post('/api/projects', auth(['admin', 'rd', 'biz']), (req, res) => {
-  const p = { id: store.projects.length + 1, status: 'draft', created_at: new Date().toISOString(), creator_id: req.user.id, ...req.body };
+  const p = { id: nextId(store.projects), status: 'draft', created_at: new Date().toISOString(), creator_id: req.user.id, ...req.body };
   store.projects.push(p);
   saveStore(store);
   logWorkflow(p.id, 'create_project', `创建项目：${p.project_name}`, req.user.id);
@@ -225,7 +404,7 @@ app.post('/api/projects/import-excel', auth(['admin', 'rd', 'biz']), upload.sing
     const { parseProjectExcel } = require('./parse-excel');
     const parsed = parseProjectExcel(req.file.path);
     const p = {
-      id: store.projects.length + 1,
+      id: nextId(store.projects),
       status: 'reviewing',
       source_file: req.file.originalname,
       source_path: req.file.path,
@@ -237,9 +416,9 @@ app.post('/api/projects/import-excel', auth(['admin', 'rd', 'biz']), upload.sing
       creator_id: req.user.id
     };
     store.projects.push(p);
-    parsed.work_items.forEach((w, i) => store.workItems.push({ id: store.workItems.length + 1, project_id: p.id, ...w }));
-    parsed.procurement_items.forEach((x, i) => store.procurementItems.push({ id: store.procurementItems.length + 1, project_id: p.id, ...x }));
-    parsed.travel_items.forEach((t, i) => store.travelItems.push({ id: store.travelItems.length + 1, project_id: p.id, ...t }));
+    parsed.work_items.forEach((w, i) => store.workItems.push({ id: nextId(store.workItems), project_id: p.id, ...w }));
+    parsed.procurement_items.forEach((x, i) => store.procurementItems.push({ id: nextId(store.procurementItems), project_id: p.id, ...x }));
+    parsed.travel_items.forEach((t, i) => store.travelItems.push({ id: nextId(store.travelItems), project_id: p.id, ...t }));
     saveStore(store);
     logWorkflow(p.id, 'excel_import', `Excel导入项目：${p.project_name}`, req.user.id);
     res.json({
@@ -260,23 +439,58 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
   if (req.user.role === 'biz' && req.user.business_dept !== project.business_dept) {
     return res.status(403).json({ error: '无权上传该项目文件' });
   }
+
+  // 自动识别文件类型：优先用前端传入的category，否则用文件名推断
+  const clientCategory = req.body.category;
+  const realOriginalName = decodeFilename(req.file.originalname);
+  const autoCategory = clientCategory && clientCategory !== 'auto'
+    ? clientCategory
+    : inferFileCategory(realOriginalName);
+
+  // 自动生成项目文件序号 (01-, 02-)
+  const seq = generateFileSeq(projectId);
+
+  // 用序号前缀重命名磁盘文件，保留可读性
+  const ext = path.extname(realOriginalName);
+  const safeOriginalName = realOriginalName.replace(/[^\w\u4e00-\u9fa5.-]/g, '_');
+  const newFilename = `${projectId}-${seq}-${safeOriginalName}`;
+
+  // 重命名已上传的文件
+  const oldPath = req.file.path;
+  const newPath = path.join(UPLOAD_DIR, newFilename);
+  if (fs.existsSync(oldPath)) {
+    fs.renameSync(oldPath, newPath);
+  }
+
   const file = {
-    id: store.files.length + 1,
+    id: nextId(store.files),
     project_id: projectId,
-    filename: req.file.filename,
-    originalname: req.file.originalname,
-    file_type: path.extname(req.file.originalname).slice(1),
-    file_category: req.body.category || 'other',
+    filename: newFilename,
+    originalname: realOriginalName,
+    file_seq: seq,
+    file_type: ext.slice(1),
+    file_category: autoCategory,
+    auto_detected: !clientCategory || clientCategory === 'auto',
     uploader_id: req.user.id,
-    url: `/uploads/${req.file.filename}`,
+    uploader_name: req.user.real_name || req.user.username,
+    url: `/uploads/${newFilename}`,
     description: req.body.description || '',
     upload_time: new Date().toISOString()
   };
   store.files.push(file);
   saveStore(store);
-  logWorkflow(projectId, 'upload_file', `上传${file.file_category}文件：${file.originalname}`, req.user.id);
+  logWorkflow(projectId, 'upload_file', `上传${getFileCategoryName(autoCategory)}文件[${seq}]: ${file.originalname}`, req.user.id);
   res.json(file);
 });
+
+function getFileCategoryName(cat) {
+  const map = {
+    estimation: '估算表', feasibility: '可研报告', bid: '招标文件',
+    award: '中标通知书', contract: '合同文件', profit: '利润率评审表',
+    subcontract: '分包申请表', tech_spec: '技术规范书', other: '其他'
+  };
+  return map[cat] || cat || '其他';
+}
 
 app.get('/api/projects/:id/files', auth(), (req, res) => {
   const projectId = parseInt(req.params.id);
@@ -328,7 +542,7 @@ app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
     return res.status(400).json({ error: '您已经提交过该项评估' });
   }
   const estimate = {
-    id: store.expertEstimates.length + 1,
+    id: nextId(store.expertEstimates),
     project_id,
     work_item_id,
     expert_id: req.user.id,
@@ -375,7 +589,7 @@ app.post('/api/confirmations', auth(['expert', 'accountant']), (req, res) => {
     return res.status(400).json({ error: '缺少必要参数' });
   }
   const confirmation = {
-    id: store.confirmations.length + 1,
+    id: nextId(store.confirmations),
     project_id,
     work_item_id,
     expert_id: req.user.id,
@@ -441,7 +655,7 @@ function calculateCategoryCost(items) {
 app.get('/api/stats/detailed', auth(), (req, res) => {
   const user = req.user;
   const projects = filterByDept(store, 'projects', user);
-  const files = store.projectFiles || [];
+  const files = store.files || [];
   const sessions = store.reviewSessions || [];
   const estimates = store.expertEstimates || [];
   
@@ -548,7 +762,7 @@ app.post('/api/reports/generate', auth(['admin', 'rd']), async (req, res) => {
 
 async function getDetailedStats(user) {
   const projects = filterByDept(store, 'projects', user);
-  const files = store.projectFiles || [];
+  const files = store.files || [];
   const sessions = store.reviewSessions || [];
   const estimates = store.expertEstimates || [];
   return { projects, files, sessions, estimates };
@@ -636,6 +850,79 @@ app.get('/api/stats/cost-structure', auth(), (req, res) => {
 app.get('/api/workflow/:projectId', auth(), (req, res) => {
   const logs = store.workflowLogs.filter(l => l.project_id === parseInt(req.params.id));
   res.json(logs);
+});
+
+// ==================== 批次下载功能 ====================
+
+// 按批次全量下载所有文件
+app.get('/api/sessions/:id/download-all', auth(['admin']), (req, res) => {
+  const sessionId = parseInt(req.params.id);
+  const session = store.reviewSessions.find(s => s.id === sessionId);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  
+  const sessionProjects = store.projects.filter(p => p.session_id === sessionId);
+  const projectIds = sessionProjects.map(p => p.id);
+  const sessionFiles = store.files.filter(f => projectIds.includes(f.project_id));
+  
+  if (sessionFiles.length === 0) {
+    return res.status(400).json({ error: '该批次暂无可下载的文件' });
+  }
+  
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  const zipName = `批次${session.id}_全量文件_${new Date().toISOString().slice(0,10)}.zip`;
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(zipName)}`);
+  
+  archive.on('error', err => { res.status(500).json({ error: err.message }); });
+  archive.pipe(res);
+  
+  // 按项目分组添加文件
+  sessionProjects.forEach(p => {
+    const pFiles = sessionFiles.filter(f => f.project_id === p.id);
+    pFiles.forEach(f => {
+      const filePath = path.join(UPLOAD_DIR, f.filename);
+      if (fs.existsSync(filePath)) {
+        const folderName = `${p.id}-${(p.project_name||'').replace(/[\\/:*?"<>|]/g,'_').substring(0,20)}`;
+        archive.file(filePath, { name: `${folderName}/${f.file_seq||''}-${f.originalname}` });
+      }
+    });
+  });
+  
+  archive.finalize();
+});
+
+// 按批次下载成本估算表文件
+app.get('/api/sessions/:id/download-estimation', auth(['admin']), (req, res) => {
+  const sessionId = parseInt(req.params.id);
+  const session = store.reviewSessions.find(s => s.id === sessionId);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  
+  const sessionProjects = store.projects.filter(p => p.session_id === sessionId);
+  const projectIds = sessionProjects.map(p => p.id);
+  const estFiles = store.files.filter(f => projectIds.includes(f.project_id) && f.file_category === 'estimation');
+  
+  if (estFiles.length === 0) {
+    return res.status(400).json({ error: '该批次暂无成本估算表文件' });
+  }
+  
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  const zipName = `批次${session.id}_成本估算表_${new Date().toISOString().slice(0,10)}.zip`;
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(zipName)}`);
+  
+  archive.on('error', err => { res.status(500).json({ error: err.message }); });
+  archive.pipe(res);
+  
+  estFiles.forEach(f => {
+    const filePath = path.join(UPLOAD_DIR, f.filename);
+    if (fs.existsSync(filePath)) {
+      const p = sessionProjects.find(x => x.id === f.project_id);
+      const folderName = `${p.id}-${(p.project_name||'').replace(/[\\/:*?"<>|]/g,'_').substring(0,20)}`;
+      archive.file(filePath, { name: `${folderName}/${f.file_seq||''}-${f.originalname}` });
+    }
+  });
+  
+  archive.finalize();
 });
 
 // ==================== 前端静态文件服务 ====================

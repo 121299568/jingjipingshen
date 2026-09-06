@@ -1,149 +1,4 @@
-<!DOC
-    <!-- STATS PAGE - 丰富统计分析 -->
-    <div id="page-stats-rich" class="page">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6><i class="bi bi-bar-chart-fill"></i> 综合统计分析</h6>
-        <div class="d-flex gap-2">
-          <select id="statsReportType" class="form-select form-select-sm" style="width:150px">
-            <option value="summary">汇总报告</option>
-            <option value="department">事业部分析</option>
-            <option value="expert">专家工作量</option>
-          </select>
-          <select id="statsDepartment" class="form-select form-select-sm" style="width:150px">
-            <option value="">全部事业部</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="generateReport()"><i class="bi bi-file-earmark-text"></i>生成报告</button>
-          <button class="btn btn-success btn-sm" onclick="downloadReport()"><i class="bi bi-download"></i>下载报告</button>
-        </div>
-      </div>
-
-      <!-- 概览卡片 -->
-      <div class="row g-3 mb-4" id="statsOverview">
-        <div class="col-md-3">
-          <div class="card bg-primary text-white h-100">
-            <div class="card-body text-center">
-              <h2 class="display-4" id="statTotalProjects">0</h2>
-              <p class="mb-0">项目总数</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="card bg-success text-white h-100">
-            <div class="card-body text-center">
-              <h2 class="display-4" id="statTotalAmount">0</h2>
-              <p class="mb-0">合同总额(万)</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="card bg-info text-white h-100">
-            <div class="card-body text-center">
-              <h2 class="display-4" id="statCompletedProjects">0</h2>
-              <p class="mb-0">已完成项目</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="card bg-warning text-white h-100">
-            <div class="card-body text-center">
-              <h2 class="display-4" id="statTotalSessions">0</h2>
-              <p class="mb-0">评审批次</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 图表区域 -->
-      <div class="row g-3 mb-4">
-        <div class="col-md-6">
-          <div class="card card-custom">
-            <div class="card-header bg-white">
-              <h6 class="mb-0"><i class="bi bi-pie-chart"></i> 事业部分布</h6>
-            </div>
-            <div class="card-body">
-              <canvas id="deptChart" height="150"></canvas>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-6">
-          <div class="card card-custom">
-            <div class="card-header bg-white">
-              <h6 class="mb-0"><i class="bi bi-bar-chart"></i> 月度趋势</h6>
-            </div>
-            <div class="card-body">
-              <canvas id="monthlyChart" height="150"></canvas>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3 mb-4">
-        <div class="col-md-6">
-          <div class="card card-custom">
-            <div class="card-header bg-white">
-              <h6 class="mb-0"><i class="bi bi-file-earmark"></i> 资料上传情况</h6>
-            </div>
-            <div class="card-body">
-              <canvas id="fileChart" height="150"></canvas>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-6">
-          <div class="card card-custom">
-            <div class="card-header bg-white">
-              <h6 class="mb-0"><i class="bi bi-calendar3"></i> 批次完成进度</h6>
-            </div>
-            <div class="card-body">
-              <canvas id="sessionChart" height="150"></canvas>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 详细数据表格 -->
-      <div class="row g-3">
-        <div class="col-12">
-          <div class="card card-custom">
-            <div class="card-header bg-white d-flex justify-content-between align-items-center">
-              <h6 class="mb-0"><i class="bi bi-table"></i> 事业部详细统计</h6>
-              <button class="btn btn-sm btn-outline-primary" onclick="exportTableToCSV()"><i class="bi bi-file-spreadsheet"></i>导出CSV</button>
-            </div>
-            <div class="card-body p-0">
-              <div class="table-responsive">
-                <table class="table table-hover mb-0" id="deptStatsTable">
-                  <thead class="table-light">
-                    <tr>
-                      <th>序号</th>
-                      <th>事业部</th>
-                      <th>项目数</th>
-                      <th>合同金额(元)</th>
-                      <th>平均金额(元)</th>
-                      <th>占比</th>
-                    </tr>
-                  </thead>
-                  <tbody id="deptStatsBody"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 报告预览区域 -->
-      <div class="row g-3 mt-3" id="reportPreviewSection" style="display:none">
-        <div class="col-12">
-          <div class="card card-custom">
-            <div class="card-header bg-white">
-              <h6 class="mb-0"><i class="bi bi-file-earmark-preview"></i> 报告预览</h6>
-            </div>
-            <div class="card-body">
-              <iframe id="reportPreviewFrame" style="width:100%;height:600px;border:1px solid #dee2e6;border-radius:4px"></iframe>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-TYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -166,6 +21,8 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .page{display:none}.page.active{display:block}
 .card-custom{border:none;box-shadow:0 2px 12px rgba(0,0,0,.08);border-radius:12px}
 .stat-card{border-radius:12px;color:#fff;padding:20px}
+.stat-num{font-size:28px;font-weight:bold}
+.stat-label{font-size:12px;opacity:.85}
 .badge-missing{background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:11px}
 .badge-uploaded{background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:12px;font-size:11px}
 .file-card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:8px;background:#fff}
@@ -182,16 +39,15 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .batch-drawer.open .batch-body{display:block}
 .batch-empty{padding:20px;text-align:center;color:#9ca3af;font-size:13px}
 .batch-count{background:#fff;border:1px solid #d1d5db;color:#4b5563;padding:2px 8px;border-radius:12px;font-size:11px}
-
-<style>
-.card-body canvas {
-  max-height: 200px !important;
-  width: 100% !important;
-}
-#statsChart {
-  height: 150px !important;
-}
-</style></style>
+.card-body canvas{max-height:200px !important;width:100% !important}
+.drop-zone{border:2px dashed #cbd5e1;border-radius:12px;padding:30px;text-align:center;transition:all .2s;cursor:pointer;background:#f8fafc}
+.drop-zone:hover{border-color:#667eea;background:#eef2ff}
+.drop-zone.dragover{border-color:#667eea;background:#e0e7ff;transform:scale(1.01)}
+.drop-zone .drop-icon{font-size:48px;color:#94a3b8}
+.drop-zone.dragover .drop-icon{color:#667eea}
+.permission-check{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:4px}
+.permission-check input{margin:0}
+</style>
 </head>
 <body>
 
@@ -217,7 +73,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div class="nav-item" data-page="sessions"><i class="bi bi-calendar-check"></i>评审批次</div>
     <div class="nav-item" data-page="projects"><i class="bi bi-folder2-open"></i>项目资料</div>
     <div class="nav-item" data-page="cost-analysis"><i class="bi bi-graph-down-arrow"></i>工作量评估</div>
-    <div class="nav-item" data-page="stats"'></button>><i class="bi bi-bar-chart"></i>统计分析</div>
+    <div class="nav-item" data-page="stats"><i class="bi bi-bar-chart"></i>统计分析</div>
     <div class="nav-item" data-page="users"><i class="bi bi-people"></i>用户管理</div>
     <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>退出登录</div>
   </aside>
@@ -247,7 +103,6 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6>评审批次列表</h6>
         <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addSessionModal"><i class="bi bi-plus"></i>新建批次</button>
-      
       </div>
       <div class="card card-custom"><div class="card-body p-0">
         <table class="table table-hover mb-0"><thead><tr><th>ID</th><th>批次名称</th><th>状态</th><th>评审时间</th><th>项目数</th><th>操作</th></tr></thead>
@@ -255,8 +110,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
       </div></div>
     </div>
 
-    <!-- PROJECTS - 核心页面：项目资料管理 -->
-    <!-- PROJECTS - 批次抽屉页：按评审批次分组展示项目资料 -->
+    <!-- PROJECTS -->
     <div id="page-projects" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6>项目资料管理（按评审批次）</h6>
@@ -265,39 +119,43 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
           <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#importExcelModal"><i class="bi bi-file-earmark-excel"></i>Excel导入</button>
         </div>
       </div>
-
-      <!-- 缺少估算表提示 -->
       <div id="missingNotice" class="alert alert-warning d-none mb-3">
         <i class="bi bi-exclamation-triangle"></i> <span id="missingText"></span>
       </div>
-
-      <!-- 批次抽屉列表 -->
       <div id="batchDrawerList"></div>
     </div>
 
-
-    <!-- UPLOAD PAGE - 上传资料专用页面 -->
+    <!-- UPLOAD PAGE -->
     <div id="page-upload" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6><i class="bi bi-cloud-upload"></i> 上传项目资料</h6>
         <button class="btn btn-sm btn-secondary" onclick="navigateTo('projects')"><i class="bi bi-arrow-left"></i>返回项目列表</button>
       </div>
-      
       <div class="card card-custom mb-3">
         <div class="card-header bg-white">
           <h5 id="uploadProjectName">项目资料上传</h5>
           <p class="small text-muted mb-0" id="uploadProjectInfo"></p>
         </div>
         <div class="card-body">
+          <!-- 拖拽上传区域 -->
+          <div class="drop-zone" id="dropZone" onclick="document.getElementById('dropFileInput').click()">
+            <i class="bi bi-cloud-arrow-up drop-icon d-block mb-2"></i>
+            <h6>拖拽文件到此处上传，或点击选择文件</h6>
+            <p class="small text-muted mb-0">支持 PDF / DOCX / XLSX / JPG / PNG，单个文件最大 50MB</p>
+            <p class="small text-primary mt-1 mb-0">系统将自动识别文件类型并关联分类</p>
+            <input type="file" id="dropFileInput" accept=".pdf,.docx,.doc,.xlsx,.xls,.jpg,.jpeg,.png" style="display:none" multiple>
+          </div>
+          <div id="dropUploadStatus" class="mt-2"></div>
+
+          <hr class="my-3">
           <div class="row g-3">
             <div class="col-md-6">
-              <div class="card h-100 border-primary">
+              <div class="card h-100 border-danger">
                 <div class="card-header bg-danger text-white"><i class="bi bi-star-fill"></i> 核心资料（必传）</div>
                 <div class="card-body">
                   <p class="text-muted small mb-3">项目成本估算汇总表是专家工作量评估的核心依据，必须上传。</p>
                   <button class="btn btn-danger w-100 py-3" onclick="triggerUpload('estimation')">
-                    <i class="bi bi-file-earmark-excel fs-3"></i><br>
-                    上传项目估算表
+                    <i class="bi bi-file-earmark-excel fs-3"></i><br>上传项目估算表
                   </button>
                 </div>
               </div>
@@ -307,33 +165,23 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
                 <div class="card-header bg-secondary text-white"><i class="bi bi-folder"></i> 参考资料</div>
                 <div class="card-body">
                   <div class="d-grid gap-2">
-                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('feasibility')">
-                      <i class="bi bi-file-earmark-text"></i> 可行性研究报告
-                    </button>
-                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('bid')">
-                      <i class="bi bi-file-earmark-bar-graph"></i> 招投标文件
-                    </button>
-                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('award')">
-                      <i class="bi bi-file-earmark-check"></i> 中标通知书
-                    </button>
-                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('contract')">
-                      <i class="bi bi-file-earmark-medical"></i> 合同文件
-                    </button>
-                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('profit')">
-                      <i class="bi bi-file-earmark-money"></i> 投标利润率评审表
-                    </button>
-                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('subcontract')">
-                      <i class="bi bi-file-earmark-break"></i> 分包申请表
-                    </button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('feasibility')"><i class="bi bi-file-earmark-text"></i> 可行性研究报告</button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('bid')"><i class="bi bi-file-earmark-bar-graph"></i> 招投标文件</button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('award')"><i class="bi bi-file-earmark-check"></i> 中标通知书</button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('contract')"><i class="bi bi-file-earmark-medical"></i> 合同文件</button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('tech_spec')"><i class="bi bi-file-earmark-code"></i> 技术规范书</button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('profit')"><i class="bi bi-file-earmark-money"></i> 投标利润率评审表</button>
+                    <button class="btn btn-outline-primary text-start" onclick="triggerUpload('subcontract')"><i class="bi bi-file-earmark-break"></i> 分包申请表</button>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-          
-          <!-- 已上传文件列表 -->
           <div class="mt-4">
-            <h6>已上传资料</h6>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6>已上传资料</h6>
+              <span class="small text-muted" id="uploadFileCount"></span>
+            </div>
             <div id="uploadedFilesList" class="row g-2"></div>
           </div>
         </div>
@@ -344,18 +192,18 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div id="page-cost-analysis" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6>工作量评估</h6>
-        <select id="costProjectSelect" class="form-select w-auto" onchange="loadCostDetail(this.value)">
-          <option value="">-- 请选择项目 --</option>
-        </select>
+        <div class="d-flex gap-2">
+          <select id="costProjectSelect" class="form-select w-auto" onchange="loadCostDetail(this.value)">
+            <option value="">-- 请选择项目 --</option>
+          </select>
+          <button class="btn btn-outline-success btn-sm" id="downloadCostBtn" onclick="downloadCostExcel()" style="display:none"><i class="bi bi-download"></i> 导出成本明细</button>
+        </div>
       </div>
-      
       <div class="alert alert-info small mb-3">
-        <strong>💡 工作流程：</strong>选择项目后，专家可在下方输入各工作项的<strong>人天评估</strong> → 提交 → 系统计算平均人天 → 乘以单价得最终成本。
+        <strong>工作流程：</strong>选择项目后，专家可在下方输入各工作项的<strong>人天评估</strong> → 提交 → 系统计算平均人天 → 乘以单价得最终成本。
       </div>
-      
       <div id="costHeaderCard" class="card card-custom mb-3 d-none"><div class="card-body" id="costHeaderBody"></div></div>
       <div class="row g-3 mb-3" id="costSummaryCards"></div>
-      
       <div class="card card-custom">
         <div class="card-header bg-white d-flex justify-content-between align-items-center">
           <span><i class="bi bi-table"></i> 工作明细与专家评估</span>
@@ -374,25 +222,105 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     </div>
 
     <!-- STATS -->
-    <button class='nav-item' data-page='stats'><i class='bi bi-graph-up'></i> 统计分析</button>
-      <button class='nav-item' data-page='stats-rich'><i class='bi bi-bar-chart-fill'></i> 综合分析</button>
-<div id="page-stats" class="page">
-      <h6 class="mb-3">统计分析</h6>
+    <div id="page-stats" class="page">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6>综合统计分析</h6>
+        <div class="d-flex gap-2">
+          <select id="statsReportType" class="form-select form-select-sm" style="width:150px">
+            <option value="summary">汇总报告</option>
+            <option value="department">事业部分析</option>
+            <option value="expert">专家工作量</option>
+          </select>
+          <select id="statsDepartment" class="form-select form-select-sm" style="width:150px">
+            <option value="">全部事业部</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="generateReport()"><i class="bi bi-file-earmark-text"></i>生成报告</button>
+          <button class="btn btn-success btn-sm" onclick="downloadReport()"><i class="bi bi-download"></i>下载报告</button>
+        </div>
+      </div>
+      <div class="row g-3 mb-4" id="statsOverview">
+        <div class="col-md-3"><div class="card bg-primary text-white h-100"><div class="card-body text-center"><h2 class="display-4" id="statTotalProjects">0</h2><p class="mb-0">项目总数</p></div></div></div>
+        <div class="col-md-3"><div class="card bg-success text-white h-100"><div class="card-body text-center"><h2 class="display-4" id="statTotalAmount">0</h2><p class="mb-0">合同总额(万)</p></div></div></div>
+        <div class="col-md-3"><div class="card bg-info text-white h-100"><div class="card-body text-center"><h2 class="display-4" id="statCompletedProjects">0</h2><p class="mb-0">已完成项目</p></div></div></div>
+        <div class="col-md-3"><div class="card bg-warning text-white h-100"><div class="card-body text-center"><h2 class="display-4" id="statTotalSessions">0</h2><p class="mb-0">评审批次</p></div></div></div>
+      </div>
+      <div class="row g-3 mb-4">
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-pie-chart"></i> 事业部分布</h6></div><div class="card-body"><canvas id="deptChart" height="150"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-bar-chart"></i> 月度趋势</h6></div><div class="card-body"><canvas id="monthlyChart" height="150"></canvas></div></div></div>
+      </div>
+      <div class="row g-3 mb-4">
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-file-earmark"></i> 资料上传情况</h6></div><div class="card-body"><canvas id="fileChart" height="150"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-calendar3"></i> 批次完成进度</h6></div><div class="card-body"><canvas id="sessionChart" height="150"></canvas></div></div></div>
+      </div>
       <div class="row g-3">
-        <div class="col-md-8"><div class="card card-custom"><div class="card-header bg-white"><i class="bi bi-graph-up"></i> 成本结构</div><div class="card-body"><canvas id="statsChart" height="100"></canvas></div></div></div>
-        <div class="col-md-4"><div class="card card-custom"><div class="card-header bg-white"><i class="bi bi-clipboard-data"></i> 资料完整率</div><div class="card-body"><canvas id="materialChart" height="200"></canvas></div></div></div>
+        <div class="col-12"><div class="card card-custom">
+          <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="bi bi-table"></i> 事业部详细统计</h6>
+            <button class="btn btn-sm btn-outline-primary" onclick="exportTableToCSV()"><i class="bi bi-file-spreadsheet"></i>导出CSV</button>
+          </div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-hover mb-0" id="deptStatsTable">
+                <thead class="table-light"><tr><th>序号</th><th>事业部</th><th>项目数</th><th>合同金额(元)</th><th>平均金额(元)</th><th>占比</th></tr></thead>
+                <tbody id="deptStatsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <div class="row g-3 mt-3" id="reportPreviewSection" style="display:none">
+        <div class="col-12"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-file-earmark-preview"></i> 报告预览</h6></div><div class="card-body"><iframe id="reportPreviewFrame" style="width:100%;height:600px;border:1px solid #dee2e6;border-radius:4px"></iframe></div></div></div>
       </div>
     </div>
 
     <!-- USERS -->
     <div id="page-users" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6>用户管理</h6><button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal"><i class="bi bi-plus"></i>新建用户</button>
+        <h6>用户管理</h6>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-info btn-sm" data-bs-toggle="modal" data-bs-target="#userGroupModal"><i class="bi bi-people-fill"></i>用户分组</button>
+          <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal"><i class="bi bi-plus"></i>新建用户</button>
+        </div>
       </div>
-      <div class="card card-custom"><div class="card-body p-0">
-        <table class="table table-hover mb-0"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>部门</th><th>事业部</th></tr></thead>
-        <tbody id="userTbody"></tbody></table>
-      </div></div>
+      <div class="row g-3">
+        <div class="col-12">
+          <div class="card card-custom">
+            <div class="card-header bg-white">
+              <ul class="nav nav-tabs card-header-tabs" id="userTabs">
+                <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-users">用户列表</a></li>
+                <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-groups">分组管理</a></li>
+                <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-permissions">权限配置</a></li>
+              </ul>
+            </div>
+            <div class="card-body p-0">
+              <div class="tab-content">
+                <div class="tab-pane fade show active" id="tab-users">
+                  <table class="table table-hover mb-0"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>部门</th><th>事业部</th><th>分组</th><th>操作</th></tr></thead>
+                  <tbody id="userTbody"></tbody></table>
+                </div>
+                <div class="tab-pane fade" id="tab-groups">
+                  <div class="p-3">
+                    <button class="btn btn-sm btn-primary mb-3" onclick="addUserGroupInline()"><i class="bi bi-plus"></i> 新建分组</button>
+                    <table class="table table-hover"><thead><tr><th>ID</th><th>分组名称</th><th>描述</th><th>成员数</th><th>操作</th></tr></thead>
+                    <tbody id="groupTbody"></tbody></table>
+                  </div>
+                </div>
+                <div class="tab-pane fade" id="tab-permissions">
+                  <div class="p-3">
+                    <p class="text-muted small mb-3">选择用户后，可为其配置细粒度操作权限。未配置时按角色默认权限执行。</p>
+                    <div class="mb-3">
+                      <label class="form-label">选择用户</label>
+                      <select class="form-select" id="permUserSelect" onchange="loadUserPermissions(this.value)"></select>
+                    </div>
+                    <div id="permCheckboxes" class="row g-2"></div>
+                    <button class="btn btn-primary mt-3" onclick="saveUserPermissions()"><i class="bi bi-check-circle"></i> 保存权限</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </main>
 </div>
@@ -453,25 +381,59 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div class="modal-body">
       <div class="mb-3"><label class="form-label">用户名</label><input type="text" class="form-control" id="newUsername" required></div>
       <div class="mb-3"><label class="form-label">姓名</label><input type="text" class="form-control" id="newRealName" required></div>
+      <div class="mb-3"><label class="form-label">密码</label><input type="text" class="form-control" id="newPassword" value="123456"></div>
       <div class="mb-3"><label class="form-label">角色</label><select class="form-select" id="newRole"><option>admin</option><option>biz</option><option>rd</option><option>expert</option><option>accountant</option></select></div>
       <div class="mb-3"><label class="form-label">部门</label><input type="text" class="form-control" id="newDept"></div>
       <div class="mb-3"><label class="form-label">事业部</label><select class="form-select" id="newBizDept"><option value="">（不适用）</option><option>电网事业部</option><option>系统集成事业部</option><option>电力气象事业部</option><option>人工智能事业部</option><option>管理事业部</option><option>能源事业部</option></select></div>
+      <div class="mb-3"><label class="form-label">用户分组</label><select class="form-select" id="newUserGroup"><option value="">（无）</option></select></div>
     </div>
     <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-primary" onclick="saveUser()">保存</button></div>
   </div></div>
 </div>
 
+<div class="modal fade" id="editUserModal" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5>编辑用户</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="editUserId">
+      <div class="mb-3"><label class="form-label">姓名</label><input type="text" class="form-control" id="editRealName" required></div>
+      <div class="mb-3"><label class="form-label">角色</label><select class="form-select" id="editRole"><option>admin</option><option>biz</option><option>rd</option><option>expert</option><option>accountant</option></select></div>
+      <div class="mb-3"><label class="form-label">部门</label><input type="text" class="form-control" id="editDept"></div>
+      <div class="mb-3"><label class="form-label">事业部</label><select class="form-select" id="editBizDept"><option value="">（不适用）</option><option>电网事业部</option><option>系统集成事业部</option><option>电力气象事业部</option><option>人工智能事业部</option><option>管理事业部</option><option>能源事业部</option></select></div>
+      <div class="mb-3"><label class="form-label">用户分组</label><select class="form-select" id="editUserGroup"><option value="">（无）</option></select></div>
+      <div class="mb-3"><label class="form-label">重置密码（留空不改）</label><input type="text" class="form-control" id="editPassword" placeholder="留空保持原密码"></div>
+    </div>
+    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-primary" onclick="saveEditUser()">保存</button></div>
+  </div></div>
+</div>
+
+<div class="modal fade" id="userGroupModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5>用户分组管理</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <div class="input-group mb-3">
+        <input type="text" class="form-control" id="newGroupName" placeholder="分组名称">
+        <input type="text" class="form-control" id="newGroupDesc" placeholder="描述（可选）">
+        <button class="btn btn-primary" onclick="createUserGroup()"><i class="bi bi-plus"></i>创建</button>
+      </div>
+      <table class="table table-hover"><thead><tr><th>ID</th><th>分组名称</th><th>描述</th><th>成员数</th><th>操作</th></tr></thead>
+      <tbody id="groupModalTbody"></tbody></table>
+    </div>
+  </div></div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-const API='http://localhost:3000/api';
-let currentUser=null, sessions=[], projects=[], users=[], files=[];
-let currentProjectId=null;
-let uploadingCategory='';
+const API=window.location.origin+'/api';
+let currentUser=null, sessions=[], projects=[], users=[], files=[], userGroups=[], permissionOptions=[], currentReportContent='';
+let currentProjectId=null, uploadingCategory='', editingUserId=null, costResult=null;
+let openBatches=null;
 
 document.addEventListener('DOMContentLoaded',()=>{
   const saved=localStorage.getItem('currentUser');
   if(saved){currentUser=JSON.parse(saved);showMainApp();}
   bindNav();
+  bindDropZone();
 });
 
 function showMainApp(){
@@ -491,24 +453,51 @@ function navigateTo(page){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
-  document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  document.getElementById('pageTitle').textContent={dashboard:'工作台',sessions:'评审批次',projects:'项目资料',upload:'上传资料',cost_analysis:'工作量评估',stats:'统计分析',users:'用户管理'}[page]||page;
+  document.querySelector('.nav-item[data-page="'+page+'"]')?.classList.add('active');
+  document.getElementById('pageTitle').textContent={dashboard:'工作台',sessions:'评审批次',projects:'项目资料',upload:'上传资料','cost-analysis':'工作量评估',stats:'统计分析',users:'用户管理'}[page]||page;
   switch(page){
     case'dashboard':renderDashboard();break;
     case'sessions':populateSessionSelect();renderSessions();break;
     case'projects':populateSessionSelect();renderProjects();break;
     case'upload':break;
     case'cost-analysis':updateCostSelect();renderCostAnalysis();break;
-    case'stats':renderStats();break;
-    case'stats-rich':loadStatsRich();break;
-    case'users':renderUsers();break;
+    case'stats':loadStatsRich();break;
+    case'users':renderUsers();loadUserGroups();loadPermissionOptions();break;
   }
 }
 
-async function loadAll(){await Promise.all([loadSessions(),loadProjects(),loadUsers()]);navigateTo('dashboard');}
+async function loadAll(){await Promise.all([loadSessions(),loadProjects(),loadUsers(),loadFiles(),loadUserGroups()]);navigateTo('dashboard');}
 async function loadSessions(){try{const r=await fetch(API+'/sessions',{headers:authH()});sessions=await r.json();}catch(e){}}
 async function loadProjects(){try{const r=await fetch(API+'/projects',{headers:authH()});projects=await r.json();}catch(e){}}
-async function loadUsers(){try{const r=await fetch(API+'/users',{headers:authH()});users=await r.json();}catch(e){}}
+async function loadUsers(){try{const r=await fetch(API+'/users',{headers:authH()});users=await r.json();populateUserSelects();}catch(e){}}
+async function loadFiles(){
+  try{
+    const r=await fetch(API+'/projects',{headers:authH()});
+    const allProjects=await r.json();
+    files=[];
+    for(const p of allProjects){
+      try{
+        const fr=await fetch(API+'/projects/'+p.id,{headers:authH()});
+        const pd=await fr.json();
+        if(pd.files)files=files.concat(pd.files);
+      }catch(e){}
+    }
+  }catch(e){}
+}
+async function loadUserGroups(){
+  try{
+    const r=await fetch(API+'/user-groups',{headers:authH()});
+    userGroups=await r.json();
+    populateUserGroupSelects();
+  }catch(e){}
+}
+async function loadPermissionOptions(){
+  try{
+    const r=await fetch(API+'/permission-options',{headers:authH()});
+    permissionOptions=await r.json();
+    populatePermUserSelect();
+  }catch(e){}
+}
 
 // LOGIN
 document.getElementById('loginForm').addEventListener('submit',async e=>{
@@ -531,20 +520,11 @@ async function renderDashboard(){
     const s=await r.json();
     document.getElementById('s-sessions').textContent=s.total_sessions||0;
     document.getElementById('s-projects').textContent=s.total_projects||0;
-    
-    // 计算缺少估算表的项目数
-    const missingEst = projects.filter(p => {
-      const pf = files.filter(f => f.project_id === p.id);
-      return !pf.some(f => f.file_category === 'estimation');
-    }).length;
-    document.getElementById('s-missing').textContent = missingEst;
-    document.getElementById('s-missing').className = 'stat-num ' + (missingEst > 0 ? 'text-danger' : 'text-success');
-    
-    document.getElementById('s-pending').textContent = s.pending_tasks?.length || 0;
-    
-    document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>`<div class="small mb-1"><i class="bi bi-circle-fill text-primary me-1"></i>${a}</div>`).join(''):'<p class="text-muted small">暂无活动</p>');
-    
-    // 上传进度图
+    const missingEst=projects.filter(p=>!files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
+    document.getElementById('s-missing').textContent=missingEst;
+    document.getElementById('s-missing').className='stat-num '+(missingEst>0?'text-danger':'text-success');
+    document.getElementById('s-pending').textContent=s.pending_tasks?.length||0;
+    document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>'<div class="small mb-1"><i class="bi bi-circle-fill text-primary me-1"></i>'+a+'</div>').join(''):'<p class="text-muted small">暂无活动</p>');
     renderUploadProgressChart();
   }catch(e){console.error(e);}
 }
@@ -553,72 +533,54 @@ function renderUploadProgressChart(){
   const ctx=document.getElementById('uploadProgressChart');
   if(!ctx)return;
   if(ctx._c)ctx._c.destroy();
-  
-  // 统计各类资料的上传情况
-  const types=['estimation','feasibility','bid','award','contract','profit','subcontract'];
-  const labels=['估算表','可研','招标','中标','合同','利润率','分包'];
-  const uploaded=[0,0,0,0,0,0,0];
+  const types=['estimation','feasibility','bid','award','contract','profit','subcontract','tech_spec'];
+  const labels=['估算表','可研','招标','中标','合同','利润率','分包','技术规范'];
+  const uploaded=types.map(t=>files.filter(f=>f.file_category===t).length);
   const total=projects.length||1;
-  
-  types.forEach((type,i)=>{
-    uploaded[i]=files.filter(f=>f.file_category===type).length;
-  });
-  
-  ctx._c=new Chart(ctx,{
-    responsive: true,
-        maintainAspectRatio: false,
-        new Chart(ctx,{
-    type:'bar',
-    data:{
-      labels,
-      datasets:[{label:'已上传项目数',data:uploaded,backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#10b981','#f59e0b','#ec4899','#6b7280'],borderRadius:4}]
-    },
-    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:total}}}
-  });
+  ctx._c=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'已上传文件数',data:uploaded,backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#10b981','#f59e0b','#ec4899','#6b7280','#0ea5e9'],borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
 }
 
 // SESSIONS
 function populateSessionSelect(){
   ['projSessionId','importSessionId'].forEach(id=>{
     const el=document.getElementById(id);
-    if(el)el.innerHTML='<option value="">（不关联）</option>'+sessions.map(s=>`<option value="${s.id}">${s.name||s.session_name}</option>`).join('');
+    if(el)el.innerHTML='<option value="">（不关联）</option>'+sessions.map(s=>'<option value="'+s.id+'">'+(s.name||s.session_name)+'</option>').join('');
   });
 }
 function renderSessions(){
   const tb=document.getElementById('sessionTbody');if(!tb)return;
-  tb.innerHTML=sessions.map(s=>`<tr>
-    <td>${s.id}</td><td>${s.name||s.session_name||'-'}</td>
-    <td><span class="badge bg-${{completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary'}">${{completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status}</span></td>
-    <td>${fmtTime(s.review_time)||'-'}</td>
-    <td>${projects.filter(p=>p.session_id===s.id).length}</td>
-      <td>
-        ${s.status==='pending'?`<button class="btn btn-sm btn-warning" onclick="updateSessionStatus(${s.id},'in_progress')"><i class="bi bi-play-fill"></i>启动</button>`:''}
-        ${s.status==='in_progress'?`<button class="btn btn-sm btn-success" onclick="updateSessionStatus(${s.id},'completed')"><i class="bi bi-archive-fill"></i>归档</button>`:''}
-        ${s.status==='completed'?`<span class="text-muted small"><i class="bi bi-archive"></i>已归档</span>`:''}
-      </td>
-    </tr>`).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无批此</td></tr>';
+  const isAdmin=currentUser&&currentUser.role==='admin';
+  tb.innerHTML=sessions.map(s=>{
+    const sFiles=files.filter(f=>projects.some(p=>p.id===f.project_id&&p.session_id===s.id));
+    return '<tr>'+
+      '<td>'+s.id+'</td><td>'+(s.name||s.session_name||'-')+'</td>'+
+      '<td><span class="badge bg-'+({completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary')+'">'+({completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status)+'</span></td>'+
+      '<td>'+fmtTime(s.review_time)+'</td>'+
+      '<td>'+projects.filter(p=>p.session_id===s.id).length+'</td>'+
+      '<td>'+
+        (s.status==='pending'?'<button class="btn btn-sm btn-warning me-1" onclick="updateSessionStatus('+s.id+',\'in_progress\')"><i class="bi bi-play-fill"></i>启动</button>':'')+
+        (s.status==='in_progress'?'<button class="btn btn-sm btn-success me-1" onclick="updateSessionStatus('+s.id+',\'completed\')"><i class="bi bi-archive-fill"></i>归档</button>':'')+
+        (s.status==='completed'?'<span class="text-muted small"><i class="bi bi-archive"></i>已归档</span>':'')+
+        (isAdmin&&sFiles.length>0?'<button class="btn btn-sm btn-outline-primary me-1" title="全量下载" onclick="downloadSessionFiles('+s.id+')"><i class="bi bi-download"></i>全部文件</button><button class="btn btn-sm btn-outline-success" title="下载估算表" onclick="downloadSessionEstimation('+s.id+')"><i class="bi bi-file-earmark-excel"></i>估算表</button>':'')+
+      '</td></tr>';
+  }).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无批次</td></tr>';
 }
-
-// PROJECTS - 批次抽屉：按评审批次分组，归档批次收缩，进行中批次默认展开
-let openBatches=null;
-function batchLabel(n){const c=['一','二','三','四','五','六','七','八','九','十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十'];return '第'+(c[n-1]||n)+'批';}
-function fmtTime(t){if(!t)return'';const s=String(t).replace('T',' ').slice(0,16);return s||t;}
+function fmtTime(t){if(!t)return'';return String(t).replace('T',' ').slice(0,16);}
 function sessionStatusBadge(status){
   const map={completed:['success','已完成·归档'],in_progress:['warning','进行中'],pending:['info','未开始']};
   const m=map[status];
-  return m?`<span class="badge bg-${m[0]}">${m[1]}</span>`:`<span class="badge bg-secondary">${status||'-'}</span>`;
+  return m?'<span class="badge bg-'+m[0]+'">'+m[1]+'</span>':'<span class="badge bg-secondary">'+(status||'-')+'</span>';
 }
+
+// PROJECTS - batch drawer
+function batchLabel(n){const c=['一','二','三','四','五','六','七','八','九','十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十'];return '第'+(c[n-1]||n)+'批';}
 function renderProjects(){
   const box=document.getElementById('batchDrawerList');if(!box)return;
-
-  // 缺少估算表统计（全批次合计）
   const missingEst=projects.filter(p=>!files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
   const missingNotice=document.getElementById('missingNotice');
   const missingText=document.getElementById('missingText');
-  if(missingEst>0){missingNotice.classList.remove('d-none');missingText.textContent=`共${missingEst}个项目尚未上传项目估算表，请及时上传。`;}
+  if(missingEst>0){missingNotice.classList.remove('d-none');missingText.textContent='共'+missingEst+'个项目尚未上传项目估算表，请及时上传。';}
   else{missingNotice.classList.add('d-none');}
-
-  // 按评审批次分组（按批次id升序 => 第一批、第二批、第三批...）
   const sorted=[...sessions].sort((a,b)=>a.id-b.id);
   const groups=sorted.map((s,idx)=>({
     key:'s'+s.id,session:s,label:batchLabel(idx+1),
@@ -627,76 +589,120 @@ function renderProjects(){
   }));
   const orphans=projects.filter(p=>!p.session_id||!sessions.some(s=>s.id===p.session_id));
   if(orphans.length)groups.push({key:'orphan',session:null,label:'未分批次',items:orphans,archived:false,open:false});
-
-  // 展开状态：首次进入时进行中批次默认展开；后续切换保留用户手动状态
   if(!openBatches)openBatches=new Set();
   groups.forEach(g=>{if(g.open&&!openBatches.has(g.key))openBatches.add(g.key);});
-
   if(groups.length===0){
     box.innerHTML='<div class="card card-custom"><div class="card-body text-muted text-center py-5"><i class="bi bi-folder2-open fs-1 d-block mb-2"></i>暂无评审批次<br><span class="small">请先在「评审批次」页创建批次，再通过 Excel导入 或 新建项目 挂接项目</span></div></div>';
     return;
   }
-
   box.innerHTML=groups.map(g=>{
     const isOpen=openBatches.has(g.key);
     const total=g.items.length;
     const hasEst=g.items.filter(p=>files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
-    const head=`
-      <div class="batch-header" onclick="toggleBatch('${g.key}')">
-        <i class="bi bi-chevron-right batch-arrow"></i>
-        <span class="batch-title">${g.label}</span>
-        ${g.session?`<span class="text-muted small">${g.session.name||g.session.session_name||''}</span>`:''}
-        ${g.session?sessionStatusBadge(g.session.status):'<span class="badge bg-secondary">待分派</span>'}
-        <span class="batch-count">项目 ${total} 个</span>
-        ${total>0?`<span class="badge bg-${hasEst===total?'success':'danger'}">估算表 ${hasEst}/${total}</span>`:''}
-        ${g.session&&g.session.review_time?`<span class="text-muted small ms-auto">${fmtTime(g.session.review_time)}</span>`:''}
-      </div>`;
+    const head='<div class="batch-header" onclick="toggleBatch(\''+g.key+'\')">'+
+      '<i class="bi bi-chevron-right batch-arrow"></i>'+
+      '<span class="batch-title">'+g.label+'</span>'+
+      (g.session?'<span class="text-muted small">'+(g.session.name||g.session.session_name||'')+'</span>':'')+
+      (g.session?sessionStatusBadge(g.session.status):'<span class="badge bg-secondary">待分派</span>')+
+      '<span class="batch-count">项目 '+total+' 个</span>'+
+      (total>0?'<span class="badge bg-'+(hasEst===total?'success':'danger')+'">估算表 '+hasEst+'/'+total+'</span>':'')+
+      (g.session&&g.session.review_time?'<span class="text-muted small ms-auto">'+fmtTime(g.session.review_time)+'</span>':'')+
+    '</div>';
     const ck=c=>v=>v?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">—</span>';
     const rows=g.items.map(p=>{
       const pf=files.filter(f=>f.project_id===p.id);
       const has=c=>pf.some(f=>f.file_category===c);
       const statusBg={reviewing:'warning',draft:'secondary',completed:'success'}[p.status]||'secondary';
-      return `<tr>
-        <td>${p.id}</td>
-        <td title="${p.project_name||''}">${(p.project_name||'').substring(0,24)}</td>
-        <td>${p.biz_department||'-'}</td>
-        <td>${p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-'}</td>
-        <td><span class="badge bg-${statusBg}">${{reviewing:'评审中',draft:'草稿',completed:'已完成',archived:'已归档'}[p.status]||p.status||'-'}</span></td>
-        <td class="text-center">${ck('estimation')(has('estimation'))}</td>
-        <td class="text-center">${ck('feasibility')(has('feasibility'))}</td>
-        <td class="text-center">${ck('bid')(has('bid'))}</td>
-        <td class="text-center">${ck('contract')(has('contract'))}</td>
-        <td>
-          <button class="btn btn-sm btn-danger me-1" title="上传估算表" onclick="goToUpload(${p.id},'estimation')"><i class="bi bi-file-earmark-excel"></i></button>
-          <button class="btn btn-sm btn-info me-1" title="查看/上传资料" onclick="goToUpload(${p.id})"><i class="bi bi-folder"></i></button>
-          <button class="btn btn-sm btn-success" title="工作量评估" onclick="goToCost(${p.id})"><i class="bi bi-graph-down"></i></button>
-        </td>
-      </tr>`;
+      return '<tr>'+
+        '<td>'+p.id+'</td>'+
+        '<td title="'+(p.project_name||'')+'">'+(p.project_name||'').substring(0,24)+'</td>'+
+        '<td>'+(p.biz_department||'-')+'</td>'+
+        '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
+        '<td><span class="badge bg-'+statusBg+'">'+({reviewing:'评审中',draft:'草稿',completed:'已完成',archived:'已归档'}[p.status]||p.status||'-')+'</span></td>'+
+        '<td class="text-center">'+ck('estimation')(has('estimation'))+'</td>'+
+        '<td class="text-center">'+ck('feasibility')(has('feasibility'))+'</td>'+
+        '<td class="text-center">'+ck('bid')(has('bid'))+'</td>'+
+        '<td class="text-center">'+ck('contract')(has('contract'))+'</td>'+
+        '<td>'+
+          '<button class="btn btn-sm btn-danger me-1" title="上传估算表" onclick="goToUpload('+p.id+',\'estimation\')"><i class="bi bi-file-earmark-excel"></i></button>'+
+          '<button class="btn btn-sm btn-info me-1" title="查看/上传资料" onclick="goToUpload('+p.id+')"><i class="bi bi-folder"></i></button>'+
+          '<button class="btn btn-sm btn-success" title="工作量评估" onclick="goToCost('+p.id+')"><i class="bi bi-graph-down"></i></button>'+
+        '</td>'+
+      '</tr>';
     }).join('');
-    const body=`
-      <div class="batch-body">
-        ${total>0?`<div class="table-responsive"><table class="table table-hover mb-0">
-          <thead class="table-light"><tr>
-            <th>ID</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th>
-            <th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">投标</th><th class="text-center">合同</th>
-            <th>操作</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table></div>`:'<div class="batch-empty">该批次暂无项目，请通过「Excel导入」或「新建项目」挂接到本批次</div>'}
-      </div>`;
-    return `<div class="batch-drawer ${isOpen?'open':''} ${g.archived?'archived':''}" data-batch="${g.key}">${head}${body}</div>`;
+    const body='<div class="batch-body">'+
+      (total>0?'<div class="table-responsive"><table class="table table-hover mb-0">'+
+        '<thead class="table-light"><tr><th>ID</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th>'+
+        '<th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">投标</th><th class="text-center">合同</th><th>操作</th></tr></thead>'+
+        '<tbody>'+rows+'</tbody></table></div>':'<div class="batch-empty">该批次暂无项目，请通过「Excel导入」或「新建项目」挂接到本批次</div>')+
+    '</div>';
+    return '<div class="batch-drawer '+(isOpen?'open':'')+' '+(g.archived?'archived':'')+'" data-batch="'+g.key+'">'+head+body+'</div>';
   }).join('');
 }
 function toggleBatch(key){
-  const drawer=document.querySelector(`.batch-drawer[data-batch="${key}"]`);
+  const drawer=document.querySelector('.batch-drawer[data-batch="'+key+'"]');
   if(!drawer)return;
   const open=drawer.classList.toggle('open');
   if(!openBatches)return;
   if(open)openBatches.add(key);else openBatches.delete(key);
 }
 
-// UPLOAD PAGE
-function goToUpload(projectId, category){
+// UPLOAD - drag & drop
+function bindDropZone(){
+  const dz=document.getElementById('dropZone');
+  const input=document.getElementById('dropFileInput');
+  if(!dz||!input)return;
+  ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('dragover');}));
+  ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('dragover');}));
+  dz.addEventListener('drop',e=>{
+    const droppedFiles=Array.from(e.dataTransfer.files);
+    if(droppedFiles.length>0)handleDragDropUpload(droppedFiles);
+  });
+  input.addEventListener('change',e=>{
+    const selected=Array.from(e.target.files);
+    if(selected.length>0)handleDragDropUpload(selected);
+    e.target.value='';
+  });
+}
+
+async function handleDragDropUpload(fileList){
+  const statusEl=document.getElementById('dropUploadStatus');
+  if(!currentProjectId){if(statusEl)statusEl.innerHTML='<div class="alert alert-warning">请先选择项目</div>';return;}
+  let html='<div class="alert alert-info">正在上传 '+fileList.length+' 个文件...</div>';
+  if(statusEl)statusEl.innerHTML=html;
+  let success=0,fail=0;
+  for(const file of fileList){
+    const fd=new FormData();
+    fd.append('file',file);
+    fd.append('category','auto');
+    try{
+      const r=await fetch(API+'/projects/'+currentProjectId+'/files',{method:'POST',headers:{'Authorization':'Bearer '+localStorage.getItem('token')},body:fd});
+      const data=await r.json();
+      if(r.ok){
+        success++;
+        // 刷新files
+        await refreshProjectFiles();
+        renderUploadPage();
+      }else{fail++;}
+    }catch(e){fail++;}
+  }
+  if(statusEl)statusEl.innerHTML='<div class="alert alert-'+(fail===0?'success':'warning')+'">上传完成：成功 '+success+' 个'+(fail>0?'，失败 '+fail+' 个':'')+'</div>';
+  renderProjects();
+}
+
+async function refreshProjectFiles(){
+  try{
+    const r=await fetch(API+'/projects/'+currentProjectId,{headers:authH()});
+    const d=await r.json();
+    if(d.files){
+      // 移除旧文件、添加新文件
+      files=files.filter(f=>f.project_id!==currentProjectId);
+      files=files.concat(d.files);
+    }
+  }catch(e){}
+}
+
+function goToUpload(projectId,category){
   currentProjectId=projectId;
   if(category){
     uploadingCategory=category;
@@ -709,29 +715,26 @@ function goToUpload(projectId, category){
 function renderUploadPage(){
   const p=projects.find(x=>x.id===currentProjectId);
   if(!p)return;
-  document.getElementById('uploadProjectName').textContent='上传资料 - '+p.project_name;
-  document.getElementById('uploadProjectInfo').textContent=`项目编号: ${p.id} | 承建部门: ${p.biz_department||'-'}`;
-  
+  document.getElementById('uploadProjectName').textContent='上传资料 - '+(p.project_name||'');
+  document.getElementById('uploadProjectInfo').textContent='项目编号: '+p.id+' | 承建部门: '+(p.biz_department||'-');
   const pf=files.filter(f=>f.project_id===currentProjectId);
+  document.getElementById('uploadFileCount').textContent=pf.length>0?'共 '+pf.length+' 个文件':'';
   const listEl=document.getElementById('uploadedFilesList');
   if(pf.length>0){
-    listEl.innerHTML=pf.map(f=>`
-      <div class="col-md-4">
-        <div class="file-card ${f.file_category==='estimation'?'core':''}">
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <i class="bi bi-file-earmark-${getFileIcon(f.file_type)} fs-4 ${f.file_category==='estimation'?'text-danger':'text-primary'}"></i>
-              <span class="ms-2 fw-bold">${f.originalname}</span>
-            </div>
-            <div>
-              <span class="badge bg-${f.file_category==='estimation'?'danger':'secondary'} me-1">${getFileCategoryName(f.file_category)}</span>
-              <a href="${API}${f.url}" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a>
-            </div>
-          </div>
-          <div class="small text-muted mt-1">${f.upload_time?new Date(f.upload_time).toLocaleDateString():'-'}</div>
-        </div>
-      </div>
-    `).join('');
+    listEl.innerHTML=pf.map(f=>{
+      const catName=getFileCategoryName(f.file_category);
+      const autoTag=f.auto_detected?'<span class="badge bg-info me-1" title="系统自动识别">自动</span>':'';
+      const seqTag=f.file_seq?'<span class="badge bg-light text-dark me-1">'+f.file_seq+'</span>':'';
+      return '<div class="col-md-4"><div class="file-card '+(f.file_category==='estimation'?'core':'')+'">'+
+        '<div class="d-flex justify-content-between align-items-center">'+
+          '<div><i class="bi bi-file-earmark-'+getFileIcon(f.file_type)+' fs-4 '+(f.file_category==='estimation'?'text-danger':'text-primary')+'"></i>'+
+          '<span class="ms-2 fw-bold">'+f.originalname+'</span></div>'+
+          '<div>'+seqTag+autoTag+'<span class="badge bg-'+(f.file_category==='estimation'?'danger':'secondary')+' me-1">'+catName+'</span>'+
+          '<a href="'+API+f.url+'" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a></div>'+
+        '</div>'+
+        '<div class="small text-muted mt-1">'+(f.upload_time?new Date(f.upload_time).toLocaleDateString():'-')+(f.uploader_name?' | '+f.uploader_name:'')+'</div>'+
+      '</div></div>';
+    }).join('');
   }else{
     listEl.innerHTML='<p class="text-muted small">暂无已上传资料</p>';
   }
@@ -743,41 +746,45 @@ function triggerUpload(category){
   modal.show();
 }
 function getAcceptForCategory(cat){
-  const map={estimation:'.xlsx,.xls',feasibility:'.pdf,.docx',bid:'.pdf,.docx',award:'.pdf',contract:'.pdf,.docx',profit:'.xlsx,.xls,.pdf',subcontract:'.pdf,.docx'};
+  const map={estimation:'.xlsx,.xls',feasibility:'.pdf,.docx',bid:'.pdf,.docx',award:'.pdf',contract:'.pdf,.docx',tech_spec:'.pdf,.docx',profit:'.xlsx,.xls,.pdf',subcontract:'.pdf,.docx'};
   return map[cat]||'.pdf,.docx,.xlsx,.xls,.jpg,.png';
 }
-
 async function doUploadFile(){
   const fileInput=document.getElementById('uploadFileInput');
-  const file=fileInput ? fileInput.files[0] : null;
+  const file=fileInput?fileInput.files[0]:null;
   const statusEl=document.getElementById('uploadStatus');
   if(!file){alert('请选择文件');return;}
   if(statusEl)statusEl.innerHTML='<div class="alert alert-info">正在上传...</div>';
   const fd=new FormData();
   fd.append('file',file);
-  const cat=uploadingCategory||document.getElementById('uploadCategory').value||'other';
+  const cat=uploadingCategory||document.getElementById('uploadCategory').value||'auto';
   fd.append('category',cat);
   const descEl=document.getElementById('uploadDesc');
   if(descEl&&descEl.value)fd.append('description',descEl.value);
   try{
-    const r=await fetch(`${API}/projects/${currentProjectId}/files`,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+localStorage.getItem('token')},
-      body:fd
-    });
+    const r=await fetch(API+'/projects/'+currentProjectId+'/files',{method:'POST',headers:{'Authorization':'Bearer '+localStorage.getItem('token')},body:fd});
     const data=await r.json();
     if(r.ok){
-      if(statusEl)statusEl.innerHTML='<div class="alert alert-success">✓ 上传成功！</div>';
+      if(statusEl)statusEl.innerHTML='<div class="alert alert-success">上传成功！'+(data.auto_detected?'<br>系统自动识别类型：'+getFileCategoryName(data.file_category):'')+'<br>文件序号：'+(data.file_seq||'-')+'</div>';
       if(fileInput)fileInput.value='';
-      setTimeout(()=>{const m=document.getElementById('uploadFileModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();renderUploadPage&&renderUploadPage();renderProjects&&renderProjects();},800);
+      await refreshProjectFiles();
+      setTimeout(()=>{const m=document.getElementById('uploadFileModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();renderUploadPage();renderProjects();},1500);
     }else{throw new Error(data.error||'上传失败');}
-  }catch(e){if(statusEl)statusEl.innerHTML=`<div class="alert alert-danger">✗ ${e.message}</div>`;}
+  }catch(e){if(statusEl)statusEl.innerHTML='<div class="alert alert-danger"> '+e.message+'</div>';}
+}
+
+// BATCH DOWNLOAD
+function downloadSessionFiles(sessionId){
+  window.location.href=API+'/sessions/'+sessionId+'/download-all?token='+encodeURIComponent(localStorage.getItem('token'));
+}
+function downloadSessionEstimation(sessionId){
+  window.location.href=API+'/sessions/'+sessionId+'/download-estimation?token='+encodeURIComponent(localStorage.getItem('token'));
 }
 
 // COST ANALYSIS
 function updateCostSelect(){
   const sel=document.getElementById('costProjectSelect');
-  if(sel)sel.innerHTML='<option value="">-- 请选择项目 --</option>'+projects.map(p=>`<option value="${p.id}">${p.project_name||p.name}</option>`).join('');
+  if(sel)sel.innerHTML='<option value="">-- 请选择项目 --</option>'+projects.map(p=>'<option value="'+p.id+'">'+(p.project_name||p.name)+'</option>').join('');
 }
 async function renderCostAnalysis(){
   updateCostSelect();
@@ -791,25 +798,23 @@ async function loadCostDetail(pid){
     fetch(API+'/projects/'+pid+'/cost',{headers:authH()})
   ]);
   const proj=await pjR.json(),cost=await costR.json();
-  
+  costResult=cost;
   const hc=document.getElementById('costHeaderCard'),hb=document.getElementById('costHeaderBody');
   if(hc&&hb){
     hc.classList.remove('d-none');
-    hb.innerHTML=`<h5 class="mb-2">${proj.project_name||proj.name}</h5>
-      <div class="row g-2 text-muted small">
-        <div class="col-md-3"><strong>承建部门:</strong> ${proj.biz_department||'-'}</div>
-        <div class="col-md-3"><strong>合同金额:</strong> ¥${Number(proj.contract_amount||0).toLocaleString()}</div>
-        <div class="col-md-3"><strong>总成本:</strong> ¥${Number(proj.cost_summary?.total_cost||0).toLocaleString()}</div>
-      </div>`;
+    hb.innerHTML='<h5 class="mb-2">'+(proj.project_name||proj.name)+'</h5>'+
+      '<div class="row g-2 text-muted small">'+
+        '<div class="col-md-3"><strong>承建部门:</strong> '+(proj.biz_department||'-')+'</div>'+
+        '<div class="col-md-3"><strong>合同金额:</strong> ¥'+Number(proj.contract_amount||0).toLocaleString()+'</div>'+
+        '<div class="col-md-3"><strong>总成本:</strong> ¥'+Number(proj.cost_summary?.total_cost||0).toLocaleString()+'</div>'+
+      '</div>';
   }
-  
   const cardsEl=document.getElementById('costSummaryCards');
   if(cardsEl){
     const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
     const catSum=cost.category_cost||{};
-    cardsEl.innerHTML=Object.entries(catSum).map(([k,v])=>`<div class="col-6 col-md-4 col-lg-2"><div class="card card-custom"><div class="card-body p-3 text-center"><div class="text-muted small">${catMap[k]||k}</div><div class="h5 fw-bold">¥${Number(v||0).toLocaleString()}</div></div></div></div>`).join('');
+    cardsEl.innerHTML=Object.entries(catSum).map(([k,v])=>'<div class="col-6 col-md-4 col-lg-2"><div class="card card-custom"><div class="card-body p-3 text-center"><div class="text-muted small">'+(catMap[k]||k)+'</div><div class="h5 fw-bold">¥'+Number(v||0).toLocaleString()+'</div></div></div></div>').join('');
   }
-  
   const wtEl=document.getElementById('workTbody');
   if(wtEl){
     const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
@@ -819,35 +824,35 @@ async function loadCostDetail(pid){
       const avg=w.expert_days_avg!=null?w.expert_days_avg:w.person_days;
       const finalCost=w.adjusted_cost||w.cost;
       let inputCell=isExpert&&expDays.indexOf(currentUser.id)===-1
-        ?`<input type="number" class="form-control form-control-sm" id="input_${w.id}" placeholder="?" min="0" step="0.5">`
-        :`${expDays.length>0?expDays.join('/'):'-'}`;
-      return `<tr>
-        <td><span class="badge bg-secondary">${catMap[w.category]||w.category}</span></td>
-        <td>${(w.work_task||'').substring(0,10)}</td>
-        <td title="${w.work_item||''}">${(w.work_item||'').substring(0,14)}</td>
-        <td>${w.person_days!=null?w.person_days:'-'}</td>
-        <td class="text-muted">¥${Number(w.cost||0).toLocaleString()}</td>
-        <td colspan="5">${inputCell}</td>
-        <td class="fw-bold">${avg.toFixed(1)}</td>
-        <td class="fw-bold text-success">¥${Number(finalCost).toLocaleString()}</td>
-      </tr>`;
+       ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="?" min="0" step="0.5">'
+        :(expDays.length>0?expDays.join('/'):'-');
+      return '<tr>'+
+        '<td><span class="badge bg-secondary">'+(catMap[w.category]||w.category)+'</span></td>'+
+        '<td>'+(w.work_task||'').substring(0,10)+'</td>'+
+        '<td title="'+(w.work_item||'')+'">'+(w.work_item||'').substring(0,14)+'</td>'+
+        '<td>'+(w.person_days!=null?w.person_days:'-')+'</td>'+
+        '<td class="text-muted">¥'+Number(w.cost||0).toLocaleString()+'</td>'+
+        '<td colspan="5">'+inputCell+'</td>'+
+        '<td class="fw-bold">'+avg.toFixed(1)+'</td>'+
+        '<td class="fw-bold text-success">¥'+Number(finalCost).toLocaleString()+'</td>'+
+      '</tr>';
     }).join('')||'<tr><td colspan="12" class="text-muted text-center">暂无工作明细</td></tr>';
-    
     if(isExpert){
-      wtEl.insertAdjacentHTML('beforeend',`<tr><td colspan="12" class="text-end p-2"><button class="btn btn-sm btn-success" onclick="submitEstimate(${pid})"><i class="bi bi-check-circle"></i> 提交我的评估</button></td></tr>`);
+      wtEl.insertAdjacentHTML('beforeend','<tr><td colspan="12" class="text-end p-2"><button class="btn btn-sm btn-success" onclick="submitEstimate('+pid+')"><i class="bi bi-check-circle"></i> 提交我的评估</button></td></tr>');
     }
   }
-  
   const badge=document.getElementById('estimateBadge');
   if(badge){
     const estCount=(cost.work_items||[]).filter(w=>w.expert_days_list&&w.expert_days_list.length>0).length;
-    badge.textContent=estCount>0?`${estCount}项已评估`:'等待评估';
+    badge.textContent=estCount>0?estCount+'项已评估':'等待评估';
     badge.className='badge '+(estCount>0?'bg-success':'bg-warning');
   }
+  const dlBtn=document.getElementById('downloadCostBtn');
+  if(dlBtn)dlBtn.style.display=cost.work_items&&cost.work_items.length>0?'inline-block':'none';
 }
 
 async function submitEstimate(projectId){
-  const items=currentProjectId?costResult?.work_items:[];
+  const items=costResult?costResult.work_items||[]:[];
   const estimates=[];
   for(const item of items){
     const input=document.getElementById('input_'+item.id);
@@ -863,28 +868,280 @@ async function submitEstimate(projectId){
   }catch(e){alert('提交失败: '+e.message);}
 }
 
+function downloadCostExcel(){
+  if(!costResult||!currentProjectId)return;
+  const p=projects.find(x=>x.id===currentProjectId);
+  if(!p)return;
+  let csv='\ufeff';
+  csv+='类别,任务,工作项,人天,原费用,专家评估人天,平均人天,最终成本\n';
+  const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
+  (costResult.work_items||[]).forEach(w=>{
+    const expDays=(w.expert_days_list||[]).join('/');
+    csv+=[catMap[w.category]||w.category,w.work_task||'',w.work_item||'',w.person_days||'',w.cost||0,expDays,w.expert_days_avg||'',w.adjusted_cost||w.cost||0].map(c=>'"'+c+'"').join(',')+'\n';
+  });
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='成本估算明细_'+(p.project_name||'')+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function goToCost(pid){currentProjectId=pid;navigateTo('cost-analysis');loadCostDetail(pid);}
+
 // STATS
-function renderStats(){
-  const ctx1=document.getElementById('statsChart');
-  if(ctx1){if(ctx1._c)ctx1._c.destroy();
-    fetch(API+'/stats/cost-structure',{headers:authH()}).then(r=>r.json()).then(d=>{
-      ctx1._c=new Chart(ctx1,{type:'bar',data:{labels:d.labels,datasets:[{label:'成本(元)',data:d.data,backgroundColor:'rgba(102,126,234,.7)',borderRadius:4}]},options:{responsive:true}});
-    }).catch(()=>{});
-  }
-  
-  const ctx2=document.getElementById('materialChart');
-  if(ctx2){if(ctx2._c)ctx2._c.destroy();
-    const types=['estimation','feasibility','bid','award','contract','profit','subcontract'];
-    const labels=['估算表','可研','招标','中标','合同','利润率','分包'];
-    const data=types.map(t=>files.filter(f=>f.file_category===t).length);
-    ctx2._c=new Chart(ctx2,{type:'doughnut',data:{labels,data,datasets:[{data,backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#10b981','#f59e0b','#ec4899','#6b7280'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,plugins:{legend:{position:'right'}}}});
-  }
+let deptChartInstance=null,monthlyChartInstance=null,fileChartInstance=null,sessionChartInstance=null;
+async function loadStatsRich(){
+  try{
+    const r=await fetch(API+'/stats/detailed',{headers:authH()});
+    const data=await r.json();
+    renderStatsOverview(data);
+    renderDeptChart(data.departments);
+    renderMonthlyChart(data.monthly_trend);
+    renderFileChart(data.file_categories);
+    renderSessionChart(data.sessions);
+    renderDeptTable(data.departments);
+    populateDeptSelect(data.departments);
+  }catch(e){console.error('Failed to load stats:',e);}
+}
+function renderStatsOverview(data){
+  document.getElementById('statTotalProjects').textContent=data.overview.total_projects;
+  document.getElementById('statTotalAmount').textContent=(data.overview.total_amount/10000).toFixed(1);
+  document.getElementById('statCompletedProjects').textContent=data.overview.completed_projects;
+  document.getElementById('statTotalSessions').textContent=data.overview.total_sessions;
+}
+function renderDeptChart(depts){
+  const ctx=document.getElementById('deptChart');if(!ctx)return;
+  if(deptChartInstance)deptChartInstance.destroy();
+  deptChartInstance=new Chart(ctx,{type:'doughnut',data:{labels:depts.map(d=>d.name),datasets:[{data:depts.map(d=>d.total_amount),backgroundColor:['#667eea','#764ba2','#f093fb','#f5576c','#4fac00','#00f2fe']}]},options:{responsive:true,plugins:{legend:{position:'right'},tooltip:{callbacks:{label:c=>' ¥'+c.parsed.toLocaleString()}}}}});
+}
+function renderMonthlyChart(trend){
+  const ctx=document.getElementById('monthlyChart');if(!ctx)return;
+  if(monthlyChartInstance)monthlyChartInstance.destroy();
+  monthlyChartInstance=new Chart(ctx,{type:'line',data:{labels:trend.map(t=>t.month),datasets:[{label:'项目数量',data:trend.map(t=>t.projects),borderColor:'#667eea',backgroundColor:'rgba(102,126,234,0.1)',fill:true,tension:0.4},{label:'合同金额(万)',data:trend.map(t=>(t.total_amount/10000).toFixed(1)),borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.1)',fill:true,tension:0.4,yAxisID:'y1'}]},options:{responsive:true,interaction:{intersect:false},scales:{y:{beginAtZero:true},y1:{position:'right',beginAtZero:true}}}});
+}
+function renderFileChart(cats){
+  const ctx=document.getElementById('fileChart');if(!ctx)return;
+  if(fileChartInstance)fileChartInstance.destroy();
+  const labels={estimation:'估算表',feasibility:'可研报告',bid:'招标文件',award:'中标文件',contract:'合同',profit:'利润评审',subcontract:'分包申请',tech_spec:'技术规范书'};
+  fileChartInstance=new Chart(ctx,{type:'bar',data:{labels:Object.keys(cats).map(k=>labels[k]||k),datasets:[{label:'上传数量',data:Object.values(cats).map(c=>c.count),backgroundColor:'#667eea'},{label:'覆盖项目数',data:Object.values(cats).map(c=>c.projects_with_file),backgroundColor:'#10b981'}]},options:{responsive:true,plugins:{legend:{position:'top'}}}});
+}
+function renderSessionChart(sessions){
+  const ctx=document.getElementById('sessionChart');if(!ctx)return;
+  if(sessionChartInstance)sessionChartInstance.destroy();
+  sessionChartInstance=new Chart(ctx,{type:'bar',data:{labels:sessions.map(s=>s.name||s.session_name||'批次'+s.id),datasets:[{label:'总项目数',data:sessions.map(s=>s.project_count),backgroundColor:'#667eea'},{label:'已完成',data:sessions.map(s=>s.completed_projects),backgroundColor:'#10b981'}]},options:{responsive:true,plugins:{legend:{position:'top'}},scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}}}});
+}
+function renderDeptTable(depts){
+  const tbody=document.getElementById('deptStatsBody');if(!tbody)return;
+  const totalAmount=depts.reduce((s,d)=>s+d.total_amount,0);
+  tbody.innerHTML=depts.map((d,i)=>'<tr><td>'+(i+1)+'</td><td>'+d.name+'</td><td>'+d.count+'</td><td>'+d.total_amount.toLocaleString()+'</td><td>'+d.avg_amount.toLocaleString()+'</td><td>'+(totalAmount>0?((d.total_amount/totalAmount)*100).toFixed(1):0)+'%</td></tr>').join('')||'<tr><td colspan="6" class="text-muted text-center">暂无数据</td></tr>';
+}
+function populateDeptSelect(depts){
+  const select=document.getElementById('statsDepartment');if(!select)return;
+  select.innerHTML='<option value="">全部事业部</option>'+depts.map(d=>'<option value="'+d.name+'">'+d.name+'</option>').join('');
+}
+function generateReport(){
+  const type=document.getElementById('statsReportType').value;
+  const dept=document.getElementById('statsDepartment').value;
+  fetch(API+'/reports/generate',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({type,params:{department:dept}})})
+  .then(r=>r.json()).then(data=>{
+    if(data.success){currentReportContent=data.content;showReportPreview(data.content);}
+    else{alert('生成报告失败: '+(data.error||'未知错误'));}
+  }).catch(e=>alert('网络错误: '+e.message));
+}
+function showReportPreview(content){
+  const section=document.getElementById('reportPreviewSection');
+  const frame=document.getElementById('reportPreviewFrame');
+  if(section&&frame){section.style.display='block';frame.srcdoc=content;section.scrollIntoView({behavior:'smooth'});}
+}
+function downloadReport(){
+  if(!currentReportContent){alert('请先生成报告');return;}
+  const type=document.getElementById('statsReportType').value;
+  const blob=new Blob([currentReportContent],{type:'text/html;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='经济评审分析报告_'+type+'_'+new Date().toISOString().slice(0,10)+'.html';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function exportTableToCSV(){
+  const table=document.getElementById('deptStatsTable');if(!table)return;
+  let csv=[];const rows=table.querySelectorAll('tr');
+  rows.forEach(row=>{const cols=row.querySelectorAll('td,th');csv.push(Array.from(cols).map(c=>'"'+c.textContent.replace(/"/g,'""')+'"').join(','));});
+  const blob=new Blob(['\ufeff'+csv.join('\n')],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='事业部统计表_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // USERS
 function renderUsers(){
   const tb=document.getElementById('userTbody');if(!tb)return;
-  tb.innerHTML=users.map(u=>`<tr><td>${u.username}</td><td>${u.real_name||'-'}</td><td>${getRoleName(u.role)}</td><td>${u.department||'-'}</td><td>${u.business_dept||'-'}</td></tr>`).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无用户</td></tr>';
+  const isAdmin=currentUser&&currentUser.role==='admin';
+  tb.innerHTML=users.map(u=>{
+    const group=userGroups.find(g=>g.id===u.group_id);
+    return '<tr>'+
+      '<td>'+u.username+'</td><td>'+(u.real_name||'-')+'</td>'+
+      '<td>'+getRoleName(u.role)+'</td><td>'+(u.department||'-')+'</td><td>'+(u.business_dept||'-')+'</td>'+
+      '<td>'+(group?'<span class="badge bg-info">'+group.name+'</span>':'-')+'</td>'+
+      '<td>'+(isAdmin?
+        '<button class="btn btn-sm btn-outline-primary me-1" onclick="editUser('+u.id+')"><i class="bi bi-pencil"></i></button>'+
+        '<button class="btn btn-sm btn-outline-danger" onclick="deleteUser('+u.id+',\''+u.username+'\')"><i class="bi bi-trash"></i></button>'
+      :'-')+'</td>'+
+    '</tr>';
+  }).join('')||'<tr><td colspan="7" class="text-muted text-center">暂无用户</td></tr>';
+}
+
+function populateUserSelects(){
+  const permSelect=document.getElementById('permUserSelect');
+  if(permSelect)permSelect.innerHTML='<option value="">-- 选择用户 --</option>'+users.map(u=>'<option value="'+u.id+'">'+u.username+' ('+(u.real_name||'')+')</option>').join('');
+  const userGroupSelect=document.getElementById('newUserGroup');
+  if(userGroupSelect)userGroupSelect.innerHTML='<option value="">（无）</option>'+userGroups.map(g=>'<option value="'+g.id+'">'+g.name+'</option>').join('');
+  const editUserGroup=document.getElementById('editUserGroup');
+  if(editUserGroup)editUserGroup.innerHTML='<option value="">（无）</option>'+userGroups.map(g=>'<option value="'+g.id+'">'+g.name+'</option>').join('');
+}
+
+function populateUserGroupSelects(){
+  const groupTbody=document.getElementById('groupTbody');
+  const groupModalTbody=document.getElementById('groupModalTbody');
+  const html=userGroups.map(g=>{
+    const count=users.filter(u=>u.group_id===g.id).length;
+    return '<tr><td>'+g.id+'</td><td>'+g.name+'</td><td>'+(g.description||'-')+'</td><td>'+count+'</td>'+
+      '<td><button class="btn btn-sm btn-outline-danger" onclick="deleteUserGroup('+g.id+')"><i class="bi bi-trash"></i></button></td></tr>';
+  }).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无分组</td></tr>';
+  if(groupTbody)groupTbody.innerHTML=html;
+  if(groupModalTbody)groupModalTbody.innerHTML=html;
+  populateUserSelects();
+}
+
+function populatePermUserSelect(){
+  const permSelect=document.getElementById('permUserSelect');
+  if(permSelect)permSelect.innerHTML='<option value="">-- 选择用户 --</option>'+users.map(u=>'<option value="'+u.id+'">'+u.username+' ('+(u.real_name||'')+')</option>').join('');
+}
+
+function saveUser(){
+  const username=document.getElementById('newUsername').value.trim();
+  const realName=document.getElementById('newRealName').value.trim();
+  const password=document.getElementById('newPassword').value.trim()||'123456';
+  const role=document.getElementById('newRole').value;
+  const dept=document.getElementById('newDept').value.trim();
+  const bizDept=document.getElementById('newBizDept').value||null;
+  const groupId=document.getElementById('newUserGroup').value||null;
+  if(!username||!realName){alert('请填写用户名和姓名');return;}
+  fetch(API+'/users',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({username,real_name:realName,password,role,department:dept,business_dept:bizDept,group_id:groupId?parseInt(groupId):null})})
+    .then(r=>r.json()).then(d=>{
+      if(d.error){alert(d.error);return;}
+      users.push(d);
+      bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();
+      renderUsers();populateUserSelects();loadUserGroups();
+    }).catch(e=>alert('创建失败: '+e.message));
+}
+
+function editUser(userId){
+  const u=users.find(x=>x.id===userId);if(!u)return;
+  editingUserId=userId;
+  document.getElementById('editUserId').value=userId;
+  document.getElementById('editRealName').value=u.real_name||'';
+  document.getElementById('editRole').value=u.role||'expert';
+  document.getElementById('editDept').value=u.department||'';
+  document.getElementById('editBizDept').value=u.business_dept||'';
+  document.getElementById('editUserGroup').value=u.group_id||'';
+  document.getElementById('editPassword').value='';
+  new bootstrap.Modal(document.getElementById('editUserModal')).show();
+}
+
+function saveEditUser(){
+  if(!editingUserId)return;
+  const body={
+    real_name:document.getElementById('editRealName').value.trim(),
+    role:document.getElementById('editRole').value,
+    department:document.getElementById('editDept').value.trim(),
+    business_dept:document.getElementById('editBizDept').value||null,
+    group_id:document.getElementById('editUserGroup').value?parseInt(document.getElementById('editUserGroup').value):null
+  };
+  const pwd=document.getElementById('editPassword').value.trim();
+  if(pwd)body.password=pwd;
+  fetch(API+'/users/'+editingUserId,{method:'PATCH',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify(body)})
+    .then(r=>r.json()).then(d=>{
+      if(d.error){alert(d.error);return;}
+      const idx=users.findIndex(u=>u.id===editingUserId);
+      if(idx>=0)users[idx]={...users[idx],...d};
+      bootstrap.Modal.getInstance(document.getElementById('editUserModal')).hide();
+      renderUsers();populateUserSelects();
+    }).catch(e=>alert('更新失败: '+e.message));
+}
+
+function deleteUser(userId,username){
+  if(!confirm('确定删除用户「'+username+'」？'))return;
+  fetch(API+'/users/'+userId,{method:'DELETE',headers:authH()})
+    .then(r=>r.json()).then(d=>{
+      users=users.filter(u=>u.id!==userId);
+      renderUsers();populateUserSelects();
+    }).catch(e=>alert('删除失败: '+e.message));
+}
+
+function createUserGroup(){
+  const name=document.getElementById('newGroupName').value.trim();
+  const desc=document.getElementById('newGroupDesc').value.trim();
+  if(!name){alert('请输入分组名称');return;}
+  fetch(API+'/user-groups',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({name,description:desc})})
+    .then(r=>r.json()).then(d=>{
+      if(d.error){alert(d.error);return;}
+      userGroups.push(d);
+      document.getElementById('newGroupName').value='';
+      document.getElementById('newGroupDesc').value='';
+      populateUserGroupSelects();
+    }).catch(e=>alert('创建失败: '+e.message));
+}
+
+function addUserGroupInline(){
+  const name=prompt('请输入分组名称');
+  if(!name)return;
+  fetch(API+'/user-groups',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({name})})
+    .then(r=>r.json()).then(d=>{
+      if(d.error){alert(d.error);return;}
+      userGroups.push(d);
+      populateUserGroupSelects();
+    }).catch(e=>alert('创建失败: '+e.message));
+}
+
+function deleteUserGroup(groupId){
+  if(!confirm('确定删除该分组？组内用户的分组关联将被解除。'))return;
+  fetch(API+'/user-groups/'+groupId,{method:'DELETE',headers:authH()})
+    .then(r=>r.json()).then(d=>{
+      userGroups=userGroups.filter(g=>g.id!==groupId);
+      users.forEach(u=>{if(u.group_id===groupId)u.group_id=null;});
+      populateUserGroupSelects();renderUsers();
+    }).catch(e=>alert('删除失败: '+e.message));
+}
+
+// PERMISSIONS
+async function loadUserPermissions(userId){
+  if(!userId){document.getElementById('permCheckboxes').innerHTML='';return;}
+  try{
+    const r=await fetch(API+'/users/'+userId+'/permissions',{headers:authH()});
+    const perms=await r.json();
+    const box=document.getElementById('permCheckboxes');
+    box.innerHTML=permissionOptions.map(p=>{
+      const checked=perms.includes(p.code);
+      return '<div class="col-md-6"><div class="permission-check">'+
+        '<input type="checkbox" class="form-check-input" value="'+p.code+'" id="perm_'+p.code+'" '+(checked?'checked':'')+'>'+
+        '<label class="form-check-label" for="perm_'+p.code+'">'+p.name+'</label>'+
+      '</div></div>';
+    }).join('');
+  }catch(e){}
+}
+
+function saveUserPermissions(){
+  const userId=document.getElementById('permUserSelect').value;
+  if(!userId){alert('请先选择用户');return;}
+  const checked=Array.from(document.querySelectorAll('#permCheckboxes input:checked')).map(c=>c.value);
+  fetch(API+'/users/'+userId+'/permissions',{method:'PUT',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({permissions:checked})})
+    .then(r=>r.json()).then(d=>{alert('权限保存成功！');})
+    .catch(e=>alert('保存失败: '+e.message));
 }
 
 // SAVE FUNCTIONS
@@ -915,288 +1172,24 @@ function doImport(){
   formData.append('session_id',document.getElementById('importSessionId').value||'');
   fetch(API+'/projects/import-excel',{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:formData})
     .then(r=>r.json()).then(data=>{
-      statusEl.innerHTML='<div class="alert alert-success">✓ 导入成功！</div>';
+      statusEl.innerHTML='<div class="alert alert-success">导入成功！</div>';
       setTimeout(()=>{bootstrap.Modal.getInstance(document.getElementById('importExcelModal')).hide();loadAll();},1500);
-    }).catch(e=>{statusEl.innerHTML='<div class="alert alert-danger">✗ '+e.message+'</div>';});
-}
-function saveUser(){
-  const username=document.getElementById('newUsername').value.trim();
-  const realName=document.getElementById('newRealName').value.trim();
-  const role=document.getElementById('newRole').value;
-  const dept=document.getElementById('newDept').value.trim();
-  const bizDept=document.getElementById('newBizDept').value||null;
-  if(!username||!realName){alert('请填写用户名和姓名');return;}
-  fetch(API+'/users',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({username,real_name:realName,role,department:dept,business_dept:bizDept})})
-    .then(r=>r.json()).then(d=>{users.push(d);bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();renderUsers();});
+    }).catch(e=>{statusEl.innerHTML='<div class="alert alert-danger">'+e.message+'</div>';});
 }
 
-// Helpers
-function getFileIcon(ext){const m={pdf:'pdf',docx:'word',doc:'word',xlsx:'excel',xls:'excel',jpg:'image',png:'image'};return m[ext?.toLowerCase()]||'file';}
-function getFileCategoryName(cat){const m={estimation:'估算表',feasibility:'可研',bid:'招标',award:'中标',contract:'合同',profit:'利润率',subcontract:'分包',other:'其他'};return m[cat]||cat;}
-
-function updateSessionStatus(sessionId, newStatus) {
+function updateSessionStatus(sessionId,newStatus){
   if(!confirm(newStatus==='completed'?'确定要归档该批次吗？归档后项目资料将锁定。':'确定要启动该批次吗？'))return;
   fetch(API+'/sessions/'+sessionId,{method:'PATCH',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({status:newStatus})})
     .then(r=>r.json()).then(d=>{
-      if(d.id){
-        const idx=sessions.findIndex(s=>s.id===sessionId);
-        if(idx>=0)sessions[idx]=d;
-        renderSessions();renderProjects();
-        alert(newStatus==='completed'?'✓ 批次已归档，项目资料已锁定。':'✓ 批次已启动，可开始接收项目资料。');
+      if(d.id){const idx=sessions.findIndex(s=>s.id===sessionId);if(idx>=0)sessions[idx]=d;renderSessions();renderProjects();
+        alert(newStatus==='completed'?'批次已归档。':'批次已启动。');
       }else{alert('操作失败: '+d.error);}
     }).catch(e=>alert('网络错误: '+e.message));
 }
 
-// ==================== 综合统计分析 ====================
-let deptChartInstance = null;
-let monthlyChartInstance = null;
-let fileChartInstance = null;
-let sessionChartInstance = null;
-
-async function loadStatsRich() {
-  try {
-    const r = await fetch(API + '/stats/detailed', { headers: authH() });
-    const data = await r.json();
-    renderStatsOverview(data);
-    renderDeptChart(data.departments);
-    renderMonthlyChart(data.monthly_trend);
-    renderFileChart(data.file_categories);
-    renderSessionChart(data.sessions);
-    renderDeptTable(data.departments);
-    populateDeptSelect(data.departments);
-  } catch(e) {
-    console.error('Failed to load stats:', e);
-  }
-}
-
-function renderStatsOverview(data) {
-  document.getElementById('statTotalProjects').textContent = data.overview.total_projects;
-  document.getElementById('statTotalAmount').textContent = (data.overview.total_amount / 10000).toFixed(1);
-  document.getElementById('statCompletedProjects').textContent = data.overview.completed_projects;
-  document.getElementById('statTotalSessions').textContent = data.overview.total_sessions;
-}
-
-function renderDeptChart(depts) {
-  const ctx = document.getElementById('deptChart');
-  if (!ctx) return;
-  if (deptChartInstance) deptChartInstance.destroy();
-  
-  deptChartInstance = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: depts.map(d => d.name),
-      datasets: [{
-        data: depts.map(d => d.total_amount),
-        backgroundColor: ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4fac00', '#00f2fe']
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { position: 'right' },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => ' ¥' + ctx.parsed.toLocaleString()
-          }
-        }
-      }
-    }
-  });
-}
-
-function renderMonthlyChart(trend) {
-  const ctx = document.getElementById('monthlyChart');
-  if (!ctx) return;
-  if (monthlyChartInstance) monthlyChartInstance.destroy();
-  
-  monthlyChartInstance = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: trend.map(t => t.month),
-      datasets: [{
-        label: '项目数量',
-        data: trend.map(t => t.projects),
-        borderColor: '#667eea',
-        backgroundColor: 'rgba(102, 126, 234, 0.1)',
-        fill: true,
-        tension: 0.4
-      }, {
-        label: '合同金额(万)',
-        data: trend.map(t => (t.total_amount / 10000).toFixed(1)),
-        borderColor: '#10b981',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-        fill: true,
-        tension: 0.4,
-        yAxisID: 'y1'
-      }]
-    },
-    options: {
-      responsive: true,
-      interaction: { intersect: false },
-      scales: {
-        y: { beginAtZero: true },
-        y1: { position: 'right', beginAtZero: true }
-      }
-    }
-  });
-}
-
-function renderFileChart(cats) {
-  const ctx = document.getElementById('fileChart');
-  if (!ctx) return;
-  if (fileChartInstance) fileChartInstance.destroy();
-  
-  const labels = {
-    estimation: '估算表', feasibility: '可研报告', bid: '招标文件',
-    award: '中标文件', contract: '合同', profit: '利润评审', subcontract: '分包申请'
-  };
-  
-  fileChartInstance = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: Object.keys(cats).map(k => labels[k] || k),
-      datasets: [{
-        label: '上传数量',
-        data: Object.values(cats).map(c => c.count),
-        backgroundColor: '#667eea'
-      }, {
-        label: '覆盖项目数',
-        data: Object.values(cats).map(c => c.projects_with_file),
-        backgroundColor: '#10b981'
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { position: 'top' } }
-    }
-  });
-}
-
-function renderSessionChart(sessions) {
-  const ctx = document.getElementById('sessionChart');
-  if (!ctx) return;
-  if (sessionChartInstance) sessionChartInstance.destroy();
-  
-  sessionChartInstance = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: sessions.map(s => s.name || s.session_name || '批次' + s.id),
-      datasets: [{
-        label: '总项目数',
-        data: sessions.map(s => s.project_count),
-        backgroundColor: '#667eea'
-      }, {
-        label: '已完成',
-        data: sessions.map(s => s.completed_projects),
-        backgroundColor: '#10b981'
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { position: 'top' } },
-      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
-    }
-  });
-}
-
-function renderDeptTable(depts) {
-  const tbody = document.getElementById('deptStatsBody');
-  if (!tbody) return;
-  
-  const totalAmount = depts.reduce((s, d) => s + d.total_amount, 0);
-  tbody.innerHTML = depts.map((d, i) => `
-    <tr>
-      <td>${i + 1}</td>
-      <td>${d.name}</td>
-      <td>${d.count}</td>
-      <td>${d.total_amount.toLocaleString()}</td>
-      <td>${d.avg_amount.toLocaleString()}</td>
-      <td>${totalAmount > 0 ? ((d.total_amount / totalAmount) * 100).toFixed(1) : 0}%</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="text-muted text-center">暂无数据</td></tr>';
-}
-
-function populateDeptSelect(depts) {
-  const select = document.getElementById('statsDepartment');
-  if (!select) return;
-  select.innerHTML = '<option value="">全部事业部</option>' + 
-    depts.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
-}
-
-function generateReport() {
-  const type = document.getElementById('statsReportType').value;
-  const dept = document.getElementById('statsDepartment').value;
-  
-  fetch(API + '/reports/generate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authH() },
-    body: JSON.stringify({ type, params: { department: dept } })
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.success) {
-      currentReportContent = data.content;
-      showReportPreview(data.content);
-    } else {
-      alert('生成报告失败: ' + (data.error || '未知错误'));
-    }
-  })
-  .catch(e => alert('网络错误: ' + e.message));
-}
-
-let currentReportContent = '';
-
-function showReportPreview(content) {
-  const section = document.getElementById('reportPreviewSection');
-  const frame = document.getElementById('reportPreviewFrame');
-  if (section && frame) {
-    section.style.display = 'block';
-    frame.srcdoc = content;
-    section.scrollIntoView({ behavior: 'smooth' });
-  }
-}
-
-function downloadReport() {
-  if (!currentReportContent) {
-    alert('请先生成报告');
-    return;
-  }
-  
-  const type = document.getElementById('statsReportType').value;
-  const blob = new Blob([currentReportContent], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '经济评审分析报告_' + type + '_' + new Date().toISOString().slice(0,10) + '.html';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function exportTableToCSV() {
-  const table = document.getElementById('deptStatsTable');
-  if (!table) return;
-  
-  let csv = [];
-  const rows = table.querySelectorAll('tr');
-  rows.forEach(row => {
-    const cols = row.querySelectorAll('td, th');
-    const rowData = Array.from(cols).map(col => '"' + col.textContent.replace(/"/g, '""') + '"');
-    csv.push(rowData.join(','));
-  });
-  
-  const blob = new Blob(['\ufeff' + csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '事业部统计表_' + new Date().toISOString().slice(0,10) + '.csv';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-})
-}}}))))</script>
+// HELPERS
+function getFileIcon(ext){const m={pdf:'pdf',docx:'word',doc:'word',xlsx:'excel',xls:'excel',jpg:'image',png:'image'};return m[(ext||'').toLowerCase()]||'file';}
+function getFileCategoryName(cat){const m={estimation:'估算表',feasibility:'可研',bid:'招标',award:'中标',contract:'合同',profit:'利润率',subcontract:'分包',tech_spec:'技术规范书',other:'其他'};return m[cat]||cat||'其他';}
+</script>
 </body>
 </html>
