@@ -2,6 +2,7 @@
  * Excel 项目成本估算表解析器
  * 解析格式：项目成本估算汇总簿（12个工作表：项目基本信息 + 人员/分包成本 + 采购 + 差旅）
  * 特性：展开合并单元格、跳过表头/合计/说明行、公式取缓存值
+ *       —— 兼容真实业务表的「表名变体」与「表头行位置不一」
  * 依赖：xlsx（SheetJS 社区版）
  */
 const XLSX = require('xlsx');
@@ -55,11 +56,49 @@ function gv(grid, r, c) {
   return (row && row[c] != null) ? row[c] : null;
 }
 
+// ---------- 表名模糊匹配 ----------
+// 业务人员手工表的 sheet 名往往与模板有出入（如「专业分包成本测算」「XX项目成本」）。
+// 不再要求精确相等，而是按关键词命中；先精确后模糊，且一张 sheet 只归属一个规范表。
+const SHEET_RULES = [
+  { key: '项目基本信息', kws: ['基本信息', '项目信息'] },
+  { key: '长期职工成本估算', kws: ['长期职工', '长期'] },
+  { key: '中实职工成本估算', kws: ['中实职工', '中实'] },
+  { key: '华兆职工成本估算', kws: ['华兆职工', '华兆'] },
+  { key: '人员外包成本估算', kws: ['人员外包', '外包'] },
+  { key: '专业分包成本估算', kws: ['专业分包', '分包'] },
+  { key: '采购成本估算', kws: ['采购'] },
+  { key: '差旅费估算', kws: ['差旅'] }
+];
+function resolveSheets(wb) {
+  const norm = {};
+  for (const name of wb.SheetNames) norm[name.replace(/\s+/g, '')] = wb.Sheets[name];
+  const used = new Set();
+  const map = {};
+  for (const { key, kws } of SHEET_RULES) {
+    if (norm[key]) { map[key] = norm[key]; used.add(key); continue; }
+    for (const name of wb.SheetNames) {
+      if (used.has(name)) continue;
+      const nn = name.replace(/\s+/g, '');
+      if (kws.some(k => nn.includes(k))) { map[key] = wb.Sheets[name]; used.add(name); break; }
+    }
+  }
+  return map;
+}
+
+// 自动探测表头行：在前 [0..min(lastRow,10)] 行中找第一个「含全部关键词」的行。
+// 找不到时回退到 fallback（兼容旧模板固定的第2行表头）。
+function detectHeaderRow(grid, lastRow, kws, fallback) {
+  for (let r = 0; r <= Math.min(lastRow, 10); r++) {
+    const rowStr = (grid[r] || []).map(c => str(c)).join('|');
+    if (kws.every(k => rowStr.includes(k))) return r;
+  }
+  return fallback;
+}
+
 // ---------- 主解析 ----------
 function parseProjectExcel(filePath) {
   const wb = XLSX.readFile(filePath, { cellFormula: true, raw: true });
-  const sheets = {};
-  for (const name of wb.SheetNames) sheets[name.replace(/\s+/g, '')] = wb.Sheets[name];
+  const sheets = resolveSheets(wb);
 
   const result = {
     project: {},
@@ -85,9 +124,6 @@ function parseProjectExcel(filePath) {
     result.project.business_sub_direction = str(gv(grid, 4, 3));
     result.project.contract_amount = num(gv(grid, 5, 3));
     // 成本行 index 6..15，左 A/B，右 C/D
-    // r=6: 项目总成本（元） | 预估利润率
-    // r=7..14: 各分项成本 | 费用占比/差旅费
-    // r=15: 知识产权费
     const costKeys = {
       '项目总成本（元）': 'total_cost',
       '预估利润率': 'profit_rate',
@@ -119,13 +155,14 @@ function parseProjectExcel(filePath) {
     { key: '华兆职工成本估算', category: 'huazhao' }
   ];
   for (const { key, category } of staffSheets) {
-    if (!sheets[key]) continue;
     const ws = sheets[key];
+    if (!ws) continue;
     const fill = expandGrid(ws, true).grid;   // 文本用
     const raw = expandGrid(ws, false).grid;   // 数值用
     const lastRow = XLSX.utils.decode_range(ws['!ref']).e.r;
+    const hr = detectHeaderRow(fill, lastRow, ['工作项', '费用'], 1);
     let task = '';
-    for (let r = 2; r <= lastRow; r++) {
+    for (let r = hr + 1; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
       if (aVal.includes('合计') || aVal.includes('说明')) continue;
       const bVal = str(gv(fill, r, 1));        // 工作任务(填充)
@@ -157,13 +194,14 @@ function parseProjectExcel(filePath) {
     { key: '专业分包成本估算', category: 'subcontract' }
   ];
   for (const { key, category } of expertSheets) {
-    if (!sheets[key]) continue;
     const ws = sheets[key];
+    if (!ws) continue;
     const fill = expandGrid(ws, true).grid;
     const raw = expandGrid(ws, false).grid;
     const lastRow = XLSX.utils.decode_range(ws['!ref']).e.r;
+    const hr = detectHeaderRow(fill, lastRow, ['工作项', '专家'], 1);
     let task = '';
-    for (let r = 2; r <= lastRow; r++) {
+    for (let r = hr + 1; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
       if (aVal.includes('合计') || aVal.includes('说明')) continue;
       const bVal = str(gv(fill, r, 1));
@@ -223,8 +261,33 @@ function parseProjectExcel(filePath) {
         });
       }
     };
-    if (swStart > 0) scanBlock(swStart, hwStart > 0 ? hwStart - 1 : lastRow, 'software');
-    if (hwStart > 0) scanBlock(hwStart, lastRow, 'hardware');
+    if (swStart >= 0) scanBlock(swStart, hwStart >= 0 ? hwStart - 1 : lastRow, 'software');
+    if (hwStart >= 0) scanBlock(hwStart, lastRow, 'hardware');
+    // 兜底：若未识别到软件/硬件分区，则把表中所有「有名称且非合计」的行当软件项抽取
+    if (swStart < 0 && hwStart < 0) {
+      const hr = detectHeaderRow(fill, lastRow, ['名称', '规格'], 1);
+      for (let r = hr + 1; r <= lastRow; r++) {
+        const aVal = str(gv(fill, r, 0));
+        if (aVal.includes('合')) break;
+        const name = str(gv(fill, r, 1));
+        if (!name) continue;
+        result.procurement_items.push({
+          type: 'software',
+          name,
+          spec: str(gv(raw, r, 2)),
+          unit: str(gv(raw, r, 3)),
+          quantity: num(gv(raw, r, 4)),
+          unit_price: num(gv(raw, r, 5)),
+          subtotal: num(gv(raw, r, 6)),
+          remark: str(gv(raw, r, 7)),
+          source_sheet: '采购成本估算',
+          row: r + 1
+        });
+      }
+      if (result.procurement_items.length === 0) {
+        result.warnings.push('采购成本表未识别到「软件/硬件」分区，已按通用商品行兜底抽取');
+      }
+    }
   }
 
   // ===== 5. 差旅费 =====
@@ -233,7 +296,8 @@ function parseProjectExcel(filePath) {
     const fill = expandGrid(ws, true).grid;
     const raw = expandGrid(ws, false).grid;
     const lastRow = XLSX.utils.decode_range(ws['!ref']).e.r;
-    for (let r = 2; r <= lastRow; r++) {
+    const hr = detectHeaderRow(fill, lastRow, ['出差', '事由', '目的地', '天数', '目的'], 1);
+    for (let r = hr + 1; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
       if (aVal.includes('小计') || aVal.includes('合计')) break;
       const purpose = str(gv(fill, r, 1));
@@ -270,7 +334,7 @@ function parseProjectExcel(filePath) {
   if (result.cost_summary.profit_rate == null && result.project.contract_amount) {
     result.cost_summary.profit_rate = +(1 - result.cost_summary.total_cost / result.project.contract_amount).toFixed(4);
   }
-  result.meta = { parsed_at: new Date().toISOString(), sheet_count: Object.keys(sheets).length };
+  result.meta = { parsed_at: new Date().toISOString(), sheet_count: wb.SheetNames.length, sheets: wb.SheetNames };
   return result;
 }
 

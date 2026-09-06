@@ -120,7 +120,7 @@ function decodeFilename(name) {
 }
 function inferFileCategory(filename) {
   const name = filename || '';
-  if (/估算|概算|预算|成本.*表|cost.*estimat|estimat/i.test(name)) return 'estimation';
+  if (/估算|概算|预算|成本|成本.*表|成本测算|成本分劈|成本评估|成本外包|分包成本|测算|评估|工作量|报价|cost.*estimat|estimat/i.test(name)) return 'estimation';
   if (/可研|可行性|研究报|feasib/i.test(name)) return 'feasibility';
   if (/利润|利润率|profit/i.test(name)) return 'profit';
   if (/招标|投标|bid|tender/i.test(name)) return 'bid';
@@ -697,8 +697,17 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
       }));
       project.cost_summary = parsed.cost_summary;
       db.logWorkflow(projectId, 'extract_cost', `解析成本估算表，抽取工作项${parsed.work_items.length}条、采购${parsed.procurement_items.length}条、差旅${parsed.travel_items.length}条`, req.user.id);
+      // 把解析结果暴露给前端，避免"上传成功但空数据"的静默失败
+      file.extracted = {
+        work_items: parsed.work_items.length,
+        procurement_items: parsed.procurement_items.length,
+        travel_items: parsed.travel_items.length,
+        total_cost: parsed.cost_summary.total_cost || 0,
+        warnings: parsed.warnings || []
+      };
     } catch (ex) {
       console.error('估算表解析失败:', ex && ex.message);
+      file.parse_error = ex && ex.message;
     }
   }
   project.updated_at = new Date().toISOString();
