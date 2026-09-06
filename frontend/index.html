@@ -731,7 +731,7 @@ function renderUploadPage(){
           '<div><i class="bi bi-file-earmark-'+getFileIcon(f.file_type)+' fs-4 '+(f.file_category==='estimation'?'text-danger':'text-primary')+'"></i>'+
           '<span class="ms-2 fw-bold">'+f.originalname+'</span></div>'+
           '<div>'+seqTag+autoTag+'<span class="badge bg-'+(f.file_category==='estimation'?'danger':'secondary')+' me-1">'+catName+'</span>'+
-          '<a href="'+API+f.url+'" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a></div>'+
+          '<a href="'+API.replace('/api','')+f.url+'" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a></div>'+
         '</div>'+
         '<div class="small text-muted mt-1">'+(f.upload_time?new Date(f.upload_time).toLocaleDateString():'-')+(f.uploader_name?' | '+f.uploader_name:'')+'</div>'+
       '</div></div>';
@@ -822,7 +822,7 @@ async function loadCostDetail(pid){
     const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role);
     wtEl.innerHTML=(cost.work_items||[]).map(w=>{
       const expDays=w.expert_days_list||[];
-      const avg=w.expert_days_avg!=null?w.expert_days_avg:w.person_days;
+      const avg=(w.expert_days_avg!=null?w.expert_days_avg:w.person_days)||0;
       const finalCost=w.adjusted_cost||w.cost;
       let inputCell=isExpert&&expDays.indexOf(currentUser.id)===-1
        ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="?" min="0" step="0.5">'
