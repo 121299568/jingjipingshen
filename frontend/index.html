@@ -25,8 +25,22 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .stat-label{font-size:12px;opacity:.85}
 .badge-missing{background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:11px}
 .badge-uploaded{background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:12px;font-size:11px}
-.file-card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:8px;background:#fff}
+.file-card{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:10px;background:#fff;position:relative}
 .file-card.core{border-left:4px solid var(--danger)}
+.file-card .file-icon-wrap{width:44px;height:44px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#fef2f2;color:#dc2626;font-size:20px;flex-shrink:0}
+.file-card .file-icon-wrap.pdf{background:#fee2e2;color:#b91c1c}
+.file-card .file-icon-wrap.word{background:#dbeafe;color:#2563eb}
+.file-card .file-icon-wrap.image{background:#dcfce7;color:#16a34a}
+.file-card .file-seq{position:absolute;top:8px;right:12px;font-size:12px;color:#6b7280;font-weight:600}
+.file-card .file-actions{display:flex;align-items:center;gap:6px}
+.file-card .file-actions .btn{width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}
+.file-card .badge-auto{background:#0ea5e1;color:#fff;font-size:11px;padding:3px 8px;border-radius:10px}
+.file-card .badge-cat-estimation{background:#dc2626;color:#fff;font-size:11px;padding:3px 8px;border-radius:10px}
+.file-card .badge-cat{background:#6b7280;color:#fff;font-size:11px;padding:3px 8px;border-radius:10px}
+.cost-summary-card{cursor:pointer;transition:transform .1s,box-shadow .1s;border-bottom:none;overflow:hidden}
+.cost-summary-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.cost-summary-card.active-cost-card{box-shadow:0 0 0 2px #667eea}
+.cost-card-bar{height:4px;border-radius:0 0 10px 10px}
 .batch-drawer{border:1px solid #e5e7eb;border-radius:10px;margin-bottom:12px;overflow:hidden;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.05)}
 .batch-drawer.archived{background:#fafafa}
 .batch-header{display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;background:#f8f9fb;user-select:none;flex-wrap:wrap}
@@ -222,24 +236,16 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         </div>
       </div>
       <div class="alert alert-info small mb-3">
-        <strong>工作流程：</strong>选择项目后，专家可在下方输入各工作项的<strong>人天评估</strong> → 提交 → 系统计算平均人天 → 乘以单价得最终成本。
+        <strong>工作流程：</strong>选择项目后，点击成本卡片查看对应明细；专家可在人员外包/专业分包明细中提交人天评估。
       </div>
       <div id="costHeaderCard" class="card card-custom mb-3 d-none"><div class="card-body" id="costHeaderBody"></div></div>
       <div class="row g-3 mb-3" id="costSummaryCards"></div>
-      <div class="card card-custom">
+      <div id="costDetailCard" class="card card-custom d-none">
         <div class="card-header bg-white d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-table"></i> 工作明细与专家评估</span>
+          <span id="costDetailTitle"><i class="bi bi-table"></i> 成本明细</span>
           <span class="badge bg-success" id="estimateBadge">等待评估</span>
         </div>
-        <div class="card-body p-0">
-          <table class="table table-sm table-hover mb-0">
-            <thead class="table-light"><tr>
-              <th>类别</th><th>任务</th><th>工作项</th><th>人天</th><th>原费用</th>
-              <th>专家评估人天</th><th>平均</th><th>最终成本</th>
-            </tr></thead>
-            <tbody id="workTbody"></tbody>
-          </table>
-        </div>
+        <div class="card-body p-0" id="costDetailBody"></div>
       </div>
     </div>
 
@@ -458,7 +464,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 // API地址配置：本地开发自动使用localhost，生产环境需指向已部署的后端
 const API=window.location.hostname.endsWith('github.io')?'https://jingjipingshen-api.onrender.com/api':window.location.origin+'/api';
 let currentUser=null, sessions=[], projects=[], users=[], files=[], userGroups=[], permissionOptions=[], currentReportContent='';
-let currentProjectId=null, uploadingCategory='', editingUserId=null, costResult=null;
+let currentProjectId=null, uploadingCategory='', editingUserId=null, costResult=null, selectedCostCategory=null;
 let openBatches=null;
 
 document.addEventListener('DOMContentLoaded',()=>{
@@ -562,7 +568,10 @@ async function renderDashboard(){
     document.getElementById('s-missing').textContent=missingEst;
     document.getElementById('s-missing').className='stat-num '+(missingEst>0?'text-danger':'text-success');
     document.getElementById('s-pending').textContent=s.pending_tasks?.length||0;
-    document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>'<div class="small mb-1"><i class="bi bi-circle-fill text-primary me-1"></i>'+esc(a)+'</div>').join(''):'<p class="text-muted small">暂无活动</p>');
+    document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>{
+      const t=a.at?new Date(a.at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+      return '<div class="small mb-2"><div class="text-muted" style="font-size:11px">'+esc(t)+'</div><div><i class="bi bi-circle-fill text-primary me-1" style="font-size:6px;vertical-align:middle"></i>'+esc(a.operator_name)+' '+esc(a.action)+'：'+esc(a.remark)+'</div></div>';
+    }).join(''):'<p class="text-muted small">暂无活动</p>');
     renderUploadProgressChart();
   }catch(e){console.error(e);}
 }
@@ -588,20 +597,33 @@ function populateSessionSelect(){
 function renderSessions(){
   const tb=document.getElementById('sessionTbody');if(!tb)return;
   const isAdmin=currentUser&&currentUser.role==='admin';
+  const canBatchDelete=currentUser&&(['admin','rd'].includes(currentUser.role)||currentUser.role==='biz');
   tb.innerHTML=sessions.map(s=>{
     const sFiles=files.filter(f=>projects.some(p=>p.id===f.project_id&&p.session_id===s.id));
+    const sProjects=projects.filter(p=>p.session_id===s.id);
+    const canDeleteThis=canBatchDelete&&(isAdmin||currentUser.role==='rd'||sProjects.some(p=>p.biz_department===currentUser.business_dept));
     return '<tr>'+
       '<td>'+s.id+'</td><td>'+esc(s.name||s.session_name||'-')+'</td>'+
       '<td><span class="badge bg-'+({completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary')+'">'+({completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status)+'</span></td>'+
       '<td>'+fmtTime(s.review_time)+'</td>'+
-      '<td>'+projects.filter(p=>p.session_id===s.id).length+'</td>'+
+      '<td>'+sProjects.length+'</td>'+
       '<td>'+
         (s.status==='pending'?'<button class="btn btn-sm btn-warning me-1" onclick="updateSessionStatus('+s.id+',\'in_progress\')"><i class="bi bi-play-fill"></i>启动</button>':'')+
         (s.status==='in_progress'?'<button class="btn btn-sm btn-success me-1" onclick="updateSessionStatus('+s.id+',\'completed\')"><i class="bi bi-archive-fill"></i>归档</button>':'')+
         (s.status==='completed'?'<span class="text-muted small"><i class="bi bi-archive"></i>已归档</span>':'')+
-        (isAdmin&&sFiles.length>0?'<button class="btn btn-sm btn-outline-primary me-1" title="全量下载" onclick="downloadSessionFiles('+s.id+')"><i class="bi bi-download"></i>全部文件</button><button class="btn btn-sm btn-outline-success" title="下载估算表" onclick="downloadSessionEstimation('+s.id+')"><i class="bi bi-file-earmark-excel"></i>估算表</button>':'')+
+        (isAdmin&&sFiles.length>0?'<button class="btn btn-sm btn-outline-primary me-1" title="全量下载" onclick="downloadSessionFiles('+s.id+')"><i class="bi bi-download"></i>全部文件</button><button class="btn btn-sm btn-outline-success me-1" title="下载估算表" onclick="downloadSessionEstimation('+s.id+')"><i class="bi bi-file-earmark-excel"></i>估算表</button>':'')+
+        (canDeleteThis&&sProjects.length>0?'<button class="btn btn-sm btn-outline-danger" title="删除本批次全部项目" onclick="deleteSessionProjects('+s.id+')"><i class="bi bi-trash"></i>删除项目</button>':'')+
       '</td></tr>';
   }).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无批次</td></tr>';
+}
+async function deleteSessionProjects(sessionId){
+  if(!confirm('确定删除该批次下的全部项目？此操作不可恢复！'))return;
+  try{
+    const r=await fetch(API+'/sessions/'+sessionId+'/projects',{method:'DELETE',headers:authH()});
+    const d=await r.json();
+    if(r.ok){alert('已删除 '+d.deleted+' 个项目');await loadAll();}
+    else{alert('删除失败: '+(d.error||'未知错误'));}
+  }catch(e){alert('删除出错: '+e.message);}
 }
 function fmtTime(t){if(!t)return'';return String(t).replace('T',' ').slice(0,16);}
 function sessionStatusBadge(status){
@@ -651,12 +673,14 @@ function renderProjects(){
       const pf=files.filter(f=>f.project_id===p.id);
       const has=c=>pf.some(f=>f.file_category===c);
       const statusBg={reviewing:'warning',draft:'secondary',completed:'success'}[p.status]||'secondary';
+      const lastOp=p.last_operation_at?new Date(p.last_operation_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
       return '<tr>'+
         '<td>'+p.id+'</td>'+
         '<td title="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+'</td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
         '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
         '<td><span class="badge bg-'+statusBg+'">'+({reviewing:'评审中',draft:'草稿',completed:'已完成',archived:'已归档'}[p.status]||p.status||'-')+'</span></td>'+
+        '<td class="small text-muted">'+lastOp+'</td>'+
         '<td class="text-center">'+ck('estimation')(has('estimation'))+'</td>'+
         '<td class="text-center">'+ck('feasibility')(has('feasibility'))+'</td>'+
         '<td class="text-center">'+ck('bid')(has('bid'))+'</td>'+
@@ -670,7 +694,7 @@ function renderProjects(){
     }).join('');
     const body='<div class="batch-body">'+
       (total>0?'<div class="table-responsive"><table class="table table-hover mb-0">'+
-        '<thead class="table-light"><tr><th>ID</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th>'+
+        '<thead class="table-light"><tr><th>ID</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th><th>最后操作时间</th>'+
         '<th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">投标</th><th class="text-center">合同</th><th>操作</th></tr></thead>'+
         '<tbody>'+rows+'</tbody></table></div>':'<div class="batch-empty">该批次暂无项目，请通过「Excel导入」或「新建项目」挂接到本批次</div>')+
     '</div>';
@@ -761,18 +785,24 @@ function renderUploadPage(){
   if(pf.length>0){
     listEl.innerHTML=pf.map(f=>{
       const catName=getFileCategoryName(f.file_category);
-      const autoTag=f.auto_detected?'<span class="badge bg-info me-1" title="系统自动识别">自动</span>':'';
-      const seqTag=f.file_seq?'<span class="badge bg-light text-dark me-1">'+f.file_seq+'</span>':'';
+      const icon=getFileIcon(f.file_type);
+      const autoTag=f.auto_detected?'<span class="badge badge-auto me-1" title="系统自动识别">自动</span>':'';
       const isDeletable=currentUser&&(currentUser.role==='admin'||currentUser.id===f.uploader_id);
-      const delBtn=isDeletable?'<button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteFile('+f.id+')" title="删除"><i class="bi bi-trash"></i></button>':'';
-      return '<div class="col-md-4"><div class="file-card '+(f.file_category==='estimation'?'core':'')+'">'+
-        '<div class="d-flex justify-content-between align-items-center">'+
-          '<div><i class="bi bi-file-earmark-'+getFileIcon(f.file_type)+' fs-4 '+(f.file_category==='estimation'?'text-danger':'text-primary')+'"></i>'+
-          '<span class="ms-2 fw-bold">'+esc(f.originalname)+'</span></div>'+
-          '<div>'+seqTag+autoTag+'<span class="badge bg-'+(f.file_category==='estimation'?'danger':'secondary')+' me-1">'+catName+'</span>'+
-          '<a href="'+API.replace('/api','')+f.url+'" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a>'+delBtn+'</div>'+
+      const delBtn=isDeletable?'<button class="btn btn-outline-danger" onclick="deleteFile('+f.id+')" title="删除"><i class="bi bi-trash"></i></button>':'';
+      return '<div class="col-12"><div class="file-card '+(f.file_category==='estimation'?'core':'')+'">'+
+        (f.file_seq?'<div class="file-seq">'+f.file_seq+'</div>':'')+
+        '<div class="d-flex align-items-center gap-3">'+
+          '<div class="file-icon-wrap '+icon+'"><i class="bi bi-file-earmark-'+icon+'"></i></div>'+
+          '<div class="flex-grow-1" style="min-width:0">'+
+            '<div class="fw-bold text-truncate" title="'+esc(f.originalname)+'">'+esc(f.originalname)+'</div>'+
+            '<div class="small text-muted">'+(f.upload_time?new Date(f.upload_time).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-')+(f.uploader_name?' · '+esc(f.uploader_name):'')+'</div>'+
+          '</div>'+
+          '<div class="file-actions flex-shrink-0">'+
+            autoTag+
+            '<span class="badge '+(f.file_category==='estimation'?'badge-cat-estimation':'badge-cat')+' me-1">'+catName+'</span>'+
+            '<a href="'+API.replace('/api','')+f.url+'" target="_blank" class="btn btn-outline-primary" title="预览"><i class="bi bi-eye"></i></a>'+delBtn+
+          '</div>'+
         '</div>'+
-        '<div class="small text-muted mt-1">'+(f.upload_time?new Date(f.upload_time).toLocaleDateString():'-')+(f.uploader_name?' | '+esc(f.uploader_name):'')+'</div>'+
       '</div></div>';
     }).join('');
   }else{
@@ -846,6 +876,7 @@ async function renderCostAnalysis(){
 async function loadCostDetail(pid){
   if(!pid)return;
   currentProjectId=pid;
+  selectedCostCategory=null;
   const [pjR,costR]=await Promise.all([
     fetch(API+'/projects/'+pid,{headers:authH()}),
     fetch(API+'/projects/'+pid+'/cost',{headers:authH()})
@@ -855,55 +886,153 @@ async function loadCostDetail(pid){
   const hc=document.getElementById('costHeaderCard'),hb=document.getElementById('costHeaderBody');
   if(hc&&hb){
     hc.classList.remove('d-none');
+    const profitRate=(cost.cost_summary?.profit_rate!=null?Math.round(cost.cost_summary.profit_rate*10000)/100:0);
     hb.innerHTML='<h5 class="mb-2">'+esc(proj.project_name||proj.name)+'</h5>'+
       '<div class="row g-2 text-muted small">'+
         '<div class="col-md-3"><strong>承建部门:</strong> '+esc(proj.biz_department||'-')+'</div>'+
         '<div class="col-md-3"><strong>合同金额:</strong> ¥'+Number(proj.contract_amount||0).toLocaleString()+'</div>'+
-        '<div class="col-md-3"><strong>总成本:</strong> ¥'+Number(proj.cost_summary?.total_cost||0).toLocaleString()+'</div>'+
+        '<div class="col-md-3"><strong>总成本:</strong> ¥'+Number(cost.cost_summary?.total_cost||0).toLocaleString()+'</div>'+
+        '<div class="col-md-3"><strong>预估利润率:</strong> '+profitRate+'%</div>'+
       '</div>';
   }
-  const cardsEl=document.getElementById('costSummaryCards');
-  if(cardsEl){
-    const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
-    const catSum=cost.category_cost||{};
-    cardsEl.innerHTML=Object.entries(catSum).map(([k,v])=>'<div class="col-6 col-md-4 col-lg-2"><div class="card card-custom"><div class="card-body p-3 text-center"><div class="text-muted small">'+(catMap[k]||k)+'</div><div class="h5 fw-bold">¥'+Number(v||0).toLocaleString()+'</div></div></div></div>').join('');
-  }
-  const wtEl=document.getElementById('workTbody');
-  if(wtEl){
-    const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
-    const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role);
-    // 只显示人员外包和专业分包的工作项
-    const filteredItems=(cost.work_items||[]).filter(w=>w.category==='outsourcing'||w.category==='subcontract');
-    wtEl.innerHTML=filteredItems.map(w=>{
-      const expDays=w.expert_days_list||[];
-      const avg=(w.expert_days_avg!=null?w.expert_days_avg:w.person_days)||0;
-      const finalCost=w.adjusted_cost||w.cost;
-      let inputCell=isExpert&&expDays.indexOf(currentUser.id)===-1
-       ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="?" min="0" step="0.5">'
-        :(expDays.length>0?expDays.join('/'):'-');
-      return '<tr>'+
-        '<td><span class="badge bg-secondary">'+(catMap[w.category]||w.category)+'</span></td>'+
-        '<td>'+esc(w.work_task||'')+'</td>'+
-        '<td title="'+esc(w.work_item||'')+'">'+esc(w.work_item||'')+'</td>'+
-        '<td>'+(w.person_days!=null?w.person_days:'-')+'</td>'+
-        '<td class="text-muted">¥'+Number(w.cost||0).toLocaleString()+'</td>'+
-        '<td>'+inputCell+'</td>'+
-        '<td class="fw-bold">'+avg.toFixed(1)+'</td>'+
-        '<td class="fw-bold text-success">¥'+Number(finalCost).toLocaleString()+'</td>'+
-      '</tr>';
-    }).join('')||'<tr><td colspan="8" class="text-muted text-center">暂无外包工作明细</td></tr>';
-    if(isExpert&&filteredItems.length>0){
-      wtEl.insertAdjacentHTML('beforeend','<tr><td colspan="8" class="text-end p-2"><button class="btn btn-sm btn-success" onclick="submitEstimate('+pid+')"><i class="bi bi-check-circle"></i> 提交我的评估</button></td></tr>');
-    }
-  }
-  const badge=document.getElementById('estimateBadge');
-  if(badge){
-    const estCount=(cost.work_items||[]).filter(w=>w.expert_days_list&&w.expert_days_list.length>0).length;
-    badge.textContent=estCount>0?estCount+'项已评估':'等待评估';
-    badge.className='badge '+(estCount>0?'bg-success':'bg-warning');
-  }
+  renderCostSummaryCards(cost);
+  // 默认选中第一个有金额的成本项
+  const firstCategory=Object.entries(cost.cost_summary||{}).find(([k,v])=>k!=='profit_rate'&&v>0);
+  if(firstCategory)selectCostCategory(firstCategory[0]);
+  else{const dc=document.getElementById('costDetailCard');if(dc)dc.classList.add('d-none');}
   const dlBtn=document.getElementById('downloadCostBtn');
   if(dlBtn)dlBtn.style.display=cost.work_items&&cost.work_items.length>0?'inline-block':'none';
+}
+const COST_CATEGORY_LABELS={
+  total_cost:'项目总成本', profit_rate:'预估利润率',
+  long_term_cost:'长期职工成本', zhongshi_cost:'中实职工成本', huazhao_cost:'华兆职工成本',
+  outsourcing_cost:'人员外包成本', subcontract_cost:'专业分包成本',
+  procurement_cost:'采购成本', third_party_test_cost:'第三方测试费用',
+  travel_cost:'差旅费用', ip_cost:'知识产权费'
+};
+const COST_CATEGORY_KEYS={
+  long_term_cost:'long_term', zhongshi_cost:'zhongshi', huazhao_cost:'huazhao',
+  outsourcing_cost:'outsourcing', subcontract_cost:'subcontract'
+};
+function renderCostSummaryCards(cost){
+  const cardsEl=document.getElementById('costSummaryCards');
+  if(!cardsEl)return;
+  const cs=cost.cost_summary||{};
+  const entries=Object.entries(COST_CATEGORY_LABELS).filter(([k])=>k==='total_cost'||k==='profit_rate'||cs[k]!=null);
+  cardsEl.innerHTML=entries.map(([k,label])=>{
+    const isRate=k==='profit_rate';
+    const v=cs[k]!=null?cs[k]:0;
+    const display=isRate?Math.round(v*10000)/100+'%':'¥'+Number(v||0).toLocaleString();
+    const active=selectedCostCategory===k?'active-cost-card':'';
+    const colorClass=k==='total_cost'?'bg-primary':k==='profit_rate'?'bg-success':k.endsWith('_cost')?'bg-info':'bg-secondary';
+    return '<div class="col-6 col-md-4 col-lg-3 col-xl-2">'+
+      '<div class="card card-custom cost-summary-card '+active+'" onclick="selectCostCategory(\''+k+'\')">'+
+        '<div class="card-body p-3 text-center">'+
+          '<div class="text-muted small">'+label+'</div>'+
+          '<div class="h5 fw-bold mt-1">'+display+'</div>'+
+        '</div>'+
+        '<div class="cost-card-bar '+colorClass+'"></div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+function selectCostCategory(category){
+  selectedCostCategory=category;
+  if(costResult)renderCostSummaryCards(costResult);
+  renderCostDetail(costResult);
+}
+function renderCostDetail(cost){
+  const dc=document.getElementById('costDetailCard'),db=document.getElementById('costDetailBody'),dt=document.getElementById('costDetailTitle');
+  if(!dc||!db||!dt)return;
+  if(!selectedCostCategory||!cost){dc.classList.add('d-none');return;}
+  dc.classList.remove('d-none');
+  const label=COST_CATEGORY_LABELS[selectedCostCategory]||selectedCostCategory;
+  dt.innerHTML='<i class="bi bi-table"></i> '+label+'明细';
+  const catKey=COST_CATEGORY_KEYS[selectedCostCategory];
+  if(selectedCostCategory==='total_cost'){
+    db.innerHTML='<div class="p-3"><p class="text-muted">项目总成本 = 各分项成本之和。</p><ul class="list-group list-group-flush">'+Object.entries(COST_CATEGORY_LABELS).filter(([k])=>k.endsWith('_cost')).map(([k,l])=>'<li class="list-group-item d-flex justify-content-between"><span>'+l+'</span><span>¥'+Number((cost.cost_summary||{})[k]||0).toLocaleString()+'</span></li>').join('')+'</ul></div>';
+    return;
+  }
+  if(selectedCostCategory==='profit_rate'){
+    const summary=cost.cost_summary||{};
+    db.innerHTML='<div class="p-3"><p><strong>预估利润率：</strong>'+Math.round((summary.profit_rate||0)*10000)/100+'%</p><p class="text-muted">计算方式：(合同金额 - 项目总成本) / 合同金额</p></div>';
+    return;
+  }
+  if(selectedCostCategory==='procurement_cost'){
+    const items=cost.procurement_items||[];
+    db.innerHTML=items.length?renderProcurementTable(items):'<p class="text-muted text-center py-4">暂无采购明细</p>';
+    return;
+  }
+  if(selectedCostCategory==='travel_cost'){
+    const items=cost.travel_items||[];
+    db.innerHTML=items.length?renderTravelTable(items):'<p class="text-muted text-center py-4">暂无差旅明细</p>';
+    return;
+  }
+  if(catKey){
+    const items=(cost.work_items||[]).filter(w=>w.category===catKey);
+    const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role);
+    const showExpert=catKey==='outsourcing'||catKey==='subcontract';
+    db.innerHTML=renderWorkItemsTable(items, showExpert, isExpert);
+    updateEstimateBadge(cost);
+    return;
+  }
+  // 第三方测试、知识产权等无明细的成本项
+  db.innerHTML='<div class="p-3 text-muted">该成本项在基本信息表中填写，无进一步明细。</div>';
+}
+function renderWorkItemsTable(items, showExpert, isExpert){
+  if(!items.length)return '<p class="text-muted text-center py-4">暂无明细</p>';
+  const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
+  let h='<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>';
+  h+='<th>任务</th><th>工作项</th><th>工作说明</th><th>人天</th><th>人员</th><th>原费用</th>';
+  if(showExpert)h+='<th>专家1</th><th>专家2</th><th>专家3</th><th>专家4</th><th>专家5</th><th>平均</th><th>调整后费用</th><th>评估</th>';
+  h+='</tr></thead><tbody>';
+  items.forEach(w=>{
+    h+='<tr>'+
+      '<td>'+esc(w.work_task||'')+'</td>'+
+      '<td title="'+esc(w.work_item||'')+'">'+esc(w.work_item||'')+'</td>'+
+      '<td>'+esc(w.description||'')+'</td>'+
+      '<td>'+(w.person_days!=null?w.person_days:'-')+'</td>'+
+      '<td>'+esc(w.person||'-')+'</td>'+
+      '<td class="text-muted">¥'+Number(w.cost||0).toLocaleString()+'</td>';
+    if(showExpert){
+      const exp=(w.expert_days||[]).map((d,i)=>d!=null?d:'-').join('</td><td>');
+      const avg=w.expert_days_avg!=null?w.expert_days_avg:'-';
+      const adj=w.adjusted_cost!=null?w.adjusted_cost:(w.cost||0);
+      const hasSubmitted=(w.expert_days_list||[]).length>0;
+      const inputCell=isExpert&&!hasSubmitted
+        ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="?" min="0" step="0.5">'
+        :(w.expert_days_list||[]).join(' / ')||'-';      
+      h+='<td>'+exp+'</td><td class="fw-bold">'+avg+'</td><td class="fw-bold text-success">¥'+Number(adj).toLocaleString()+'</td><td>'+inputCell+'</td>';
+    }
+    h+='</tr>';
+  });
+  h+='</tbody></table></div>';
+  if(showExpert&&isExpert&&items.length>0){
+    h+='<div class="p-2 text-end"><button class="btn btn-sm btn-success" onclick="submitEstimate('+currentProjectId+')"><i class="bi bi-check-circle"></i> 提交我的评估</button></div>';
+  }
+  return h;
+}
+function renderProcurementTable(items){
+  let h='<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr><th>类别</th><th>名称</th><th>规格</th><th>单位</th><th>数量</th><th>单价</th><th>小计</th><th>备注</th></tr></thead><tbody>';
+  items.forEach(x=>{
+    h+='<tr><td>'+esc(x.type||'')+'</td><td>'+esc(x.item_name||x.name||'')+'</td><td>'+esc(x.spec||'')+'</td><td>'+esc(x.unit||'')+'</td><td>'+(x.quantity||'')+'</td><td>¥'+Number(x.unit_price||0).toLocaleString()+'</td><td>¥'+Number(x.amount||x.subtotal||0).toLocaleString()+'</td><td>'+esc(x.remark||'')+'</td></tr>';
+  });
+  h+='</tbody></table></div>';return h;
+}
+function renderTravelTable(items){
+  let h='<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr><th>出差事项</th><th>目的地</th><th>天数</th><th>住宿</th><th>差补</th><th>交通</th><th>合计</th></tr></thead><tbody>';
+  items.forEach(t=>{
+    const total=(Number(t.hotel)||0)+(Number(t.per_diem)||0)+(Number(t.transport)||0);
+    h+='<tr><td>'+esc(t.purpose||'')+'</td><td>'+esc(t.destination||'')+'</td><td>'+(t.days||'')+'</td><td>'+(t.hotel||'')+'</td><td>'+(t.per_diem||'')+'</td><td>'+(t.transport||'')+'</td><td>¥'+total.toLocaleString()+'</td></tr>';
+  });
+  h+='</tbody></table></div>';return h;
+}
+function updateEstimateBadge(cost){
+  const badge=document.getElementById('estimateBadge');
+  if(!badge)return;
+  const estCount=(cost.work_items||[]).filter(w=>w.expert_days_list&&w.expert_days_list.length>0).length;
+  badge.textContent=estCount>0?estCount+'项已评估':'等待评估';
+  badge.className='badge '+(estCount>0?'bg-success':'bg-warning');
 }
 
 async function deleteFile(fileId){
@@ -928,7 +1057,8 @@ async function submitEstimate(projectId){
   if(estimates.length===0){alert('请填写要评估的人天数');return;}
   try{
     for(const est of estimates){
-      await fetch(API+'/estimates',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify(est)});
+      const r=await fetch(API+'/estimates',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify(est)});
+      if(!r.ok){const d=await r.json();throw new Error(d.error||'提交失败');}
     }
     alert('评估提交成功！');
     loadCostDetail(projectId);
@@ -940,12 +1070,26 @@ function downloadCostExcel(){
   const p=projects.find(x=>x.id===currentProjectId);
   if(!p)return;
   let csv='\ufeff';
-  csv+='类别,任务,工作项,人天,原费用,专家评估人天,平均人天,最终成本\n';
   const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
+  csv+='类别,任务,工作项,工作说明,人天,人员,原费用,专家1,专家2,专家3,专家4,专家5,平均,调整后费用,系统评估人天\n';
   (costResult.work_items||[]).forEach(w=>{
-    const expDays=(w.expert_days_list||[]).join('/');
-    csv+=[catMap[w.category]||w.category,w.work_task||'',w.work_item||'',w.person_days||'',w.cost||0,expDays,w.expert_days_avg||'',w.adjusted_cost||w.cost||0].map(c=>'"'+c+'"').join(',')+'\n';
+    const expSys=(w.expert_days_list||[]).join('/');
+    const expExcel=(w.expert_days||[]).join('/');
+    csv+=[catMap[w.category]||w.category,w.work_task||'',w.work_item||'',w.description||'',w.person_days||'',w.person||'',w.cost||0,expExcel,w.expert_days_avg||'',w.adjusted_cost||w.cost||0,expSys].map(c=>'"'+c+'"').join(',')+'\n';
   });
+  if(costResult.procurement_items&&costResult.procurement_items.length){
+    csv+='\n采购明细\n类别,名称,规格,单位,数量,单价,小计,备注\n';
+    costResult.procurement_items.forEach(x=>{
+      csv+=[x.type||'',x.item_name||x.name||'',x.spec||'',x.unit||'',x.quantity||0,x.unit_price||0,x.amount||x.subtotal||0,x.remark||''].map(c=>'"'+c+'"').join(',')+'\n';
+    });
+  }
+  if(costResult.travel_items&&costResult.travel_items.length){
+    csv+='\n差旅明细\n出差事项,目的地,天数,住宿,差补,交通,合计\n';
+    costResult.travel_items.forEach(t=>{
+      const total=(Number(t.hotel)||0)+(Number(t.per_diem)||0)+(Number(t.transport)||0);
+      csv+=[t.purpose||'',t.destination||'',t.days||0,t.hotel||0,t.per_diem||0,t.transport||0,total].map(c=>'"'+c+'"').join(',')+'\n';
+    });
+  }
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');

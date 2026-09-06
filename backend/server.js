@@ -146,6 +146,15 @@ function calculateCategoryCost(items) {
   items.forEach(w => { if (cost[w.category] !== undefined) cost[w.category] += Number(w.cost || 0); });
   return cost;
 }
+function lastOperationAt(projectId) {
+  const logs = db.store.workflowLogs.filter(l => l.project_id === projectId);
+  if (!logs.length) return null;
+  return logs.sort((a, b) => new Date(b.created_at || b.operated_at || 0) - new Date(a.created_at || a.operated_at || 0))[0].created_at || null;
+}
+function enrichProject(p) {
+  if (!p) return p;
+  return { ...p, last_operation_at: lastOperationAt(p.id) || p.updated_at || p.created_at || null };
+}
 
 // Multer
 const storage = multer.diskStorage({
@@ -361,7 +370,7 @@ app.patch('/api/sessions/:id', auth(['admin', 'rd']), (req, res) => {
 
 // ==================== 项目 ====================
 app.get('/api/projects', auth(), (req, res) => {
-  res.json(db.filterByDept('projects', req.user));
+  res.json(db.filterByDept('projects', req.user).map(enrichProject));
 });
 
 app.get('/api/projects/:id', auth(), (req, res) => {
@@ -377,7 +386,7 @@ app.get('/api/projects/:id', auth(), (req, res) => {
     if (!assigned) return res.status(403).json({ error: '无权查看该项目' });
   }
   res.json({
-    ...p,
+    ...enrichProject(p),
     work_items: db.store.workItems.filter(w => w.project_id === p.id),
     procurement_items: db.store.procurementItems.filter(x => x.project_id === p.id),
     travel_items: db.store.travelItems.filter(t => t.project_id === p.id),
@@ -432,7 +441,12 @@ app.delete('/api/projects/:id', auth(['admin', 'rd']), (req, res) => {
   const projectId = parseInt(req.params.id);
   const idx = db.store.projects.findIndex(x => x.id === projectId);
   if (idx < 0) return res.status(404).json({ error: '项目不存在' });
-  // 级联清理
+  deleteProjectAndChildren(projectId);
+  db.save();
+  res.json({ success: true });
+});
+
+function deleteProjectAndChildren(projectId) {
   const fileRecs = db.store.files.filter(f => f.project_id === projectId);
   fileRecs.forEach(f => {
     const fp = path.join(UPLOAD_DIR, f.filename);
@@ -445,9 +459,24 @@ app.delete('/api/projects/:id', auth(['admin', 'rd']), (req, res) => {
   db.store.expertEstimates = db.store.expertEstimates.filter(e => e.project_id !== projectId);
   db.store.confirmations = db.store.confirmations.filter(c => c.project_id !== projectId);
   db.store.workflowLogs = db.store.workflowLogs.filter(l => l.project_id !== projectId);
-  db.store.projects.splice(idx, 1);
+  db.store.projects = db.store.projects.filter(p => p.id !== projectId);
+}
+
+// 批次级项目整体删除：管理员或对应事业部可删除某批次下全部项目
+app.delete('/api/sessions/:id/projects', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const sessionId = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sessionId);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  let targets = db.store.projects.filter(p => p.session_id === sessionId);
+  if (req.user.role === 'biz') {
+    targets = targets.filter(p => p.biz_department === req.user.business_dept);
+    if (targets.length === 0) return res.status(403).json({ error: '该批次下没有属于您事业部的项目' });
+  }
+  const count = targets.length;
+  targets.forEach(p => deleteProjectAndChildren(p.id));
   db.save();
-  res.json({ success: true });
+  db.logWorkflow(null, 'delete_session_projects', `删除批次${sessionId}下${count}个项目`, req.user.id);
+  res.json({ success: true, deleted: count });
 });
 
 // ==================== Excel 导入 ====================
@@ -468,6 +497,7 @@ app.post('/api/projects/import-excel', auth(['admin', 'rd', 'biz']), upload.sing
       biz_department: bizDept, // 确保字段一致
       cost_summary: parsed.cost_summary,
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       creator_id: req.user.id
     };
     if (!p.project_name) return res.status(400).json({ error: 'Excel 中未解析到项目名称' });
@@ -554,6 +584,7 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     upload_time: new Date().toISOString()
   };
   db.store.files.push(file);
+  project.updated_at = new Date().toISOString();
   db.save();
   db.logWorkflow(projectId, 'upload_file', `上传${getFileCategoryName(autoCategory)}文件[${seq}]: ${file.originalname}`, req.user.id);
   res.json(file);
@@ -630,6 +661,8 @@ app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
     submitted_at: new Date().toISOString()
   };
   db.store.expertEstimates.push(estimate);
+  const pj = db.store.projects.find(p => p.id === parseInt(project_id));
+  if (pj) pj.updated_at = new Date().toISOString();
   db.save();
   db.logWorkflow(parseInt(project_id), 'submit_estimate', `专家${estimate.expert_name}评估工作项${work_item_id}: ${daysNum}人天`, req.user.id);
   res.json(estimate);
@@ -672,6 +705,8 @@ app.post('/api/confirmations', auth(['expert', 'accountant']), (req, res) => {
     confirmed_at: new Date().toISOString()
   };
   db.store.confirmations.push(confirmation);
+  const cpj = db.store.projects.find(p => p.id === parseInt(project_id));
+  if (cpj) cpj.updated_at = new Date().toISOString();
   db.save();
   db.logWorkflow(parseInt(project_id), confirmed ? 'confirm_estimate' : 'reject_estimate',
     `专家${confirmation.expert_name}${confirmed ? '确认' : '驳回'}工作项${work_item_id}的平均值`, req.user.id);
@@ -695,6 +730,7 @@ app.get('/api/projects/:id/cost', auth(), (req, res) => {
     .filter(e => e.project_id === p.id)
     .reduce((acc, e) => { (acc[e.work_item_id] = acc[e.work_item_id] || []).push(e.days); return acc; }, {});
   res.json({
+    cost_summary: p.cost_summary || {},
     work_items: db.store.workItems.filter(w => w.project_id === p.id).map(w => ({
       ...w,
       expert_days_list: estimateSummary[w.id] || [],
@@ -924,7 +960,12 @@ app.get('/api/stats/summary', auth(), (req, res) => {
     avg_score: s.expertEstimates.length ? Math.round(s.expertEstimates.reduce((a, e) => a + Number(e.days || 0), 0) / s.expertEstimates.length * 10) / 10 : 0,
     total_users: s.users.length,
     total_cost: totalCost,
-    recent_activity: s.workflowLogs.slice(-5).reverse().map(l => `${l.operator_name} ${l.action}: ${l.remark}`),
+    recent_activity: s.workflowLogs.slice(-5).reverse().map(l => ({
+      at: l.created_at || l.operated_at || '',
+      operator_name: l.operator_name || '',
+      action: l.action || '',
+      remark: l.remark || ''
+    })),
     pending_tasks: s.projects.filter(p => p.status === 'pending' || p.status === 'reviewing').map(p => p.project_name)
   });
 });

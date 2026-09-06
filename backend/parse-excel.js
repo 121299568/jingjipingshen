@@ -111,22 +111,18 @@ function parseProjectExcel(filePath) {
     result.warnings.push('未找到"项目基本信息"工作表');
   }
 
-  // ===== 2. 人员成本明细（长期/中实/华兆/人员外包）=====
+  // ===== 2. 人员成本明细（长期/中实/华兆：7 列无专家评估）=====
   // 文本列(工作任务B/工作项C)可能合并→用填充网格；数值列(人天E/费用F或G)合并会导致重复计数→用原始网格
   const staffSheets = [
     { key: '长期职工成本估算', category: 'long_term' },
     { key: '中实职工成本估算', category: 'zhongshi' },
-    { key: '华兆职工成本估算', category: 'huazhao' },
-    { key: '人员外包成本估算', category: 'outsourcing' }
+    { key: '华兆职工成本估算', category: 'huazhao' }
   ];
   for (const { key, category } of staffSheets) {
     if (!sheets[key]) continue;
     const ws = sheets[key];
     const fill = expandGrid(ws, true).grid;   // 文本用
     const raw = expandGrid(ws, false).grid;   // 数值用
-    const ec = XLSX.utils.decode_range(ws['!ref']).e.c;
-    const hasPersonCol = ec >= 6;
-    const costCol = hasPersonCol ? 6 : 5;
     const lastRow = XLSX.utils.decode_range(ws['!ref']).e.r;
     let task = '';
     for (let r = 2; r <= lastRow; r++) {
@@ -135,8 +131,8 @@ function parseProjectExcel(filePath) {
       const bVal = str(gv(fill, r, 1));        // 工作任务(填充)
       const item = str(gv(fill, r, 2));        // 工作项(填充)
       const days = num(gv(raw, r, 4));         // 人天(原始)
-      const cost = num(gv(raw, r, costCol));   // 费用(原始)
-      const person = hasPersonCol ? str(gv(raw, r, 5)) : '';
+      const cost = num(gv(raw, r, 6));         // 费用(原始)
+      const person = str(gv(raw, r, 5));
       if (!item || item === '工作项') continue; // 需有工作项名，过滤表头/空行
       if (days === null && cost === null && !person) continue; // 过滤说明文字行
       if (bVal && bVal !== '工作任务') task = bVal;
@@ -154,16 +150,22 @@ function parseProjectExcel(filePath) {
     }
   }
 
-  // ===== 3. 专业分包（含 5 位专家工作量）=====
-  if (sheets['专业分包成本估算']) {
-    const ws = sheets['专业分包成本估算'];
+  // ===== 3. 含专家评估的成本明细（人员外包 / 专业分包：13 列）=====
+  // 列：A 序号 B 工作任务 C 工作项 D 工作说明 E 工作量估算 F 费用 G-K 专家1-5 L 平均值 M 调整后费用
+  const expertSheets = [
+    { key: '人员外包成本估算', category: 'outsourcing' },
+    { key: '专业分包成本估算', category: 'subcontract' }
+  ];
+  for (const { key, category } of expertSheets) {
+    if (!sheets[key]) continue;
+    const ws = sheets[key];
     const fill = expandGrid(ws, true).grid;
     const raw = expandGrid(ws, false).grid;
     const lastRow = XLSX.utils.decode_range(ws['!ref']).e.r;
     let task = '';
     for (let r = 2; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
-      if (aVal.includes('合计')) continue;
+      if (aVal.includes('合计') || aVal.includes('说明')) continue;
       const bVal = str(gv(fill, r, 1));
       if (bVal && bVal !== '工作任务') task = bVal;
       const item = str(gv(fill, r, 2));
@@ -174,7 +176,7 @@ function parseProjectExcel(filePath) {
       const avg = num(gv(raw, r, 11));
       const adjusted = num(gv(raw, r, 12));
       result.work_items.push({
-        category: 'subcontract',
+        category,
         work_task: task,
         work_item: item,
         description: str(gv(raw, r, 3)),
@@ -183,7 +185,7 @@ function parseProjectExcel(filePath) {
         expert_days: expertDays,
         expert_days_avg: avg,
         adjusted_cost: adjusted !== null ? adjusted : cost,
-        source_sheet: '专业分包成本估算',
+        source_sheet: key,
         row: r + 1
       });
     }
