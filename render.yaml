@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: jingjipingshen-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    rootDir: backend
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: CORS_ORIGIN
+        value: https://121299568.github.io
+      - key: JWT_SECRET
+        generateValue: true
