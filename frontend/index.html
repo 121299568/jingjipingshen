@@ -39,7 +39,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .batch-drawer.open .batch-body{display:block}
 .batch-empty{padding:20px;text-align:center;color:#9ca3af;font-size:13px}
 .batch-count{background:#fff;border:1px solid #d1d5db;color:#4b5563;padding:2px 8px;border-radius:12px;font-size:11px}
-.card-body canvas{max-height:100px !important;width:100% !important}
+.card-body canvas{max-height:160px !important;width:100% !important}
 .drop-zone{border:2px dashed #cbd5e1;border-radius:12px;padding:30px;text-align:center;transition:all .2s;cursor:pointer;background:#f8fafc}
 .drop-zone:hover{border-color:#667eea;background:#eef2ff}
 .drop-zone.dragover{border-color:#667eea;background:#e0e7ff;transform:scale(1.01)}
@@ -245,12 +245,12 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         <div class="col-md-3"><div class="card bg-warning text-white h-100"><div class="card-body text-center"><h2 class="display-4" id="statTotalSessions">0</h2><p class="mb-0">评审批次</p></div></div></div>
       </div>
       <div class="row g-3 mb-4">
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-pie-chart"></i> 事业部分布</h6></div><div class="card-body"><canvas id="deptChart" height="80"></canvas></div></div></div>
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-bar-chart"></i> 月度趋势</h6></div><div class="card-body"><canvas id="monthlyChart" height="80"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-pie-chart"></i> 事业部分布</h6></div><div class="card-body"><canvas id="deptChart" height="160"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-bar-chart"></i> 月度趋势</h6></div><div class="card-body"><canvas id="monthlyChart" height="160"></canvas></div></div></div>
       </div>
       <div class="row g-3 mb-4">
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-file-earmark"></i> 资料上传情况</h6></div><div class="card-body"><canvas id="fileChart" height="80"></canvas></div></div></div>
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-calendar3"></i> 批次完成进度</h6></div><div class="card-body"><canvas id="sessionChart" height="80"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-file-earmark"></i> 资料上传情况</h6></div><div class="card-body"><canvas id="fileChart" height="160"></canvas></div></div></div>
+        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-calendar3"></i> 批次完成进度</h6></div><div class="card-body"><canvas id="sessionChart" height="160"></canvas></div></div></div>
       </div>
       <div class="row g-3">
         <div class="col-12"><div class="card card-custom">
