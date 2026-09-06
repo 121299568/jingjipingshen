@@ -31,7 +31,27 @@ db.load().then(startServer).catch(err => {
 });
 
 // ==================== 中间件 ====================
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// Helmet 默认 CSP 为 script-src 'self' + script-src-attr 'none'，会拦截本系统的内联脚本、
+// 内联事件处理器(onclick) 以及 jsdelivr CDN 脚本，导致页面能显示但 JS 全不执行。
+// 这里关闭默认策略并显式放行：内联脚本/事件 + jsdelivr CDN（bootstrap/chart.js）。
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+      imgSrc: ["'self'", "data:", "https:"],
+      fontSrc: ["'self'", "https:", "data:"],
+      connectSrc: ["'self'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'self'"]
+    }
+  }
+}));
 const corsOpts = config.corsOrigins.length
   ? { origin: config.corsOrigins, credentials: true }
   : { origin: true, credentials: true };
