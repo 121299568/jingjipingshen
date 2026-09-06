@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const config = require('./config');
+const memoryStore = require('./memoryStore');
 
 const DATA_DIR = config.dataDir;
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
@@ -89,6 +90,7 @@ function migrate(s) {
 }
 
 let store = null;
+let isMemory = false; // 虚拟数据模式：数据只活在内存，不落盘
 
 function ensureDirs() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -103,6 +105,14 @@ function latestBackup() {
 }
 
 function load() {
+  // 虚拟数据模式：载入一份内置的模拟业务数据，不读写磁盘，重启即复原，专为上线前测试
+  if (config.dbDriver === 'memory') {
+    store = memoryStore.build();
+    migrate(store);
+    isMemory = true;
+    console.log('[db] 已加载内存虚拟数据集（DB_DRIVER=memory），不落盘，仅用于测试');
+    return;
+  }
   ensureDirs();
   if (!fs.existsSync(STORE_FILE)) {
     store = defaultStore();
@@ -159,6 +169,8 @@ function persist(s) {
 }
 
 function save() {
+  // 虚拟数据模式不落盘（数据只在内存，重启复原）
+  if (isMemory) return;
   // 单进程下同步写入即可保证原子性；多实例部署请切换 DB_DRIVER=mysql
   persist(store);
 }

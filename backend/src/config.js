@@ -58,8 +58,11 @@ const config = {
   uploadDir: process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads'),
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
 
-  // 数据层驱动：json | mysql
-  dbDriver: (process.env.DB_DRIVER || 'json').toLowerCase(),
+  // 数据层驱动：json（默认，文件持久化）| mysql（待接入）| memory（上线前测试，纯内存不落盘）
+  dbDriver: (() => {
+    const v = (process.env.DB_DRIVER || 'json').toLowerCase();
+    return ['json', 'mysql', 'memory'].includes(v) ? v : 'json';
+  })(),
   db: {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '3306', 10),
