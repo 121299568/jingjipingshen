@@ -478,6 +478,25 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
   </div></div>
 </div>
 
+<!-- 批次设置：评审会信息 + 材料清单下发 -->
+<div class="modal fade" id="sessionSettingsModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5>批次设置 / 下发评审清单</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="sessSetId">
+      <div class="row g-3 mb-3">
+        <div class="col-md-6"><label class="form-label">批次名称</label><input type="text" class="form-control" id="sessSetName"></div>
+        <div class="col-md-6"><label class="form-label">评审会时间</label><input type="datetime-local" class="form-control" id="sessSetTime"></div>
+        <div class="col-md-6"><label class="form-label">会议地点</label><input type="text" class="form-control" id="sessSetLocation" placeholder="如：总部 3 楼会议室"></div>
+        <div class="col-md-6"><label class="form-label">会议议程</label><input type="text" class="form-control" id="sessSetAgenda" placeholder="如：项目汇报 → 专家质询 → 现场打分"></div>
+      </div>
+      <label class="form-label fw-bold">本次评审需提交的材料清单（下发后项目按此清单核对齐全度）</label>
+      <div id="sessSetChecklist" class="row g-2"></div>
+    </div>
+    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-primary" onclick="saveSessionSettings()">保存并下发</button></div>
+  </div></div>
+</div>
+
 <!-- 项目评审流程 -->
 <div class="modal fade" id="flowModal" tabindex="-1">
   <div class="modal-dialog modal-lg"><div class="modal-content">
@@ -625,11 +644,18 @@ function populateSessionSelect(){
 function renderSessions(){
   const tb=document.getElementById('sessionTbody');if(!tb)return;
   const isAdmin=currentUser&&currentUser.role==='admin';
+  const canManage=currentUser&&(currentUser.role==='admin'||currentUser.role==='rd');
   tb.innerHTML=sessions.map(s=>{
     const sFiles=files.filter(f=>projects.some(p=>p.id===f.project_id&&p.session_id===s.id));
     const sProjects=projects.filter(p=>p.session_id===s.id);
+    const cl=Array.isArray(s.checklist)?s.checklist.length:0;
+    const meta=[];
+    if(s.meeting_location)meta.push('<i class="bi bi-geo-alt"></i> '+esc(s.meeting_location));
+    if(cl)meta.push('<i class="bi bi-list-check"></i> 清单 '+cl+' 项');
+    if(s.meeting_agenda)meta.push('<i class="bi bi-card-text"></i> '+esc(s.meeting_agenda));
     return '<tr>'+
-      '<td>'+s.id+'</td><td>'+esc(s.name||s.session_name||'-')+'</td>'+
+      '<td>'+s.id+'</td><td>'+esc(s.name||s.session_name||'-')+
+        (meta.length?'<div class="small text-muted">'+meta.join(' · ')+'</div>':'')+'</td>'+
       '<td><span class="badge bg-'+({completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary')+'">'+({completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status)+'</span></td>'+
       '<td>'+fmtTime(s.review_time)+'</td>'+
       '<td>'+sProjects.length+'</td>'+
@@ -637,6 +663,7 @@ function renderSessions(){
         (s.status==='pending'?'<button class="btn btn-sm btn-warning me-1" onclick="updateSessionStatus('+s.id+',\'in_progress\')"><i class="bi bi-play-fill"></i>启动</button>':'')+
         (s.status==='in_progress'?'<button class="btn btn-sm btn-success me-1" onclick="updateSessionStatus('+s.id+',\'completed\')"><i class="bi bi-archive-fill"></i>归档</button>':'')+
         (s.status==='completed'?'<span class="text-muted small"><i class="bi bi-archive"></i>已归档</span>':'')+
+        (canManage?'<button class="btn btn-sm btn-outline-primary me-1" title="评审会信息与材料清单" onclick="openSessionSettings('+s.id+')"><i class="bi bi-gear"></i>设置</button>':'')+
         (isAdmin&&sFiles.length>0?'<button class="btn btn-sm btn-outline-primary me-1" title="全量下载" onclick="downloadSessionFiles('+s.id+')"><i class="bi bi-download"></i>全部文件</button><button class="btn btn-sm btn-outline-success me-1" title="下载估算表" onclick="downloadSessionEstimation('+s.id+')"><i class="bi bi-file-earmark-excel"></i>估算表</button>':'')+
       '</td></tr>';
   }).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无批次</td></tr>';
@@ -737,8 +764,15 @@ function canAssignProject(p){
   return currentUser && (currentUser.role==='admin'||currentUser.role==='rd');
 }
 // 项目状态展示
-function projectStatusLabel(s){return {draft:'草稿',reviewing:'评审中',rejected:'已退回',pending_confirm:'待确认',completed:'已完成',in_review:'评审中',archived:'已归档'}[s]||s||'-';}
-function statusBadgeClass(s){return {draft:'bg-secondary',reviewing:'bg-warning text-dark',rejected:'bg-danger',pending_confirm:'bg-info text-dark',completed:'bg-success',in_review:'bg-warning text-dark',archived:'bg-secondary'}[s]||'bg-secondary';}
+function projectStatusLabel(s){return {draft:'草稿',submitted:'待预审',reviewing:'评审中',rejected:'已退回',pending_confirm:'待确认',completed:'已完成',in_review:'评审中',archived:'已归档'}[s]||s||'-';}
+function statusBadgeClass(s){return {draft:'bg-secondary',submitted:'bg-primary',reviewing:'bg-warning text-dark',rejected:'bg-danger',pending_confirm:'bg-info text-dark',completed:'bg-success',in_review:'bg-warning text-dark',archived:'bg-secondary'}[s]||'bg-secondary';}
+// 评审材料清单类别（与后端 FILE_CATEGORIES 一致）
+const FILE_CATEGORY_OPTIONS=[
+  {code:'estimation',label:'成本估算表'},{code:'feasibility',label:'可行性研究报告'},{code:'bid',label:'招投标文件'},
+  {code:'award',label:'中标通知书'},{code:'contract',label:'合同文件'},{code:'tech_spec',label:'技术规范书'},
+  {code:'subcontract',label:'分包申请表'},{code:'profit',label:'投标利润率评审表'}
+];
+const FILE_CATEGORY_MAP={estimation:'估算表',feasibility:'可研',bid:'招标',award:'中标',contract:'合同',tech_spec:'技术规范书',subcontract:'分包',profit:'利润率'};
 async function deleteProject(pid){
   if(!confirm('确定删除该项目？该项目及其资料、成本明细、专家评估将一并删除，且不可恢复！'))return;
   try{
@@ -1540,9 +1574,11 @@ async function openFlowModal(pid){
   const assHtml=assignments.length?assignments.map(a=>'<span class="badge '+(a.user_role==='accountant'?'bg-info text-dark':'bg-secondary')+' me-1">'+esc(a.user_name)+'（'+(a.user_role==='accountant'?'会计师':'专家')+'）</span>').join(''):'<span class="text-muted small">尚未分配</span>';
   let actions='';
   if(isRdAdmin){
-    if(detail.status==='draft'||detail.status==='rejected'){
+    if(detail.status==='submitted'||detail.status==='rejected'){
       actions+='<button class="btn btn-success btn-sm me-2" onclick="doPreReview('+pid+',true)"><i class="bi bi-check-circle"></i> 预审通过</button>'+
         '<button class="btn btn-warning btn-sm" onclick="doPreReview('+pid+',false)"><i class="bi bi-arrow-return-left"></i> 退回</button>';
+    }else if(detail.status==='draft'){
+      actions+='<span class="text-muted small">等待事业部提交评审申请</span>';
     }else if(detail.status==='reviewing'){
       actions+='<button class="btn btn-primary btn-sm" onclick="doInitiate('+pid+')"><i class="bi bi-send-check"></i> 发起成果确认</button>';
     }else if(detail.status==='pending_confirm'){
@@ -1550,6 +1586,11 @@ async function openFlowModal(pid){
     }else if(detail.status==='completed'){
       actions+='<span class="badge bg-success">已完成并归档</span>';
     }
+  }
+  // 事业部提交/重新提交评审申请
+  if(isBizSame&&(detail.status==='draft'||detail.status==='rejected')){
+    const again=detail.status==='rejected';
+    actions+='<div class="mt-2"><button class="btn btn-primary btn-sm" onclick="doSubmitApply('+pid+')"><i class="bi bi-file-earmark-check"></i> '+(again?'补充材料并重新提交申请':'提交经济评审申请')+'</button></div>';
   }
   if(isBizSame&&detail.status==='pending_confirm'){
     const confirmed=detail.biz_confirmed;
@@ -1562,14 +1603,47 @@ async function openFlowModal(pid){
       ?'<div class="alert alert-success small mb-0">您已被分配参与此项目，请到「工作量评估」页提交人天评估。</div>'
       :'<div class="alert alert-warning small mb-0">您尚未被分配到此项目，暂不能提交评估。</div>';
   }
+  // 申请信息
+  const applyInfo=detail.applied_at
+    ?'<div class="card mb-3"><div class="card-header bg-light small fw-bold">评审申请</div><div class="card-body small">'+
+      '<div><strong>申请人：</strong>'+esc(detail.applicant_name||'-')+'　<strong>提交时间：</strong>'+esc(String(detail.applied_at).replace('T',' ').slice(0,16))+'</div>'+
+      (detail.apply_note?'<div class="mt-1"><strong>申请说明：</strong>'+esc(detail.apply_note)+'</div>':'')+
+     '</div></div>'
+    :'';
+  // 材料清单齐全度
+  const cl=detail.checklist_status||[];
+  const clDone=cl.filter(x=>x.uploaded).length;
+  const clHtml=cl.length
+    ?'<div class="card mb-3"><div class="card-header bg-light small fw-bold">评审材料清单 <span class="badge '+(clDone===cl.length?'bg-success':'bg-danger')+'">'+clDone+'/'+cl.length+'</span></div><div class="card-body">'+
+      cl.map(x=>'<span class="badge '+(x.uploaded?'bg-success':'bg-secondary')+' me-1 mb-1">'+(x.uploaded?'✓ ':'— ')+(FILE_CATEGORY_MAP[x.category]||x.category)+'</span>').join('')+
+     '</div></div>'
+    :'';
+  // 结果校核
+  const ac=detail.audit_conclusion;
+  const acLabel={approved:['success','认可'],adjust:['warning text-dark','建议调整'],rejected:['danger','不认可']}[ac&&ac.conclusion]||null;
+  let verifyCard='';
+  if(['expert','accountant'].includes(role)||ac){
+    const canVerify=['expert','accountant'].includes(role)&&amAssigned&&detail.status!=='completed';
+    verifyCard='<div class="card mb-3"><div class="card-header bg-light small fw-bold">结果校核</div><div class="card-body">'+
+      (ac
+        ?'<div class="mb-2">当前结论：<span class="badge bg-'+acLabel[0]+'">'+acLabel[1]+'</span> <span class="text-muted small">'+esc(ac.by_name||'')+' · '+esc(String(ac.at||'').replace('T',' ').slice(0,16))+' · '+(ac.by_role==='accountant'?'会计师事务所':'评审专家')+'</span>'+(ac.note?'<div class="small mt-1">校核说明：'+esc(ac.note)+'</div>':'')+'</div>'
+        :'<div class="text-muted small mb-2">尚未提交校核结论</div>')+
+      (canVerify
+        ?'<select id="verifyConclusion" class="form-select form-select-sm mb-2"><option value="approved">认可</option><option value="adjust">建议调整</option><option value="rejected">不认可</option></select>'+
+         '<textarea id="verifyNote" class="form-control form-control-sm mb-2" rows="2" placeholder="校核说明（选择“建议调整/不认可”时必填）"></textarea>'+
+         '<button class="btn btn-sm btn-primary" onclick="doVerify('+pid+')"><i class="bi bi-clipboard-check"></i> 提交校核结论</button>'
+        :'')+
+     '</div></div>';
+  }
   const rejectNote=(detail.status==='rejected'&&detail.review_note)?'<div class="alert alert-danger small">研发中心退回原因：'+esc(detail.review_note)+'</div>':'';
   const bizRejectNote=(detail.biz_confirmed===false&&detail.biz_confirm_note)?'<div class="alert alert-warning small">事业部退回：'+esc(detail.biz_confirm_note)+'</div>':'';
   document.getElementById('flowModalBody').innerHTML=
     '<div class="mb-2"><strong>项目：</strong>'+esc(detail.project_name||'')+' <span class="badge '+statusBadgeClass(detail.status||'draft')+'">'+projectStatusLabel(detail.status||'draft')+'</span></div>'+
     '<div class="mb-3"><strong>承接事业部：</strong>'+esc(detail.biz_department||'-')+' <strong class="ms-3">合同金额：</strong>¥'+(detail.contract_amount?Number(detail.contract_amount).toLocaleString():'-')+'</div>'+
     rejectNote+bizRejectNote+
+    applyInfo+clHtml+
     '<div class="card mb-3"><div class="card-header bg-light small fw-bold">已分配评审人员</div><div class="card-body">'+assHtml+(isRdAdmin?' <button class="btn btn-sm btn-outline-primary mt-2" onclick="openAssignModal('+pid+')"><i class="bi bi-people"></i> '+(assignments.length?'重分配':'分配')+'</button>':'')+'</div></div>'+
-    expertNote+
+    expertNote+verifyCard+
     '<div class="card"><div class="card-header bg-light small fw-bold">流程操作</div><div class="card-body">'+ (actions||'<span class="text-muted small">当前状态暂无可用操作</span>') +'</div></div>';
   new bootstrap.Modal(document.getElementById('flowModal')).show();
 }
@@ -1608,6 +1682,64 @@ async function doBizConfirm(pid,confirmed){
     const d=await r.json();
     if(r.ok){bootstrap.Modal.getInstance(document.getElementById('flowModal'))?.hide();await loadProjects();alert(confirmed?'已确认成果':'已退回成果');}
     else alert(d.error||'操作失败');
+  }catch(e){alert('出错: '+e.message);}
+}
+// 事业部提交经济评审申请
+async function doSubmitApply(pid){
+  const note=prompt('申请说明（可选）')||'';
+  try{
+    const r=await fetch(API+'/projects/'+pid+'/submit',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({note})});
+    const d=await r.json();
+    if(r.ok){bootstrap.Modal.getInstance(document.getElementById('flowModal'))?.hide();await loadProjects();alert('评审申请已提交，等待研发中心预审');}
+    else alert(d.error||'提交失败');
+  }catch(e){alert('出错: '+e.message);}
+}
+// 评审专家 / 会计师事务所提交结果校核结论
+async function doVerify(pid){
+  const conclusion=document.getElementById('verifyConclusion')?.value;
+  const note=(document.getElementById('verifyNote')?.value||'').trim();
+  if(!conclusion){alert('请选择校核结论');return;}
+  try{
+    const r=await fetch(API+'/projects/'+pid+'/verify',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({conclusion,note})});
+    const d=await r.json();
+    if(r.ok){bootstrap.Modal.getInstance(document.getElementById('flowModal'))?.hide();await loadProjects();alert('校核结论已提交');}
+    else alert(d.error||'提交失败');
+  }catch(e){alert('出错: '+e.message);}
+}
+
+// ==================== 批次设置（评审会信息 + 材料清单下发） ====================
+function openSessionSettings(sid){
+  const s=sessions.find(x=>x.id===sid);if(!s)return;
+  document.getElementById('sessSetId').value=s.id;
+  document.getElementById('sessSetName').value=s.name||s.session_name||'';
+  document.getElementById('sessSetTime').value=s.review_time?String(s.review_time).replace(' ','T').slice(0,16):'';
+  document.getElementById('sessSetLocation').value=s.meeting_location||'';
+  document.getElementById('sessSetAgenda').value=s.meeting_agenda||'';
+  const cur=Array.isArray(s.checklist)?s.checklist:[];
+  document.getElementById('sessSetChecklist').innerHTML=FILE_CATEGORY_OPTIONS.map(o=>
+    '<div class="col-md-6"><div class="permission-check"><input class="form-check-input" type="checkbox" id="scl_'+o.code+'" '+(cur.includes(o.code)?'checked':'')+'><label class="form-check-label" for="scl_'+o.code+'">'+o.label+'</label></div></div>'
+  ).join('');
+  new bootstrap.Modal(document.getElementById('sessionSettingsModal')).show();
+}
+async function saveSessionSettings(){
+  const sid=document.getElementById('sessSetId').value;if(!sid)return;
+  const checklist=FILE_CATEGORY_OPTIONS.filter(o=>document.getElementById('scl_'+o.code)?.checked).map(o=>o.code);
+  const body={
+    name:document.getElementById('sessSetName').value.trim(),
+    review_time:document.getElementById('sessSetTime').value,
+    meeting_location:document.getElementById('sessSetLocation').value.trim(),
+    meeting_agenda:document.getElementById('sessSetAgenda').value.trim(),
+    checklist
+  };
+  try{
+    const r=await fetch(API+'/sessions/'+sid,{method:'PATCH',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(r.ok){
+      const i=sessions.findIndex(x=>x.id==sid);if(i>=0)sessions[i]=d;
+      bootstrap.Modal.getInstance(document.getElementById('sessionSettingsModal'))?.hide();
+      renderSessions();renderProjects();
+      alert('批次设置已保存（评审材料清单已下发）');
+    }else alert('保存失败: '+(d.error||'未知错误'));
   }catch(e){alert('出错: '+e.message);}
 }
 </script>

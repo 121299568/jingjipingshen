@@ -157,10 +157,13 @@ function enrichProject(p) {
 }
 
 // ==================== 审批流辅助 ====================
-// 项目状态流转允许的方向（draft→reviewing→pending_confirm→completed，rejected 为退回分支）
+// 项目状态流转允许的方向：
+// draft(草稿) → submitted(已提交申请) → reviewing(评审中) → pending_confirm(待确认) → completed(已完成)
+// rejected 为退回分支，退回后事业部可补充材料重新提交
 const PROJECT_STATUS_FLOW = {
-  draft: ['reviewing', 'rejected'],
-  rejected: ['reviewing', 'draft'],
+  draft: ['submitted', 'rejected'],
+  submitted: ['reviewing', 'rejected'],
+  rejected: ['submitted', 'draft'],
   reviewing: ['pending_confirm', 'rejected'],
   pending_confirm: ['completed', 'reviewing'],
   completed: []
@@ -168,6 +171,27 @@ const PROJECT_STATUS_FLOW = {
 function canTransition(from, to) {
   if (from === to) return true;
   return (PROJECT_STATUS_FLOW[from] || []).includes(to);
+}
+
+// 资料类别与默认评审清单（批次未配置清单时使用）
+const FILE_CATEGORIES = ['estimation', 'feasibility', 'bid', 'award', 'contract', 'tech_spec', 'subcontract', 'profit'];
+// 项目资料清单齐全度：优先用所属批次下发的清单
+function checklistStatus(p) {
+  const sess = p.session_id ? db.store.reviewSessions.find(s => s.id === p.session_id) : null;
+  const list = (sess && Array.isArray(sess.checklist) && sess.checklist.length) ? sess.checklist : FILE_CATEGORIES;
+  return list.map(c => ({
+    category: c,
+    uploaded: db.store.files.some(f => f.project_id === p.id && f.file_category === c)
+  }));
+}
+// 流程锁：项目已归档或所属批次已归档后，禁止再改动评估与资料
+function projectLocked(p) {
+  if (p.status === 'completed') return '项目已归档';
+  if (p.session_id) {
+    const s = db.store.reviewSessions.find(x => x.id === p.session_id);
+    if (s && s.status === 'completed') return '所属批次已归档';
+  }
+  return null;
 }
 
 // 取项目已分配的评审专家/会计师
@@ -366,7 +390,7 @@ app.get('/api/sessions', auth(), (req, res) => {
   })));
 });
 app.post('/api/sessions', auth(['admin', 'rd']), (req, res) => {
-  const allowed = ['name', 'review_time', 'note', 'status'];
+  const allowed = ['name', 'review_time', 'note', 'status', 'meeting_location', 'meeting_agenda'];
   const body = pick(req.body, allowed);
   const validStatus = ['pending', 'in_progress', 'completed'];
   const s = {
@@ -374,6 +398,11 @@ app.post('/api/sessions', auth(['admin', 'rd']), (req, res) => {
     name: body.name || '未命名批次',
     review_time: body.review_time || null,
     note: body.note || '',
+    // 评审会元数据（时间复用 review_time，另增地点与议程）
+    meeting_location: body.meeting_location || '',
+    meeting_agenda: body.meeting_agenda || '',
+    // 下发的评审材料清单（资料类别数组）
+    checklist: Array.isArray(req.body.checklist) ? req.body.checklist.filter(c => FILE_CATEGORIES.includes(c)) : [],
     status: body.status && validStatus.includes(body.status) ? body.status : 'pending',
     creator_id: req.user.id,
     created_at: new Date().toISOString()
@@ -385,15 +414,47 @@ app.post('/api/sessions', auth(['admin', 'rd']), (req, res) => {
 app.patch('/api/sessions/:id', auth(['admin', 'rd']), (req, res) => {
   const idx = db.store.reviewSessions.findIndex(x => x.id === parseInt(req.params.id));
   if (idx < 0) return res.status(404).json({ error: '批次不存在' });
-  const allowed = ['pending', 'in_progress', 'completed'];
+  const s = db.store.reviewSessions[idx];
+  // 元数据可单独编辑（名称/时间/备注/会议地点/议程/评审清单）
+  if (req.body.name !== undefined) s.name = req.body.name;
+  if (req.body.review_time !== undefined) s.review_time = req.body.review_time;
+  if (req.body.note !== undefined) s.note = req.body.note;
+  if (req.body.meeting_location !== undefined) s.meeting_location = req.body.meeting_location;
+  if (req.body.meeting_agenda !== undefined) s.meeting_agenda = req.body.meeting_agenda;
+  if (Array.isArray(req.body.checklist)) s.checklist = req.body.checklist.filter(c => FILE_CATEGORIES.includes(c));
   const newStatus = req.body.status;
-  if (!newStatus || !allowed.includes(newStatus)) {
-    return res.status(400).json({ error: '无效状态，可选: pending/in_progress/completed' });
+  if (newStatus !== undefined) {
+    const allowed = ['pending', 'in_progress', 'completed'];
+    if (!allowed.includes(newStatus)) {
+      return res.status(400).json({ error: '无效状态，可选: pending/in_progress/completed' });
+    }
+    // 流程锁：启动评审前校验资料齐全；归档前校验项目全部完成
+    const ps = db.store.projects.filter(p => p.session_id === s.id);
+    if (newStatus === 'in_progress') {
+      const missing = ps.filter(p => !db.store.files.some(f => f.project_id === p.id && f.file_category === 'estimation'));
+      if (missing.length) {
+        return res.status(400).json({
+          error: `还有 ${missing.length} 个项目未上传成本估算表，不可启动评审（` +
+            missing.slice(0, 3).map(p => p.project_name).join('、') + (missing.length > 3 ? ' 等' : '') + '）'
+        });
+      }
+    }
+    if (newStatus === 'completed') {
+      const undone = ps.filter(p => p.status !== 'completed');
+      if (undone.length) {
+        return res.status(400).json({
+          error: `还有 ${undone.length} 个项目未完成评审，不可归档（` +
+            undone.slice(0, 3).map(p => p.project_name).join('、') + (undone.length > 3 ? ' 等' : '') + '）'
+        });
+      }
+    }
+    s.status = newStatus;
+    if (newStatus === 'completed') s.completed_at = new Date().toISOString();
+    db.logWorkflow(null, newStatus === 'completed' ? 'archive_session' : 'update_session_status',
+      (newStatus === 'completed' ? '归档批次：' : '更新批次状态为 ' + newStatus + '：') + (s.name || ''), req.user.id);
   }
-  db.store.reviewSessions[idx].status = newStatus;
-  if (newStatus === 'completed') db.store.reviewSessions[idx].completed_at = new Date().toISOString();
   db.save();
-  res.json(db.store.reviewSessions[idx]);
+  res.json(s);
 });
 
 // ==================== 项目 ====================
@@ -420,7 +481,8 @@ app.get('/api/projects/:id', auth(), (req, res) => {
     files: db.store.files.filter(f => f.project_id === p.id),
     expert_estimates: db.store.expertEstimates.filter(e => e.project_id === p.id),
     confirmations: db.store.confirmations.filter(c => c.project_id === p.id),
-    assignments: getAssignments(p.id)
+    assignments: getAssignments(p.id),
+    checklist_status: checklistStatus(p)
   });
 });
 
@@ -584,6 +646,9 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
   if (req.user.role === 'biz' && req.user.business_dept !== project.biz_department) {
     return res.status(403).json({ error: '无权上传该项目文件' });
   }
+  // 流程锁：项目或所属批次归档后资料锁定
+  const upLock = projectLocked(project);
+  if (upLock) return res.status(403).json({ error: upLock + '，资料已锁定不可再上传' });
   const clientCategory = req.body.category;
   const realOriginalName = decodeFilename(req.file.originalname);
   const autoCategory = (clientCategory && clientCategory !== 'auto') ? clientCategory : inferFileCategory(realOriginalName);
@@ -701,6 +766,9 @@ app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
   const pid = parseInt(project_id);
   const project = db.store.projects.find(p => p.id === pid);
   if (!project) return res.status(404).json({ error: '项目不存在' });
+  // 流程锁：项目或所属批次归档后禁止再改动评估
+  const lockReason = projectLocked(project);
+  if (lockReason) return res.status(403).json({ error: lockReason + '，禁止提交或修改评估' });
   // P0-2：校验评估人已被分配到该项目（会计师事务所同样以专家身份参与评估）
   if (!isAssignedToProject(req.user, pid)) {
     return res.status(403).json({ error: '您未被分配到该项目，无法提交评估' });
@@ -830,12 +898,37 @@ app.post('/api/projects/:id/assign', auth(['admin', 'rd']), (req, res) => {
 });
 
 // ==================== 评审流程节点 ====================
-// 研发中心预审：通过(draft/rejected → reviewing) 或 退回(draft/rejected → rejected)
+// 事业部提交经济评审申请（draft/rejected → submitted）
+app.post('/api/projects/:id/submit', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  if (req.user.role === 'biz' && req.user.business_dept !== p.biz_department) {
+    return res.status(403).json({ error: '无权提交非本事业部的项目申请' });
+  }
+  if (!['draft', 'rejected'].includes(p.status)) {
+    return res.status(400).json({ error: '当前状态（' + p.status + '）无需提交申请' });
+  }
+  p.status = 'submitted';
+  p.applicant_id = req.user.id;
+  p.applicant_name = req.user.real_name;
+  p.applied_at = new Date().toISOString();
+  p.apply_note = (req.body.note || '').toString();
+  p.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(p.id, 'submit_application', (req.user.real_name || '事业部') + '提交经济评审申请' + (p.apply_note ? '：' + p.apply_note : ''), req.user.id);
+  res.json(p);
+});
+
+// 研发中心预审：通过(submitted/rejected → reviewing) 或 退回(→ rejected)
 app.post('/api/projects/:id/pre-review', auth(['admin', 'rd']), (req, res) => {
   const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '项目不存在' });
-  if (!['draft', 'rejected'].includes(p.status)) {
-    return res.status(400).json({ error: '当前状态（' + p.status + '）不可进行预审' });
+  if (!['submitted', 'rejected'].includes(p.status)) {
+    return res.status(400).json({
+      error: p.status === 'draft'
+        ? '事业部尚未提交评审申请，请先由事业部提交申请后再预审'
+        : '当前状态（' + p.status + '）不可进行预审'
+    });
   }
   const approve = !!req.body.approve;
   const reason = (req.body.reason || '').toString();
@@ -885,6 +978,30 @@ app.post('/api/projects/:id/finalize', auth(['admin', 'rd']), (req, res) => {
       }
     }
   }
+  res.json(p);
+});
+
+// 结果校核（评审专家 / 会计师事务所；需已分配到该项目）
+// conclusion: approved=认可 / adjust=建议调整 / rejected=不认可（后两者必填说明）
+app.post('/api/projects/:id/verify', auth(['expert', 'accountant']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  if (!isAssignedToProject(req.user, p.id)) return res.status(403).json({ error: '您未被分配到该项目，无法提交校核结论' });
+  const conclusion = (req.body.conclusion || '').toString();
+  if (!['approved', 'adjust', 'rejected'].includes(conclusion)) {
+    return res.status(400).json({ error: '无效校核结论，可选: approved/adjust/rejected' });
+  }
+  const note = (req.body.note || '').toString();
+  if (conclusion !== 'approved' && !note.trim()) return res.status(400).json({ error: '非“认可”结论必须填写校核说明' });
+  p.audit_conclusion = {
+    conclusion, note,
+    by: req.user.id, by_name: req.user.real_name,
+    by_role: req.user.role, at: new Date().toISOString()
+  };
+  p.updated_at = new Date().toISOString();
+  db.save();
+  const label = { approved: '认可', adjust: '建议调整', rejected: '不认可' }[conclusion];
+  db.logWorkflow(p.id, 'verify_result', (req.user.real_name || '') + '提交结果校核：' + label + (note ? '（' + note + '）' : ''), req.user.id);
   res.json(p);
 });
 
