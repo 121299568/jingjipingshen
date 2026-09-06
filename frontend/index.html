@@ -674,7 +674,7 @@ function renderProjects(){
         '<td class="text-center">'+ck('bid')(has('bid'))+'</td>'+
         '<td class="text-center">'+ck('contract')(has('contract'))+'</td>'+
         '<td>'+
-          '<button class="btn btn-sm btn-info me-1" title="文件上传" onclick="goToUpload('+p.id+')"><i class="bi bi-folder"></i></button>'+
+          '<button class="btn btn-sm btn-info me-1" title="查看/上传资料" onclick="goToUpload('+p.id+')"><i class="bi bi-folder"></i></button>'+
           '<button class="btn btn-sm btn-success me-1" title="工作量评估" onclick="goToCost('+p.id+')"><i class="bi bi-graph-down"></i></button>'+
           (canDeleteProject(p)?'<button class="btn btn-sm btn-outline-danger" title="删除项目" onclick="deleteProject('+p.id+')"><i class="bi bi-trash"></i></button>':'')+
         '</td>'+
