@@ -787,7 +787,20 @@ function downloadSessionEstimation(sessionId){
 // COST ANALYSIS
 function updateCostSelect(){
   const sel=document.getElementById('costProjectSelect');
-  if(sel)sel.innerHTML='<option value="">-- 请选择项目 --</option>'+projects.map(p=>'<option value="'+p.id+'">'+(p.project_name||p.name)+'</option>').join('');
+  if(!sel) return;
+  const reviewingIds = sessions.filter(s => s.status === 'reviewing').map(s => s.id);
+  const filteredProjects = projects.filter(p => reviewingIds.includes(p.session_id));
+  const currentVal = sel.value;
+  sel.innerHTML='<option value="">-- 请选择项目 --</option>'+filteredProjects.map(p=>'<option value="'+p.id+'">'+(p.project_name||p.name)+'</option>').join('');
+  // 如果当前选中的项目已不在评审中批次，清空选择
+  if(currentVal && !reviewingIds.includes(projects.find(p => p.id == currentVal)?.session_id)){
+    sel.value = '';
+    currentProjectId = null;
+    document.getElementById('costHeaderCard')?.classList.add('d-none');
+    document.getElementById('costSummaryCards').innerHTML = '';
+    document.getElementById('workTbody').innerHTML = '';
+    document.getElementById('downloadCostBtn').style.display = 'none';
+  }
 }
 async function renderCostAnalysis(){
   updateCostSelect();
