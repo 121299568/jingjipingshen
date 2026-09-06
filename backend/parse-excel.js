@@ -84,8 +84,13 @@ function parseProjectExcel(filePath) {
     result.project.is_digital = str(gv(grid, 3, 3));
     result.project.business_sub_direction = str(gv(grid, 4, 3));
     result.project.contract_amount = num(gv(grid, 5, 3));
-    // 成本行 index 7..15，左 A/B，右 D/C
+    // 成本行 index 6..15，左 A/B，右 C/D
+    // r=6: 项目总成本（元） | 预估利润率
+    // r=7..14: 各分项成本 | 费用占比/差旅费
+    // r=15: 知识产权费
     const costKeys = {
+      '项目总成本（元）': 'total_cost',
+      '预估利润率': 'profit_rate',
       '长期职工成本（元）': 'long_term_cost',
       '中实职工成本（元）': 'zhongshi_cost',
       '华兆职工成本（元）': 'huazhao_cost',
@@ -96,7 +101,7 @@ function parseProjectExcel(filePath) {
       '差旅费用（元）': 'travel_cost',
       '知识产权费（元）': 'ip_cost'
     };
-    for (let r = 7; r <= 15; r++) {
+    for (let r = 6; r <= 15; r++) {
       const kL = str(gv(grid, r, 0));
       if (costKeys[kL]) { const v = num(gv(grid, r, 1)); if (v !== null) result.cost_summary[costKeys[kL]] = v; }
       const kR = str(gv(grid, r, 2));
@@ -246,19 +251,22 @@ function parseProjectExcel(filePath) {
 
   // ===== 6. 成本汇总兜底（明细求和，仅当基本信息表未提供）=====
   const sum = (items, f) => items.reduce((a, b) => a + (f(b) || 0), 0);
-  if (result.cost_summary.long_term_cost === null) result.cost_summary.long_term_cost = sum(result.work_items.filter(w => w.category === 'long_term'), w => w.cost);
-  if (result.cost_summary.zhongshi_cost === null) result.cost_summary.zhongshi_cost = sum(result.work_items.filter(w => w.category === 'zhongshi'), w => w.cost);
-  if (result.cost_summary.huazhao_cost === null) result.cost_summary.huazhao_cost = sum(result.work_items.filter(w => w.category === 'huazhao'), w => w.cost);
-  if (result.cost_summary.outsourcing_cost === null) result.cost_summary.outsourcing_cost = sum(result.work_items.filter(w => w.category === 'outsourcing'), w => w.cost);
-  if (result.cost_summary.subcontract_cost === null) result.cost_summary.subcontract_cost = sum(result.work_items.filter(w => w.category === 'subcontract'), w => w.cost);
-  if (result.cost_summary.procurement_cost === null) result.cost_summary.procurement_cost = sum(result.procurement_items, w => w.subtotal);
-  if (result.cost_summary.travel_cost === null) result.cost_summary.travel_cost = sum(result.travel_items, w => (w.hotel || 0) + (w.per_diem || 0) + (w.transport || 0));
+  if (result.cost_summary.long_term_cost == null) result.cost_summary.long_term_cost = sum(result.work_items.filter(w => w.category === 'long_term'), w => w.cost);
+  if (result.cost_summary.zhongshi_cost == null) result.cost_summary.zhongshi_cost = sum(result.work_items.filter(w => w.category === 'zhongshi'), w => w.cost);
+  if (result.cost_summary.huazhao_cost == null) result.cost_summary.huazhao_cost = sum(result.work_items.filter(w => w.category === 'huazhao'), w => w.cost);
+  if (result.cost_summary.outsourcing_cost == null) result.cost_summary.outsourcing_cost = sum(result.work_items.filter(w => w.category === 'outsourcing'), w => w.cost);
+  if (result.cost_summary.subcontract_cost == null) result.cost_summary.subcontract_cost = sum(result.work_items.filter(w => w.category === 'subcontract'), w => w.cost);
+  if (result.cost_summary.procurement_cost == null) result.cost_summary.procurement_cost = sum(result.procurement_items, w => w.subtotal);
+  if (result.cost_summary.travel_cost == null) result.cost_summary.travel_cost = sum(result.travel_items, w => (w.hotel || 0) + (w.per_diem || 0) + (w.transport || 0));
 
-  const known = ['long_term_cost', 'zhongshi_cost', 'huazhao_cost', 'outsourcing_cost', 'subcontract_cost', 'procurement_cost', 'third_party_test_cost', 'travel_cost', 'ip_cost'];
-  const total = known.reduce((a, k) => a + (result.cost_summary[k] || 0), 0);
-  result.cost_summary.total_cost = total;
-  if (result.project.contract_amount) {
-    result.cost_summary.profit_rate = +(1 - total / result.project.contract_amount).toFixed(4);
+  // total_cost: 优先用 Excel 汇总行直接读取的值，否则用分项求和
+  if (result.cost_summary.total_cost == null) {
+    const known = ['long_term_cost', 'zhongshi_cost', 'huazhao_cost', 'outsourcing_cost', 'subcontract_cost', 'procurement_cost', 'third_party_test_cost', 'travel_cost', 'ip_cost'];
+    result.cost_summary.total_cost = known.reduce((a, k) => a + (result.cost_summary[k] || 0), 0);
+  }
+  // profit_rate: 优先用 Excel 直接读取的值，否则用计算
+  if (result.cost_summary.profit_rate == null && result.project.contract_amount) {
+    result.cost_summary.profit_rate = +(1 - result.cost_summary.total_cost / result.project.contract_amount).toFixed(4);
   }
   result.meta = { parsed_at: new Date().toISOString(), sheet_count: Object.keys(sheets).length };
   return result;
