@@ -1388,7 +1388,7 @@ function renderEvaluatorBar(d){
 }
 function renderWorkloadProjects(d){
   const evs=d.evaluators||[];
-  const head='<th>工作项</th>'+(evs.map(ev=>'<th>专家'+ev.slot+'<br><small class="text-muted">'+esc(ev.user_name||'')+'</small></th>').join('')+'<th>有效数</th><th>平均人天</th><th>调整后费用</th>';
+  const head='<th>工作项</th>'+(evs.map(ev=>'<th>专家'+ev.slot+'<br><small class="text-muted">'+esc(ev.user_name||'')+'</small></th>').join('')+'<th>有效数</th><th>平均人天</th><th>调整后费用</th>');
   let html='';
   (d.projects||[]).forEach(p=>{
     html+='<div class="card card-custom mb-3"><div class="card-header bg-white d-flex justify-content-between"><h6 class="mb-0">'+esc(p.project_name||('项目'+p.project_id))+'</h6><span class="text-muted small">调整后费用合计 ¥'+Number(p.total_adjusted_cost||0).toLocaleString()+' · 已评估 '+p.evaluated_count+'/'+p.work_item_count+'</span></div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>'+head+'</tr></thead><tbody>';
