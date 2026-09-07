@@ -227,17 +227,13 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 
     <!-- COST ANALYSIS -->
     <div id="page-cost-analysis" class="page">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6>工作量评估</h6>
-        <div class="d-flex gap-2">
-          <select id="costProjectSelect" class="form-select w-auto" onchange="loadCostDetail(this.value)">
-            <option value="">-- 请选择项目 --</option>
-          </select>
-          <button class="btn btn-outline-success btn-sm" id="downloadCostBtn" onclick="downloadCostExcel()" style="display:none"><i class="bi bi-download"></i> 导出成本明细</button>
-        </div>
+      <div class="d-flex justify-content-between align-items-start mb-2 flex-wrap gap-2">
+        <h6 class="mb-0">工作量评估</h6>
+        <button class="btn btn-outline-success btn-sm" id="downloadCostBtn" onclick="downloadCostExcel()" style="display:none"><i class="bi bi-download"></i> 导出成本明细</button>
       </div>
+      <div id="costProjectFilter" class="d-flex flex-wrap gap-2 mb-3 align-items-center"></div>
       <div class="alert alert-info small mb-3">
-        <strong>工作流程：</strong>选择项目后，点击成本卡片查看对应明细；专家可在人员外包/专业分包明细中提交人天评估。
+        <strong>工作流程：</strong>点击上方项目序号快速切换项目；<span class="badge bg-success">绿色</span>表示您已提交该项目评估，<span class="badge bg-secondary">灰色</span>表示尚未提交；专家可在人员外包/专业分包明细中提交人天评估。
       </div>
       <div id="costHeaderCard" class="card card-custom mb-3 d-none"><div class="card-body" id="costHeaderBody"></div></div>
       <div class="row g-3 mb-3" id="costSummaryCards"></div>
@@ -525,6 +521,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 const API=window.location.hostname.endsWith('github.io')?'https://jingjipingshen-api.onrender.com/api':window.location.origin+'/api';
 let currentUser=null, sessions=[], projects=[], users=[], files=[], userGroups=[], permissionOptions=[], currentReportContent='';
 let currentProjectId=null, uploadingCategory='', editingUserId=null, costResult=null, selectedCostCategory=null;
+let costProjectStatus={};
 let currentAssignSessionId=null, currentSessionAssignments=[];
 let openBatches=null;
 let wlSelectedProjectId='all', wlCurrentData=null;
@@ -958,25 +955,75 @@ function downloadSessionEstimation(sessionId){
 }
 
 // COST ANALYSIS
-function updateCostSelect(){
-  const sel=document.getElementById('costProjectSelect');
-  if(!sel) return;
-  const currentVal = sel.value;
-  sel.innerHTML='<option value="">-- 请选择项目 --</option>'+projects.map(p=>'<option value="'+p.id+'">'+esc(p.project_name||p.name)+'</option>').join('');
-  if(currentVal){
-    const p=projects.find(x=>x.id==currentVal);
-    if(p)sel.value=currentVal;
-    else{sel.value='';currentProjectId=null;document.getElementById('costHeaderCard')?.classList.add('d-none');document.getElementById('costSummaryCards').innerHTML='';document.getElementById('downloadCostBtn').style.display='none';}
+function getCostVisibleProjects(){
+  return projects||[];
+}
+async function loadCostProjectsStatus(){
+  const visible=getCostVisibleProjects();
+  if(!visible.length)return;
+  const promises=visible.map(p=>
+    fetch(API+'/projects/'+p.id+'/cost',{headers:authH()})
+      .then(r=>r.ok?r.json():null)
+      .catch(()=>null)
+  );
+  const results=await Promise.all(promises);
+  results.forEach((cost,idx)=>{
+    if(!cost)return;
+    const pid=visible[idx].id;
+    const items=cost.work_items||[];
+    costProjectStatus[pid]=items.some(w=>w.my_submitted||w.my_days!=null);
+  });
+}
+function renderCostProjectFilter(){
+  const el=document.getElementById('costProjectFilter');
+  if(!el)return;
+  const visible=getCostVisibleProjects();
+  if(!visible.length){
+    el.innerHTML='<span class="text-muted small">暂无项目</span>';
+    return;
   }
+  let h='<span class="text-muted small me-2 align-self-center flex-shrink-0">快速过滤项目：</span>';
+  visible.forEach((p,idx)=>{
+    const num=String(idx+1).padStart(2,'0');
+    const submitted=costProjectStatus[p.id];
+    const active=String(currentProjectId)===String(p.id);
+    let cls;
+    if(submitted){
+      cls=active?'btn-success':'btn-outline-success';
+    }else{
+      cls=active?'btn-secondary':'btn-outline-secondary';
+    }
+    const dot=submitted?'<span class="position-absolute top-0 start-100 translate-middle p-1 bg-white border border-success rounded-circle"><span class="visually-hidden">已提交</span></span>':'';
+    const badge=submitted?'已提交':'未提交';
+    h+='<button type="button" class="btn btn-sm '+cls+' position-relative" title="'+(p.project_name||p.name||('项目'+num))+' - '+badge+'" onclick="selectCostProject('+p.id+')">'+num+dot+'</button>';
+  });
+  el.innerHTML=h;
+}
+function selectCostProject(pid){
+  currentProjectId=pid;
+  renderCostProjectFilter();
+  loadCostDetail(pid);
+}
+function updateCostSelect(){
+  renderCostProjectFilter();
 }
 async function renderCostAnalysis(){
-  updateCostSelect();
-  if(currentProjectId)await loadCostDetail(currentProjectId);
+  await loadCostProjectsStatus();
+  renderCostProjectFilter();
+  if(currentProjectId){
+    await loadCostDetail(currentProjectId);
+  }else{
+    const visible=getCostVisibleProjects();
+    const firstUnsubmitted=visible.find(p=>!costProjectStatus[p.id]);
+    const defaultPid=firstUnsubmitted?firstUnsubmitted.id:(visible[0]?visible[0].id:null);
+    if(defaultPid) await selectCostProject(defaultPid);
+  }
 }
 async function loadCostDetail(pid){
   if(!pid)return;
   currentProjectId=pid;
   selectedCostCategory=null;
+  renderCostProjectFilter();
   const [pjR,costR]=await Promise.all([
     fetch(API+'/projects/'+pid,{headers:authH()}),
     fetch(API+'/projects/'+pid+'/cost',{headers:authH()})
@@ -984,6 +1031,10 @@ async function loadCostDetail(pid){
   const proj=await pjR.json(),cost=await costR.json();
   costResult=cost;
   currentSessionAssignments=proj.assignments||[];
+  // 刷新当前项目提交状态并重新渲染过滤条
+  const items=cost.work_items||[];
+  costProjectStatus[pid]=items.some(w=>w.my_submitted||w.my_days!=null);
+  renderCostProjectFilter();
   const hc=document.getElementById('costHeaderCard'),hb=document.getElementById('costHeaderBody');
   if(hc&&hb){
     hc.classList.remove('d-none');
@@ -1188,7 +1239,9 @@ async function submitEstimate(projectId){
       if(!r.ok){const d=await r.json();throw new Error(d.error||'提交失败');}
     }
     alert('评估已保存成功！（已提交过的项将更新为最新值）');
-    loadCostDetail(projectId);
+    costProjectStatus[projectId]=true;
+    await loadCostDetail(projectId);
+    renderCostProjectFilter();
   }catch(e){alert('提交失败: '+e.message);}
 }
 
