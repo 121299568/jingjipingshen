@@ -1435,13 +1435,13 @@ async function loadWorkloadSummary(sid){
     renderWorkloadCards(data);
     renderEvaluatorBar(data);
     renderProjectFilter(data);
-    renderWorkloadProjects(data);
+    renderWorkloadProjectTable(data);
   }catch(e){alert('加载出错: '+e.message);}
 }
 function renderWorkloadCards(d){
   const completion=d.batch_work_item_count>0?Math.round(d.batch_evaluated_count/d.batch_work_item_count*100):0;
   const cards=[
-    {label:'批次调整后总费用',val:'¥'+Number(d.batch_total_adjusted_cost||0).toLocaleString(),color:'#667eea'},
+    {label:'批次调整核减费用总计',val:'¥'+Number(d.batch_total_adjusted_cost||0).toLocaleString(),color:'#667eea'},
     {label:'工作项已评估',val:d.batch_evaluated_count+' / '+d.batch_work_item_count,color:'#11998e'},
     {label:'评估完成度',val:completion+'%',color:'#eb3349'},
     {label:'评审人数',val:(d.evaluators||[]).length+' 人',color:'#fc4a1a'}
@@ -1485,26 +1485,58 @@ function selectWlProject(pid){
   wlSelectedProjectId=String(pid);
   if(!wlCurrentData) return;
   renderProjectFilter(wlCurrentData);
-  renderWorkloadProjects(wlCurrentData);
+  renderWorkloadProjectTable(wlCurrentData);
 }
-function renderWorkloadProjects(d){
-  const evs=d.evaluators||[];
-  const head='<th>工作项</th>'+(evs.map(ev=>'<th>专家'+ev.slot+'<br><small class="text-muted">'+esc(ev.user_name||'')+'</small></th>').join('')+'<th>有效数</th><th>平均人天</th><th>调整后费用</th>');
-  let html='';
+function fmtWlMoney(n){const v=Number(n);return (isNaN(v)||n==null)?'¥0':'¥'+v.toLocaleString();}
+function renderWorkloadProjectTable(d){
   const list=wlSelectedProjectId==='all'?(d.projects||[]):(d.projects||[]).filter(p=>String(p.project_id)===wlSelectedProjectId);
-  if(!list.length){
-    html='<div class="text-muted text-center py-4">所选项目暂无数据。</div>';
-  }else{
-    list.forEach(p=>{
-      html+='<div class="card card-custom mb-3"><div class="card-header bg-white d-flex justify-content-between"><h6 class="mb-0">'+esc(p.project_name||('项目'+p.project_id))+'</h6><span class="text-muted small">调整后费用合计 ¥'+Number(p.total_adjusted_cost||0).toLocaleString()+' · 已评估 '+p.evaluated_count+'/'+p.work_item_count+'</span></div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>'+head+'</tr></thead><tbody>';
-      (p.items||[]).forEach(it=>{
-        const exp=(it.expert_days||[]).map(x=>x!=null?x:'-').join('</td><td>');
-        html+='<tr><td>'+esc(it.work_task||'')+' / '+esc(it.work_item||'')+'</td><td>'+exp+'</td><td>'+(it.expert_count||0)+'</td><td class="fw-bold">'+(it.expert_days_avg||0)+'</td><td class="fw-bold text-success">¥'+Number(it.adjusted_cost||0).toLocaleString()+'</td></tr>';
-      });
-      html+='</tbody></table></div></div></div>';
-    });
-  }
-  document.getElementById('wlProjects').innerHTML=html||'<div class="text-muted text-center py-4">该批次暂无项目。</div>';
+  if(!list.length){document.getElementById('wlProjects').innerHTML='<div class="text-muted text-center py-4">该批次暂无项目。</div>';return;}
+  const cols=[
+    {k:'idx',label:'序号'},{k:'project_name',label:'项目名称'},{k:'biz_department',label:'项目承建部门'},
+    {k:'project_type',label:'项目类型'},{k:'contract_amount',label:'合同额',money:true},
+    {k:'total_cost',label:'项目总成本估算',money:true},{k:'profit_rate',label:'项目估算利润率',pct:true},
+    {k:'long_term_cost',label:'长期职工成本估算',money:true},{k:'zhongshi_cost',label:'中实职工成本估算',money:true},
+    {k:'huazhao_cost',label:'华兆职工成本估算',money:true},{k:'outsourcing_cost',label:'人员外包估算',money:true},
+    {k:'subcontract_cost',label:'专业分包估算',money:true},{k:'subcontract_ratio',label:'分包占比',pct:true},
+    {k:'procurement_cost',label:'采购估算',money:true},{k:'travel_cost',label:'差旅费估算',money:true},
+    {k:'third_party_test_cost',label:'第三方测试估算',money:true},{k:'ip_cost',label:'知识产权估算',money:true},
+    {k:'is_digital',label:'是否属于数字化'},{k:'business_direction',label:'业务方向'},
+    {k:'business_sub_direction',label:'业务子方向'},{k:'product_direction',label:'产品方向'}
+  ];
+  const moneyKeys=['contract_amount','total_cost','long_term_cost','zhongshi_cost','huazhao_cost','outsourcing_cost','subcontract_cost','procurement_cost','travel_cost','third_party_test_cost','ip_cost'];
+  const totals={};moneyKeys.forEach(k=>totals[k]=0);
+  let tbody='';
+  list.forEach((p,idx)=>{
+    const cs=p.cost_summary||{};
+    const tc=Number(cs.total_cost)||0, sub=Number(cs.subcontract_cost)||0;
+    const row={
+      idx:idx+1, project_name:p.project_name||('项目'+p.project_id), biz_department:p.biz_department||'-',
+      project_type:p.project_type||'-', contract_amount:p.contract_amount||0, total_cost:tc,
+      profit_rate:cs.profit_rate!=null?Number(cs.profit_rate)*100:null,
+      long_term_cost:cs.long_term_cost||0, zhongshi_cost:cs.zhongshi_cost||0, huazhao_cost:cs.huazhao_cost||0,
+      outsourcing_cost:cs.outsourcing_cost||0, subcontract_cost:sub, subcontract_ratio:tc>0?sub/tc*100:null,
+      procurement_cost:cs.procurement_cost||0, travel_cost:cs.travel_cost||0, third_party_test_cost:cs.third_party_test_cost||0,
+      ip_cost:cs.ip_cost||0, is_digital:p.is_digital?'是':'否', business_direction:p.business_direction||'-',
+      business_sub_direction:p.business_sub_direction||'-', product_direction:p.product_direction||'-'
+    };
+    tbody+='<tr>'+cols.map(c=>{
+      const v=row[c.k];
+      if(c.money)return '<td class="text-end">'+fmtWlMoney(v)+'</td>';
+      if(c.pct)return '<td class="text-end">'+(v==null?'-':Math.round(v*100)/100+'%')+'</td>';
+      return '<td>'+esc(v==null?'':v)+'</td>';
+    }).join('')+'</tr>';
+    moneyKeys.forEach(k=>totals[k]+=Number(row[k])||0);
+  });
+  const totalRow={idx:'合计',project_name:'',biz_department:'',project_type:'',contract_amount:totals.contract_amount,total_cost:totals.total_cost,profit_rate:null,long_term_cost:totals.long_term_cost,zhongshi_cost:totals.zhongshi_cost,huazhao_cost:totals.huazhao_cost,outsourcing_cost:totals.outsourcing_cost,subcontract_cost:totals.subcontract_cost,subcontract_ratio:totals.total_cost>0?totals.subcontract_cost/totals.total_cost*100:null,procurement_cost:totals.procurement_cost,travel_cost:totals.travel_cost,third_party_test_cost:totals.third_party_test_cost,ip_cost:totals.ip_cost,is_digital:'',business_direction:'',business_sub_direction:'',product_direction:''};
+  const tfoot='<tr class="fw-bold table-secondary">'+cols.map(c=>{
+    const v=totalRow[c.k];
+    if(c.money)return '<td class="text-end">'+fmtWlMoney(v)+'</td>';
+    if(c.pct)return '<td class="text-end">'+(v==null?'-':Math.round(v*100)/100+'%')+'</td>';
+    return '<td>'+esc(v==null?'':v)+'</td>';
+  }).join('')+'</tr>';
+  const thead='<tr>'+cols.map(c=>'<th>'+c.label+'</th>').join('')+'</tr>';
+  const html='<div class="card card-custom"><div class="card-header bg-white d-flex justify-content-between align-items-center"><h6 class="mb-0">项目经济评审结果汇总表</h6><span class="text-muted small">共 '+(d.projects||[]).length+' 个项目 · 单位：元</span></div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0 align-middle"><thead class="table-light">'+thead+'</thead><tbody>'+tbody+'</tbody><tfoot>'+tfoot+'</tfoot></table></div></div></div>';
+  document.getElementById('wlProjects').innerHTML=html;
 }
 
 // USERS

@@ -1138,20 +1138,24 @@ app.get('/api/sessions/:id/workload-summary', auth(['admin', 'rd']), (req, res) 
   const projectSummaries = projects.map(p => {
     const wis = db.store.workItems.filter(w => w.project_id === p.id);
     let totalAdjusted = 0, evaluatedWI = 0;
-    const items = wis.map(w => {
+    wis.forEach(w => {
       const r = computeWorkItemRollup(p.id, w.id, evaluators) || {};
       totalAdjusted += r.adjusted_cost || 0;
       if ((r.expert_count || 0) > 0) evaluatedWI++;
-      return {
-        work_item_id: w.id, work_task: w.work_task, work_item: w.work_item, category: w.category,
-        expert_days: r.expert_days || [], expert_count: r.expert_count || 0,
-        expert_days_avg: r.expert_days_avg || 0, adjusted_cost: r.adjusted_cost || 0
-      };
     });
+    const cs = p.cost_summary || {};
     return {
       project_id: p.id, project_name: p.project_name, status: p.status,
+      contract_amount: Number(p.contract_amount) || 0,
+      biz_department: p.biz_department || '-',
+      project_type: p.project_type || '',
+      is_digital: p.is_digital || false,
+      business_direction: p.business_direction || '',
+      business_sub_direction: p.business_sub_direction || '',
+      product_direction: p.product_direction || '',
+      cost_summary: cs,
       work_item_count: wis.length, evaluated_count: evaluatedWI,
-      total_adjusted_cost: Math.round(totalAdjusted * 100) / 100, items
+      total_adjusted_cost: Math.round(totalAdjusted * 100) / 100
     };
   });
   const evaluatorProgress = evaluators.map(ev => {
