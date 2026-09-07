@@ -1109,7 +1109,7 @@ function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
       const avg=w.expert_days_avg!=null?w.expert_days_avg:'-';
       const adj=w.adjusted_cost!=null?w.adjusted_cost:(w.cost||0);
       const inputCell=isExpert&&!w.my_submitted
-        ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="?" min="0" step="0.5" value="'+(w.my_days!=null?w.my_days:'')+'">'
+        ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="'+(w.person_days!=null?w.person_days:'?')+'" min="0" step="0.5" value="'+(w.my_days!=null?w.my_days:(w.person_days!=null?w.person_days:''))+'">'
         :(w.expert_days_list||[]).join(' / ')||'-';
       h+='<td>'+exp+'</td><td class="fw-bold">'+avg+'</td><td class="fw-bold text-success">¥'+Number(adj).toLocaleString()+'</td><td>'+inputCell+'</td>';
     }
