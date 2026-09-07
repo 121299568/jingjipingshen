@@ -1451,6 +1451,16 @@ app.get('/api/sessions/:id/download-estimation', auth(['admin']), (req, res) => 
 });
 
 // ==================== 前端静态服务 ====================
+// 禁止浏览器/代理/CDN 缓存 index.html，避免部署新前端后用户仍看到旧版
+app.use((req, res, next) => {
+  const p = req.path || '';
+  if (req.method === 'GET' && !p.startsWith('/api/') && (p === '/' || p.endsWith('.html'))) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
 app.use(express.static(FRONTEND_DIR));
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api/')) res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
