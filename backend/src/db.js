@@ -24,7 +24,7 @@ const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const COLLECTIONS = [
   'users', 'reviewSessions', 'projects', 'workItems', 'procurementItems',
   'travelItems', 'expertEstimates', 'confirmations', 'files', 'workflowLogs',
-  'userGroups', 'userPermissions', 'projectAssignments'
+  'userGroups', 'userPermissions', 'sessionAssignments'
 ];
 
 // ---------- 密码 ----------
@@ -76,7 +76,7 @@ function defaultStore() {
     }],
     projects: [], workItems: [], procurementItems: [], travelItems: [],
     expertEstimates: [], confirmations: [], files: [], workflowLogs: [],
-    userGroups: [], userPermissions: [], projectAssignments: []
+    userGroups: [], userPermissions: [], sessionAssignments: []
   };
 }
 
@@ -214,11 +214,10 @@ function filterByDept(key, user) {
     return list.filter(item => item.biz_department === user.business_dept);
   }
   if (user.role === 'expert' || user.role === 'accountant') {
-    const assigned = new Set([
-      ...store.expertEstimates.filter(e => e.expert_id === user.id).map(e => e.project_id),
-      ...(store.projectAssignments || []).filter(a => a.user_id === user.id).map(a => a.project_id)
-    ]);
-    return list.filter(item => assigned.has(item.id));
+    const estProjectIds = new Set(store.expertEstimates.filter(e => e.expert_id === user.id).map(e => e.project_id));
+    // 批次级分配：专家分配到某批次后，可见该批次下全部项目
+    const assignedSessions = new Set((store.sessionAssignments || []).filter(a => a.user_id === user.id).map(a => a.session_id));
+    return list.filter(item => estProjectIds.has(item.id) || assignedSessions.has(item.session_id));
   }
   return [];
 }

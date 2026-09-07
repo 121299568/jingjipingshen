@@ -462,9 +462,9 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 <!-- 分配评审人员 -->
 <div class="modal fade" id="assignModal" tabindex="-1">
   <div class="modal-dialog"><div class="modal-content">
-    <div class="modal-header"><h5>分配评审人员</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-header"><h5>分配批次评审人员</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
-      <p class="text-muted small mb-3">为该项目分配评审专家与会计师事务所（可多选）。保存后将覆盖原分配。被分配到项目的专家/会计师才能在「工作量评估」页提交人天评估。</p>
+      <p class="text-muted small mb-3">为该<strong>批次</strong>分配评审专家与会计师事务所（可多选）。保存后将覆盖该批次原有分配。被分配到批次的专家/会计师，可参与该批次下<strong>所有项目</strong>的评估与校核。</p>
       <div class="mb-3">
         <label class="form-label fw-bold">评审专家</label>
         <div id="assignExpertList" class="row g-2"></div>
@@ -511,7 +511,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 const API=window.location.hostname.endsWith('github.io')?'https://jingjipingshen-api.onrender.com/api':window.location.origin+'/api';
 let currentUser=null, sessions=[], projects=[], users=[], files=[], userGroups=[], permissionOptions=[], currentReportContent='';
 let currentProjectId=null, uploadingCategory='', editingUserId=null, costResult=null, selectedCostCategory=null;
-let currentProjectAssignments=[];
+let currentAssignSessionId=null, currentSessionAssignments=[];
 let openBatches=null;
 
 document.addEventListener('DOMContentLoaded',()=>{
@@ -664,6 +664,7 @@ function renderSessions(){
         (s.status==='in_progress'?'<button class="btn btn-sm btn-success me-1" onclick="updateSessionStatus('+s.id+',\'completed\')"><i class="bi bi-archive-fill"></i>归档</button>':'')+
         (s.status==='completed'?'<span class="text-muted small"><i class="bi bi-archive"></i>已归档</span>':'')+
         (canManage?'<button class="btn btn-sm btn-outline-primary me-1" title="评审会信息与材料清单" onclick="openSessionSettings('+s.id+')"><i class="bi bi-gear"></i>设置</button>':'')+
+        (canManage?'<button class="btn btn-sm btn-outline-success me-1" title="分配批次评审人员" onclick="openAssignSessionModal('+s.id+')"><i class="bi bi-people"></i>分配人员</button>':'')+
         (isAdmin&&sFiles.length>0?'<button class="btn btn-sm btn-outline-primary me-1" title="全量下载" onclick="downloadSessionFiles('+s.id+')"><i class="bi bi-download"></i>全部文件</button><button class="btn btn-sm btn-outline-success me-1" title="下载估算表" onclick="downloadSessionEstimation('+s.id+')"><i class="bi bi-file-earmark-excel"></i>估算表</button>':'')+
       '</td></tr>';
   }).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无批次</td></tr>';
@@ -732,7 +733,6 @@ function renderProjects(){
           '<button class="btn btn-sm btn-info me-1" title="查看/上传资料" onclick="goToUpload('+p.id+')"><i class="bi bi-folder"></i></button>'+
           '<button class="btn btn-sm btn-success me-1" title="工作量评估" onclick="goToCost('+p.id+')"><i class="bi bi-graph-down"></i></button>'+
           '<button class="btn btn-sm btn-primary me-1" title="评审流程" onclick="openFlowModal('+p.id+')"><i class="bi bi-list-check"></i></button>'+
-          (canAssignProject(p)?'<button class="btn btn-sm btn-outline-primary" title="分配评审人员" onclick="openAssignModal('+p.id+')"><i class="bi bi-people"></i></button>':'')+
           (canDeleteProject(p)?'<button class="btn btn-sm btn-outline-danger" title="删除项目" onclick="deleteProject('+p.id+')"><i class="bi bi-trash"></i></button>':'')+
         '</td>'+
       '</tr>';
@@ -759,9 +759,6 @@ function canDeleteProject(p){
   if(currentUser.role==='admin'||currentUser.role==='rd')return true;
   if(currentUser.role==='biz')return p.biz_department===currentUser.business_dept;
   return false;
-}
-function canAssignProject(p){
-  return currentUser && (currentUser.role==='admin'||currentUser.role==='rd');
 }
 // 项目状态展示
 function projectStatusLabel(s){return {draft:'草稿',reviewing:'评审中',rejected:'已退回',pending_confirm:'待确认',completed:'已完成',in_review:'评审中',archived:'已归档'}[s]||s||'-';}
@@ -967,12 +964,12 @@ async function loadCostDetail(pid){
   ]);
   const proj=await pjR.json(),cost=await costR.json();
   costResult=cost;
-  currentProjectAssignments=proj.assignments||[];
+  currentSessionAssignments=proj.assignments||[];
   const hc=document.getElementById('costHeaderCard'),hb=document.getElementById('costHeaderBody');
   if(hc&&hb){
     hc.classList.remove('d-none');
     const profitRate=(cost.cost_summary?.profit_rate!=null?Math.round(cost.cost_summary.profit_rate*10000)/100:0);
-    const isAssignedExp=(['expert','accountant'].includes(currentUser.role))&&currentProjectAssignments.some(a=>a.user_id===currentUser.id);
+    const isAssignedExp=(['expert','accountant'].includes(currentUser.role))&&currentSessionAssignments.some(a=>a.user_id===currentUser.id);
     hb.innerHTML='<h5 class="mb-2">'+esc(proj.project_name||proj.name)+'</h5>'+
       '<div class="row g-2 text-muted small">'+
         '<div class="col-md-3"><strong>承建部门:</strong> '+esc(proj.biz_department||'-')+'</div>'+
@@ -1060,7 +1057,7 @@ function renderCostDetail(cost){
   if(catKey){
     const items=(cost.work_items||[]).filter(w=>w.category===catKey);
     // 专家/会计师只有被分配到该项目才能提交评估
-    const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role)&&(currentProjectAssignments||[]).some(a=>a.user_id===currentUser.id);
+    const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role)&&(currentSessionAssignments||[]).some(a=>a.user_id===currentUser.id);
     const showExpert=catKey==='outsourcing'||catKey==='subcontract';
     db.innerHTML=renderWorkItemsTable(items, showExpert, isExpert);
     updateEstimateBadge(cost);
@@ -1534,13 +1531,12 @@ function updateSessionStatus(sessionId,newStatus){
 function getFileIcon(ext){const m={pdf:'pdf',docx:'word',doc:'word',xlsx:'excel',xls:'excel',jpg:'image',png:'image'};return m[(ext||'').toLowerCase()]||'file';}
 function getFileCategoryName(cat){const m={estimation:'估算表',feasibility:'可研',bid:'招标',award:'中标',contract:'合同',profit:'利润率',subcontract:'分包',tech_spec:'技术规范书',other:'其他'};return m[cat]||cat||'其他';}
 
-// ==================== 分配评审人员 ====================
+// ==================== 分配批次评审人员 ====================
 let currentFlowProjectId=null;
-async function openAssignModal(pid){
-  currentFlowProjectId=pid;
-  const p=projects.find(x=>x.id===pid);if(!p)return;
+async function openAssignSessionModal(sid){
+  currentAssignSessionId=sid;
   let assigned=[];
-  try{const r=await fetch(API+'/projects/'+pid+'/assignments',{headers:authH()});if(r.ok)assigned=await r.json();}catch(e){}
+  try{const r=await fetch(API+'/sessions/'+sid+'/assignments',{headers:authH()});if(r.ok)assigned=await r.json();}catch(e){}
   const aExp=new Set(assigned.filter(a=>a.user_role==='expert').map(a=>a.user_id));
   const aAcc=new Set(assigned.filter(a=>a.user_role==='accountant').map(a=>a.user_id));
   const experts=users.filter(u=>u.role==='expert');
@@ -1554,17 +1550,16 @@ async function openAssignModal(pid){
   new bootstrap.Modal(document.getElementById('assignModal')).show();
 }
 async function saveAssign(){
-  const pid=currentFlowProjectId;if(!pid)return;
+  const sid=currentAssignSessionId;if(!sid)return;
   const expert_ids=users.filter(u=>u.role==='expert'&&document.getElementById('aexp_'+u.id)?.checked).map(u=>u.id);
   const accountant_ids=users.filter(u=>u.role==='accountant'&&document.getElementById('aacc_'+u.id)?.checked).map(u=>u.id);
   try{
-    const r=await fetch(API+'/projects/'+pid+'/assign',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({expert_ids,accountant_ids})});
+    const r=await fetch(API+'/sessions/'+sid+'/assign',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({expert_ids,accountant_ids})});
     const d=await r.json();
     if(r.ok){
       bootstrap.Modal.getInstance(document.getElementById('assignModal'))?.hide();
-      alert('分配已保存');
+      alert('批次评审人员分配已保存');
       await loadProjects();
-      openFlowModal(pid);
     }else alert('保存失败: '+(d.error||'未知错误'));
   }catch(e){alert('出错: '+e.message);}
 }
@@ -1576,7 +1571,9 @@ async function openFlowModal(pid){
   let detail=null,assignments=[];
   try{
     const r=await fetch(API+'/projects/'+pid,{headers:authH()});detail=await r.json();
-    const ar=await fetch(API+'/projects/'+pid+'/assignments',{headers:authH()});if(ar.ok)assignments=await ar.json();
+    if(detail&&detail.session_id){
+      const ar=await fetch(API+'/sessions/'+detail.session_id+'/assignments',{headers:authH()});if(ar.ok)assignments=await ar.json();
+    }
   }catch(e){}
   if(!detail||detail.error)return;
   const role=currentUser.role;
@@ -1639,7 +1636,7 @@ async function openFlowModal(pid){
     '<div class="mb-3"><strong>承接事业部：</strong>'+esc(detail.biz_department||'-')+' <strong class="ms-3">合同金额：</strong>¥'+(detail.contract_amount?Number(detail.contract_amount).toLocaleString():'-')+'</div>'+
     rejectNote+bizRejectNote+
     clHtml+
-    '<div class="card mb-3"><div class="card-header bg-light small fw-bold">已分配评审人员</div><div class="card-body">'+assHtml+(isRdAdmin?' <button class="btn btn-sm btn-outline-primary mt-2" onclick="openAssignModal('+pid+')"><i class="bi bi-people"></i> '+(assignments.length?'重分配':'分配')+'</button>':'')+'</div></div>'+
+    '<div class="card mb-3"><div class="card-header bg-light small fw-bold">已分配评审人员（批次级）</div><div class="card-body">'+assHtml+(isRdAdmin?' <button class="btn btn-sm btn-outline-primary mt-2" onclick="openAssignSessionModal('+(detail.session_id||0)+')"><i class="bi bi-people"></i> '+(assignments.length?'重分配':'分配')+'</button>':'')+'</div></div>'+
     expertNote+verifyCard+
     '<div class="card"><div class="card-header bg-light small fw-bold">流程操作</div><div class="card-body">'+ (actions||'<span class="text-muted small">当前状态暂无可用操作</span>') +'</div></div>';
   new bootstrap.Modal(document.getElementById('flowModal')).show();

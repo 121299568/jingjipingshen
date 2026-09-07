@@ -193,15 +193,21 @@ function projectLocked(p) {
   return null;
 }
 
-// 取项目已分配的评审专家/会计师
-function getAssignments(projectId) {
-  return (db.store.projectAssignments || []).filter(a => a.project_id === projectId);
+// 取批次已分配的评审专家/会计师
+function getSessionAssignments(sessionId) {
+  if (!sessionId) return [];
+  return (db.store.sessionAssignments || []).filter(a => a.session_id === sessionId);
 }
-// 判断某专家/会计师是否被分配到该项目（兼容已提交过评估的旧数据）
+// 判断某专家/会计师是否被分配到该项目：分配改为「批次级」——
+// 只要该专家被分配到项目所属批次，即视为可参与该批次下所有项目的评估（兼容已提交过评估的旧数据）
 function isAssignedToProject(user, projectId) {
   if (user.role === 'expert' || user.role === 'accountant') {
-    const assigned = (db.store.projectAssignments || []).some(a => a.project_id === projectId && a.user_id === user.id);
-    if (assigned) return true;
+    const project = db.store.projects.find(p => p.id === projectId);
+    const sessionId = project ? project.session_id : null;
+    if (sessionId) {
+      const assigned = (db.store.sessionAssignments || []).some(a => a.session_id === sessionId && a.user_id === user.id);
+      if (assigned) return true;
+    }
     const estimated = db.store.expertEstimates.some(e => e.project_id === projectId && e.expert_id === user.id);
     return estimated;
   }
@@ -480,7 +486,7 @@ app.get('/api/projects/:id', auth(), (req, res) => {
     files: db.store.files.filter(f => f.project_id === p.id),
     expert_estimates: db.store.expertEstimates.filter(e => e.project_id === p.id),
     confirmations: db.store.confirmations.filter(c => c.project_id === p.id),
-    assignments: getAssignments(p.id),
+    assignments: getSessionAssignments(p.session_id),
     checklist_status: checklistStatus(p)
   });
 });
@@ -563,7 +569,6 @@ function deleteProjectAndChildren(projectId) {
   db.store.expertEstimates = db.store.expertEstimates.filter(e => e.project_id !== projectId);
   db.store.confirmations = db.store.confirmations.filter(c => c.project_id !== projectId);
   db.store.workflowLogs = db.store.workflowLogs.filter(l => l.project_id !== projectId);
-  db.store.projectAssignments = (db.store.projectAssignments || []).filter(a => a.project_id !== projectId);
   db.store.projects = db.store.projects.filter(p => p.id !== projectId);
 }
 
@@ -879,24 +884,25 @@ app.get('/api/projects/:id/confirmations', auth(), (req, res) => {
   res.json(confirmations);
 });
 
-// ==================== 评审人员分配 ====================
-// 查看某项目已分配的评审专家/会计师（研发中心/管理员）
-app.get('/api/projects/:id/assignments', auth(['admin', 'rd']), (req, res) => {
-  const projectId = parseInt(req.params.id);
-  const project = db.store.projects.find(p => p.id === projectId);
-  if (!project) return res.status(404).json({ error: '项目不存在' });
-  const assignments = getAssignments(projectId).map(a => {
+// ==================== 评审人员分配（批次级）====================
+// 专家分配改为「按批次分配」：分配到某批次的专家/会计师，可参与该批次下所有项目的评估。
+// 查看某批次已分配的评审专家/会计师（研发中心/管理员）
+app.get('/api/sessions/:id/assignments', auth(['admin', 'rd']), (req, res) => {
+  const sessionId = parseInt(req.params.id);
+  const sess = db.store.reviewSessions.find(s => s.id === sessionId);
+  if (!sess) return res.status(404).json({ error: '批次不存在' });
+  const assignments = getSessionAssignments(sessionId).map(a => {
     const u = db.store.users.find(x => x.id === a.user_id) || {};
     return { ...a, user_name: u.real_name || a.user_name, user_role: u.role || a.user_role };
   });
   res.json(assignments);
 });
 
-// 分配/重分配评审专家与会计师（研发中心/管理员）。替换式：提交即覆盖该项目原有分配。
-app.post('/api/projects/:id/assign', auth(['admin', 'rd']), (req, res) => {
-  const projectId = parseInt(req.params.id);
-  const project = db.store.projects.find(p => p.id === projectId);
-  if (!project) return res.status(404).json({ error: '项目不存在' });
+// 分配/重分配批次评审专家与会计师（研发中心/管理员）。替换式：提交即覆盖该批次原有分配。
+app.post('/api/sessions/:id/assign', auth(['admin', 'rd']), (req, res) => {
+  const sessionId = parseInt(req.params.id);
+  const sess = db.store.reviewSessions.find(s => s.id === sessionId);
+  if (!sess) return res.status(404).json({ error: '批次不存在' });
   const expertIds = (Array.isArray(req.body.expert_ids) ? req.body.expert_ids : []).map(Number).filter(Boolean);
   const accountantIds = (Array.isArray(req.body.accountant_ids) ? req.body.accountant_ids : []).map(Number).filter(Boolean);
   for (const id of [...expertIds, ...accountantIds]) {
@@ -904,8 +910,8 @@ app.post('/api/projects/:id/assign', auth(['admin', 'rd']), (req, res) => {
     if (!u) return res.status(400).json({ error: '存在无效的用户ID: ' + id });
   }
   const make = (uid, role) => ({
-    id: db.nextId(db.store.projectAssignments),
-    project_id: projectId,
+    id: db.nextId(db.store.sessionAssignments),
+    session_id: sessionId,
     user_id: uid,
     user_role: role,
     user_name: (db.store.users.find(x => x.id === uid) || {}).real_name,
@@ -915,10 +921,10 @@ app.post('/api/projects/:id/assign', auth(['admin', 'rd']), (req, res) => {
   const newOnes = [];
   expertIds.forEach(id => newOnes.push(make(id, 'expert')));
   accountantIds.forEach(id => newOnes.push(make(id, 'accountant')));
-  db.store.projectAssignments = (db.store.projectAssignments || []).filter(a => a.project_id !== projectId);
-  db.store.projectAssignments.push(...newOnes);
+  db.store.sessionAssignments = (db.store.sessionAssignments || []).filter(a => a.session_id !== sessionId);
+  db.store.sessionAssignments.push(...newOnes);
   db.save();
-  db.logWorkflow(projectId, 'assign_expert', `分配评审人员：${newOnes.map(a => a.user_name).join('、') || '无'}`, req.user.id);
+  db.logWorkflow(null, 'assign_expert', `批次${sessionId}分配评审人员：${newOnes.map(a => a.user_name).join('、') || '无'}`, req.user.id);
   res.json({ success: true, assignments: newOnes });
 });
 

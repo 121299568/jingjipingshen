@@ -130,7 +130,7 @@ function build() {
   return {
     users, reviewSessions, projects, workItems, procurementItems,
     travelItems, expertEstimates, confirmations, files, workflowLogs,
-    userGroups, userPermissions, projectAssignments: []
+    userGroups, userPermissions, sessionAssignments: []
   };
 }
 

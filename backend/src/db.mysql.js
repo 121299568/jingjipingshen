@@ -165,11 +165,11 @@ const SCHEMA = {
     bool: [], num: ['id', 'user_id'], json: ['permissions'],
     indexes: ['KEY `idx_user_id` (`user_id`)']
   },
-  projectAssignments: {
-    table: 'projectAssignments',
-    cols: ['id', 'project_id', 'user_id', 'user_role', 'user_name', 'assigned_by', 'assigned_at'],
-    bool: [], num: ['id', 'project_id', 'user_id', 'assigned_by'],
-    indexes: ['KEY `idx_project_id` (`project_id`)', 'KEY `idx_user_id` (`user_id`)']
+  sessionAssignments: {
+    table: 'sessionAssignments',
+    cols: ['id', 'session_id', 'user_id', 'user_role', 'user_name', 'assigned_by', 'assigned_at'],
+    bool: [], num: ['id', 'session_id', 'user_id', 'assigned_by'],
+    indexes: ['KEY `idx_session_id` (`session_id`)', 'KEY `idx_user_id` (`user_id`)']
   }
 };
 
