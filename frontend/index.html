@@ -145,7 +145,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         </div>
       </div>
       <div class="card card-custom"><div class="card-body p-0">
-        <table class="table table-hover mb-0"><thead><tr><th>ID</th><th>批次名称</th><th>状态</th><th>评审时间</th><th>项目数</th><th>操作</th></tr></thead>
+        <table class="table table-hover mb-0"><thead><tr><th>批次名称</th><th>状态</th><th>评审时间</th><th>项目数</th><th>操作</th></tr></thead>
         <tbody id="sessionTbody"></tbody></table>
       </div></div>
     </div>
@@ -691,7 +691,7 @@ function renderSessions(){
     if(cl)meta.push('<i class="bi bi-list-check"></i> 清单 '+cl+' 项');
     if(s.meeting_agenda)meta.push('<i class="bi bi-card-text"></i> '+esc(s.meeting_agenda));
     return '<tr>'+
-      '<td>'+s.id+'</td><td>'+esc(s.name||s.session_name||'-')+
+      '<td>'+esc(s.name||s.session_name||'-')+
         (meta.length?'<div class="small text-muted">'+meta.join(' · ')+'</div>':'')+'</td>'+
       '<td><span class="badge bg-'+({completed:'success',in_progress:'warning',pending:'info'}[s.status]||'secondary')+'">'+({completed:'已完成',in_progress:'进行中',pending:'待开始'}[s.status]||s.status)+'</span></td>'+
       '<td>'+fmtTime(s.review_time)+'</td>'+
@@ -704,7 +704,7 @@ function renderSessions(){
         (canManage?'<button class="btn btn-sm btn-outline-success me-1" title="分配批次评审人员" onclick="openAssignSessionModal('+s.id+')"><i class="bi bi-people"></i>分配人员</button>':'')+
         (isAdmin&&sFiles.length>0?'<button class="btn btn-sm btn-outline-primary me-1" title="全量下载" onclick="downloadSessionFiles('+s.id+')"><i class="bi bi-download"></i>全部文件</button><button class="btn btn-sm btn-outline-success me-1" title="下载估算表" onclick="downloadSessionEstimation('+s.id+')"><i class="bi bi-file-earmark-excel"></i>估算表</button>':'')+
       '</td></tr>';
-  }).join('')||'<tr><td colspan="6" class="text-muted text-center">暂无批次</td></tr>';
+  }).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无批次</td></tr>';
 }
 function fmtTime(t){if(!t)return'';return String(t).replace('T',' ').slice(0,16);}
 function sessionStatusBadge(status){
@@ -750,13 +750,13 @@ function renderProjects(){
       (g.session&&g.session.review_time?'<span class="text-muted small ms-auto">'+fmtTime(g.session.review_time)+'</span>':'')+
     '</div>';
     const ck=c=>v=>v?'<span class="badge-uploaded">✓</span>':'<span class="badge-missing">—</span>';
-    const rows=g.items.map(p=>{
+    const rows=g.items.map((p,pi)=>{
       const pf=files.filter(f=>f.project_id===p.id);
       const has=c=>pf.some(f=>f.file_category===c);
       const statusBg=statusBadgeClass(p.status);
       const lastOp=p.last_operation_at?new Date(p.last_operation_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
       return '<tr>'+
-        '<td>'+p.id+'</td>'+
+        '<td>'+String(pi+1).padStart(2,'0')+'</td>'+
         '<td title="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+'</td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
         '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
@@ -776,7 +776,7 @@ function renderProjects(){
     }).join('');
     const body='<div class="batch-body">'+
       (total>0?'<div class="table-responsive"><table class="table table-hover mb-0">'+
-        '<thead class="table-light"><tr><th>ID</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th><th>最后操作时间</th>'+
+        '<thead class="table-light"><tr><th>序号</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th><th>最后操作时间</th>'+
         '<th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">投标</th><th class="text-center">合同</th><th>操作</th></tr></thead>'+
         '<tbody>'+rows+'</tbody></table></div>':'<div class="batch-empty">该批次暂无项目，请通过「Excel导入（评审汇总表）」批量导入或「新建项目」挂接</div>')+
     '</div>';
@@ -890,7 +890,7 @@ function renderUploadPage(){
   const p=projects.find(x=>x.id===currentProjectId);
   if(!p)return;
   document.getElementById('uploadProjectName').textContent='上传资料 - '+(p.project_name||'');
-  document.getElementById('uploadProjectInfo').textContent='项目编号: '+p.id+' | 承建部门: '+(p.biz_department||'-');
+  document.getElementById('uploadProjectInfo').textContent='项目编号: '+(p.project_code||'-')+' | 承建部门: '+(p.biz_department||'-');
   const pf=files.filter(f=>f.project_id===currentProjectId);
   document.getElementById('uploadFileCount').textContent=pf.length>0?'共 '+pf.length+' 个文件':'';
   const listEl=document.getElementById('uploadedFilesList');
