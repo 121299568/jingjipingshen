@@ -1,0 +1,25 @@
+# 经济评审管理平台 · systemd 单元（参考模板）
+# 用法（root）：
+#   cp economic-review.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now economic-review
+# 说明：脚本 setup-intranet.sh 在检测到 systemd 时会自动生成等价内容，通常无需手动操作。
+
+[Unit]
+Description=经济评审管理平台 (Economic Review)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/economic-review/backend
+ExecStart=/usr/bin/node /opt/economic-review/backend/server.js
+Restart=on-failure
+RestartSec=3
+# 若用非 root 用户运行，把下面 User 改成该用户
+User=root
+Environment=NODE_ENV=production
+# 如需把配置从独立 env 文件注入，去掉下一行注释（路径按实际修改）
+# EnvironmentFile=/opt/economic-review/backend/.env
+
+[Install]
+WantedBy=multi-user.target
