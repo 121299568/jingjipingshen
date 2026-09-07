@@ -87,7 +87,12 @@ const COL_TYPE = {
   assigned_by: 'INT DEFAULT NULL',
   assigned_at: 'VARCHAR(32) DEFAULT NULL',
   permissions: 'JSON DEFAULT NULL',
-  extra: 'JSON DEFAULT NULL'
+  extra: 'JSON DEFAULT NULL',
+  expert_days: 'JSON DEFAULT NULL',
+  expert_count: 'INT NOT NULL DEFAULT 0',
+  expert_days_avg: 'DOUBLE NOT NULL DEFAULT 0',
+  adjusted_cost: 'DOUBLE NOT NULL DEFAULT 0',
+  slot: 'INT DEFAULT NULL'
 };
 
 // ---------- 集合 → 表定义 ----------
@@ -113,8 +118,9 @@ const SCHEMA = {
   },
   workItems: {
     table: 'workItems',
-    cols: ['id', 'project_id', 'work_task', 'work_item', 'category', 'cost', 'person_days', 'unit_price', 'quantity', 'remark'],
-    bool: [], num: ['id', 'project_id', 'cost', 'person_days', 'unit_price', 'quantity'],
+    cols: ['id', 'project_id', 'work_task', 'work_item', 'category', 'cost', 'person_days', 'unit_price', 'quantity', 'remark', 'expert_days', 'expert_count', 'expert_days_avg', 'adjusted_cost'],
+    bool: [], num: ['id', 'project_id', 'cost', 'person_days', 'unit_price', 'quantity', 'expert_count', 'expert_days_avg', 'adjusted_cost'],
+    json: ['expert_days'],
     indexes: ['KEY `idx_project_id` (`project_id`)']
   },
   procurementItems: {
@@ -131,8 +137,8 @@ const SCHEMA = {
   },
   expertEstimates: {
     table: 'expertEstimates',
-    cols: ['id', 'project_id', 'work_item_id', 'expert_id', 'expert_name', 'days', 'comment', 'created_at'],
-    bool: [], num: ['id', 'project_id', 'work_item_id', 'expert_id', 'days'],
+    cols: ['id', 'project_id', 'work_item_id', 'expert_id', 'expert_name', 'days', 'comment', 'created_at', 'slot'],
+    bool: [], num: ['id', 'project_id', 'work_item_id', 'expert_id', 'days', 'slot'],
     indexes: ['KEY `idx_project_id` (`project_id`)', 'KEY `idx_expert_id` (`expert_id`)']
   },
   confirmations: {

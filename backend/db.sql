@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS `workItems` (
   `unit_price` DOUBLE NOT NULL DEFAULT 0,
   `quantity` DOUBLE NOT NULL DEFAULT 0,
   `remark` VARCHAR(255) DEFAULT NULL,
+  `expert_days` JSON DEFAULT NULL,
+  `expert_count` INT NOT NULL DEFAULT 0,
+  `expert_days_avg` DOUBLE NOT NULL DEFAULT 0,
+  `adjusted_cost` DOUBLE NOT NULL DEFAULT 0,
   `extra` JSON DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_project_id` (`project_id`)
@@ -111,6 +115,7 @@ CREATE TABLE IF NOT EXISTS `expertEstimates` (
   `days` DOUBLE NOT NULL DEFAULT 0,
   `comment` VARCHAR(255) DEFAULT NULL,
   `created_at` VARCHAR(32) DEFAULT NULL,
+  `slot` INT DEFAULT NULL,
   `extra` JSON DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_project_id` (`project_id`),

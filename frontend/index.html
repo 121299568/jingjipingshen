@@ -107,6 +107,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div class="nav-item" data-page="projects"><i class="bi bi-folder2-open"></i>项目资料</div>
     <div class="nav-item" data-page="cost-analysis"><i class="bi bi-graph-down-arrow"></i>工作量评估</div>
     <div class="nav-item" data-page="stats"><i class="bi bi-bar-chart"></i>统计分析</div>
+    <div class="nav-item" data-page="workload-summary" id="nav-workload-summary"><i class="bi bi-clipboard-data"></i>评估汇总</div>
     <div class="nav-item" data-page="users"><i class="bi bi-people"></i>用户管理</div>
     <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>退出登录</div>
   </aside>
@@ -304,6 +305,20 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
       <div class="row g-3 mt-3" id="reportPreviewSection" style="display:none">
         <div class="col-12"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-file-earmark-preview"></i> 报告预览</h6></div><div class="card-body"><iframe id="reportPreviewFrame" style="width:100%;height:600px;border:1px solid #dee2e6;border-radius:4px"></iframe></div></div></div>
       </div>
+    </div>
+
+    <!-- WORKLOAD SUMMARY (管理员/研发) -->
+    <div id="page-workload-summary" class="page">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6>工作量评估汇总（5 人专家重评估）</h6>
+        <select id="wlSessionSelect" class="form-select w-auto" onchange="loadWorkloadSummary(this.value)">
+          <option value="">-- 请选择评审批次 --</option>
+        </select>
+      </div>
+      <div id="wlBatchCards" class="row g-3 mb-3"></div>
+      <div id="wlEvaluatorBar" class="mb-3"></div>
+      <div id="wlProjects"></div>
+      <div id="wlEmpty" class="text-muted text-center py-5">请选择一个评审批次查看 5 人专家评估汇总。</div>
     </div>
 
     <!-- USERS -->
@@ -525,6 +540,9 @@ function showMainApp(){
   document.getElementById('loginPage').style.display='none';
   document.getElementById('mainApp').style.display='block';
   document.getElementById('currentUserDisplay').textContent=currentUser.username+' ('+getRoleName(currentUser.role)+')'+(currentUser.business_dept?' ['+currentUser.business_dept+']':'');
+  // 评估汇总页仅管理员/研发可见
+  const navWorkload=document.getElementById('nav-workload-summary');
+  if(navWorkload)navWorkload.style.display=(currentUser.role==='admin'||currentUser.role==='rd')?'block':'none';
   loadAll();
 }
 function doLogout(){localStorage.clear();location.reload();}
@@ -545,7 +563,7 @@ function navigateTo(page){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
   document.querySelector('.nav-item[data-page="'+page+'"]')?.classList.add('active');
-  document.getElementById('pageTitle').textContent={dashboard:'工作台',sessions:'评审批次',projects:'项目资料',upload:'上传资料','cost-analysis':'工作量评估',stats:'统计分析',users:'用户管理'}[page]||page;
+  document.getElementById('pageTitle').textContent={dashboard:'工作台',sessions:'评审批次',projects:'项目资料',upload:'上传资料','cost-analysis':'工作量评估',stats:'统计分析','workload-summary':'评估汇总',users:'用户管理'}[page]||page;
   switch(page){
     case'dashboard':renderDashboard();break;
     case'sessions':populateSessionSelect();renderSessions();break;
@@ -553,6 +571,7 @@ function navigateTo(page){
     case'upload':break;
     case'cost-analysis':updateCostSelect();renderCostAnalysis();break;
     case'stats':loadStatsRich();break;
+    case'workload-summary':renderWorkloadSummary();break;
     case'users':renderUsers();loadUserGroups();loadPermissionOptions();break;
   }
 }
@@ -1059,19 +1078,23 @@ function renderCostDetail(cost){
     // 专家/会计师只有被分配到该项目才能提交评估
     const isExpert=currentUser&&['expert','accountant'].includes(currentUser.role)&&(currentSessionAssignments||[]).some(a=>a.user_id===currentUser.id);
     const showExpert=catKey==='outsourcing'||catKey==='subcontract';
-    db.innerHTML=renderWorkItemsTable(items, showExpert, isExpert);
+    db.innerHTML=renderWorkItemsTable(items, showExpert, isExpert, cost.evaluators||[]);
     updateEstimateBadge(cost);
     return;
   }
   // 第三方测试、知识产权等无明细的成本项
   db.innerHTML='<div class="p-3 text-muted">该成本项在基本信息表中填写，无进一步明细。</div>';
 }
-function renderWorkItemsTable(items, showExpert, isExpert){
+function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
   if(!items.length)return '<p class="text-muted text-center py-4">暂无明细</p>';
   const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
+  const evs=(evaluators||[]);
   let h='<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>';
   h+='<th>任务</th><th>工作项</th><th>工作说明</th><th>人天</th><th>人员</th><th>原费用</th>';
-  if(showExpert)h+='<th>专家1</th><th>专家2</th><th>专家3</th><th>专家4</th><th>专家5</th><th>平均</th><th>调整后费用</th><th>评估</th>';
+  if(showExpert){
+    evs.forEach(ev=>{ h+='<th>专家'+ev.slot+'<br><small class="text-muted">'+esc(ev.user_name||'')+'</small></th>'; });
+    h+='<th>平均</th><th>调整后费用</th><th>评估</th>';
+  }
   h+='</tr></thead><tbody>';
   items.forEach(w=>{
     h+='<tr>'+
@@ -1082,13 +1105,12 @@ function renderWorkItemsTable(items, showExpert, isExpert){
       '<td>'+esc(w.person||'-')+'</td>'+
       '<td class="text-muted">¥'+Number(w.cost||0).toLocaleString()+'</td>';
     if(showExpert){
-      const exp=(w.expert_days||[]).map((d,i)=>d!=null?d:'-').join('</td><td>');
+      const exp=(w.expert_days||[]).map(d=>d!=null?d:'-').join('</td><td>');
       const avg=w.expert_days_avg!=null?w.expert_days_avg:'-';
       const adj=w.adjusted_cost!=null?w.adjusted_cost:(w.cost||0);
-      const hasSubmitted=(w.expert_days_list||[]).length>0;
-      const inputCell=isExpert&&!hasSubmitted
-        ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="?" min="0" step="0.5">'
-        :(w.expert_days_list||[]).join(' / ')||'-';      
+      const inputCell=isExpert&&!w.my_submitted
+        ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="?" min="0" step="0.5" value="'+(w.my_days!=null?w.my_days:'')+'">'
+        :(w.expert_days_list||[]).join(' / ')||'-';
       h+='<td>'+exp+'</td><td class="fw-bold">'+avg+'</td><td class="fw-bold text-success">¥'+Number(adj).toLocaleString()+'</td><td>'+inputCell+'</td>';
     }
     h+='</tr>';
@@ -1314,6 +1336,69 @@ function exportTableToCSV(){
   a.href=url;a.download='事业部统计表_'+new Date().toISOString().slice(0,10)+'.csv';
   document.body.appendChild(a);a.click();document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ==================== 评估汇总（管理员/研发）====================
+function renderWorkloadSummary(){
+  const sel=document.getElementById('wlSessionSelect');if(!sel)return;
+  sel.innerHTML='<option value="">-- 请选择评审批次 --</option>'+(sessions||[]).map(s=>'<option value="'+s.id+'">'+esc(s.name||('批次'+s.id))+'</option>').join('');
+  // 默认选中第一个批次
+  if((sessions||[]).length){sel.value=sessions[0].id;loadWorkloadSummary(sessions[0].id);}
+  else{clearWorkloadSummary();}
+}
+function clearWorkloadSummary(){
+  document.getElementById('wlBatchCards').innerHTML='';
+  document.getElementById('wlEvaluatorBar').innerHTML='';
+  document.getElementById('wlProjects').innerHTML='';
+  document.getElementById('wlEmpty').style.display='block';
+}
+async function loadWorkloadSummary(sid){
+  if(!sid){clearWorkloadSummary();return;}
+  try{
+    const r=await fetch(API+'/sessions/'+sid+'/workload-summary',{headers:authH()});
+    if(!r.ok){const d=await r.json().catch(()=>({}));alert('加载失败: '+(d.error||r.status));return;}
+    const data=await r.json();
+    document.getElementById('wlEmpty').style.display='none';
+    renderWorkloadCards(data);
+    renderEvaluatorBar(data);
+    renderWorkloadProjects(data);
+  }catch(e){alert('加载出错: '+e.message);}
+}
+function renderWorkloadCards(d){
+  const completion=d.batch_work_item_count>0?Math.round(d.batch_evaluated_count/d.batch_work_item_count*100):0;
+  const cards=[
+    {label:'批次调整后总费用',val:'¥'+Number(d.batch_total_adjusted_cost||0).toLocaleString(),color:'#667eea'},
+    {label:'工作项已评估',val:d.batch_evaluated_count+' / '+d.batch_work_item_count,color:'#11998e'},
+    {label:'评估完成度',val:completion+'%',color:'#eb3349'},
+    {label:'评审人数',val:(d.evaluators||[]).length+' 人',color:'#fc4a1a'}
+  ];
+  document.getElementById('wlBatchCards').innerHTML=cards.map(c=>
+    '<div class="col-md-3"><div class="card card-custom"><div class="card-body p-3 text-center"><div class="text-muted small">'+c.label+'</div><div class="h5 fw-bold mt-1" style="color:'+c.color+'">'+c.val+'</div></div></div></div>'
+  ).join('');
+}
+function renderEvaluatorBar(d){
+  const evs=d.evaluators||[];
+  if(!evs.length){document.getElementById('wlEvaluatorBar').innerHTML='<div class="alert alert-info py-2">该批次尚未分配评审人。</div>';return;}
+  document.getElementById('wlEvaluatorBar').innerHTML='<div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">评审人完成度</h6></div><div class="card-body"><div class="row g-2">'+
+    evs.map(ev=>{
+      const pct=Math.round((ev.completion||0)*100);
+      const color=pct>=100?'bg-success':pct>0?'bg-warning':'bg-secondary';
+      return '<div class="col-md-4 col-lg-3"><div class="border rounded p-2"><div class="d-flex justify-content-between"><span>专家'+ev.slot+' · '+esc(ev.user_name||'')+'</span><span class="badge '+color+'">'+pct+'%</span></div><div class="small text-muted">已评 '+ev.projects_submitted+' / '+ev.projects_assigned+' 个项目</div></div></div>';
+    }).join('')+'</div></div></div>';
+}
+function renderWorkloadProjects(d){
+  const evs=d.evaluators||[];
+  const head='<th>工作项</th>'+(evs.map(ev=>'<th>专家'+ev.slot+'<br><small class="text-muted">'+esc(ev.user_name||'')+'</small></th>').join('')+'<th>有效数</th><th>平均人天</th><th>调整后费用</th>';
+  let html='';
+  (d.projects||[]).forEach(p=>{
+    html+='<div class="card card-custom mb-3"><div class="card-header bg-white d-flex justify-content-between"><h6 class="mb-0">'+esc(p.project_name||('项目'+p.project_id))+'</h6><span class="text-muted small">调整后费用合计 ¥'+Number(p.total_adjusted_cost||0).toLocaleString()+' · 已评估 '+p.evaluated_count+'/'+p.work_item_count+'</span></div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>'+head+'</tr></thead><tbody>';
+    (p.items||[]).forEach(it=>{
+      const exp=(it.expert_days||[]).map(x=>x!=null?x:'-').join('</td><td>');
+      html+='<tr><td>'+esc(it.work_task||'')+' / '+esc(it.work_item||'')+'</td><td>'+exp+'</td><td>'+(it.expert_count||0)+'</td><td class="fw-bold">'+(it.expert_days_avg||0)+'</td><td class="fw-bold text-success">¥'+Number(it.adjusted_cost||0).toLocaleString()+'</td></tr>';
+    });
+    html+='</tbody></table></div></div></div>';
+  });
+  document.getElementById('wlProjects').innerHTML=html||'<div class="text-muted text-center py-4">该批次暂无项目。</div>';
 }
 
 // USERS

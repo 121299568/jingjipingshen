@@ -824,6 +824,8 @@ app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
   db.store.expertEstimates.push(estimate);
   const pj = db.store.projects.find(p => p.id === pid);
   if (pj) pj.updated_at = new Date().toISOString();
+  // 提交评估后落库工作项的 5 人评估汇总（平均人天 / 调整后费用）
+  persistWorkItemRollup(pid, parseInt(work_item_id));
   db.save();
   const roleLabel = req.user.role === 'accountant' ? '会计师事务所' : '专家';
   db.logWorkflow(pid, 'submit_estimate', `${roleLabel}${estimate.expert_name}评估工作项${work_item_id}: ${daysNum}人天`, req.user.id);
@@ -1036,32 +1038,124 @@ app.post('/api/projects/:id/confirm', auth(['admin', 'rd', 'biz']), (req, res) =
   res.json(p);
 });
 
+// ==================== 工作量重评估（5 人专家评估聚合）====================
+// 取项目所属批次的评审人（专家+会计师），按分配顺序取前 5 位作为 专家1-5
+function getBatchEvaluators(projectId) {
+  const p = db.store.projects.find(x => x.id === projectId);
+  const sid = p && p.session_id;
+  if (!sid) return [];
+  return (db.store.sessionAssignments || [])
+    .filter(a => a.session_id === sid && (a.user_role === 'expert' || a.user_role === 'accountant'))
+    .sort((a, b) => a.id - b.id)
+    .slice(0, 5)
+    .map((a, i) => ({ slot: i + 1, user_id: a.user_id, user_name: a.user_name, role: a.user_role }));
+}
+
+// 计算单个工作项的 5 人评估汇总：平均=有效专家人天算术平均；调整后费用=平均×单人天单价(unit_price)
+function computeWorkItemRollup(projectId, workItemId, evaluators) {
+  const wi = db.store.workItems.find(w => w.id === workItemId && w.project_id === projectId);
+  if (!wi) return null;
+  const evs = evaluators || getBatchEvaluators(projectId);
+  const byUser = {};
+  db.store.expertEstimates
+    .filter(e => e.project_id === projectId && e.work_item_id === workItemId)
+    .forEach(e => { byUser[e.expert_id] = Number(e.days) || 0; });
+  const expert_days = evs.map(ev => (byUser[ev.user_id] != null ? byUser[ev.user_id] : null));
+  const valid = expert_days.filter(d => d != null && d > 0);
+  const expert_count = valid.length;
+  const avg = expert_count > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / expert_count * 100) / 100 : 0;
+  const unit_price = Number(wi.unit_price) || 0;
+  const adjusted_cost = avg > 0 ? Math.round(avg * unit_price * 100) / 100 : 0;
+  return { evaluators: evs, expert_days, expert_count, expert_days_avg: avg, adjusted_cost, unit_price };
+}
+
+// 提交评估后落库汇总到 workItems（供管理员汇总页 / 导出读取）
+function persistWorkItemRollup(projectId, workItemId) {
+  const wi = db.store.workItems.find(w => w.id === workItemId && w.project_id === projectId);
+  if (!wi) return;
+  const r = computeWorkItemRollup(projectId, workItemId);
+  if (!r) return;
+  wi.expert_days = r.expert_days;
+  wi.expert_count = r.expert_count;
+  wi.expert_days_avg = r.expert_days_avg;
+  wi.adjusted_cost = r.adjusted_cost;
+}
+
 // ==================== 成本明细 ====================
 app.get('/api/projects/:id/cost', auth(), (req, res) => {
   const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '项目不存在' });
-  const estimateSummary = db.store.expertEstimates
-    .filter(e => e.project_id === p.id)
-    .reduce((acc, e) => { (acc[e.work_item_id] = acc[e.work_item_id] || []).push(e.days); return acc; }, {});
+  const evaluators = getBatchEvaluators(p.id);
+  const work_items = db.store.workItems.filter(w => w.project_id === p.id).map(w => {
+    const r = computeWorkItemRollup(p.id, w.id, evaluators) || {};
+    const ests = db.store.expertEstimates.filter(e => e.project_id === p.id && e.work_item_id === w.id);
+    const myEst = ests.find(e => e.expert_id === req.user.id);
+    return {
+      ...w,
+      expert_days: r.expert_days || [],
+      expert_count: r.expert_count || 0,
+      expert_days_avg: r.expert_days_avg || 0,
+      adjusted_cost: r.adjusted_cost || 0,
+      expert_days_list: ests.map(e => e.days),
+      my_submitted: !!myEst,
+      my_days: myEst ? myEst.days : null
+    };
+  });
+  const allEst = db.store.expertEstimates.filter(e => e.project_id === p.id);
   res.json({
     cost_summary: p.cost_summary || {},
-    work_items: db.store.workItems.filter(w => w.project_id === p.id).map(w => ({
-      ...w,
-      expert_days_list: estimateSummary[w.id] || [],
-      expert_days_avg: estimateSummary[w.id]
-        ? Math.round(estimateSummary[w.id].reduce((a, b) => a + b, 0) / estimateSummary[w.id].length * 10) / 10
-        : (w.expert_days_avg || 0),
-      adjusted_cost: estimateSummary[w.id]
-        ? Math.round(estimateSummary[w.id].reduce((a, b) => a + b, 0) / estimateSummary[w.id].length * (Number(w.cost) / (Number(w.person_days) || 1)) * 10) / 10
-        : (w.adjusted_cost || 0)
-    })),
+    work_items,
+    evaluators,
     procurement_items: db.store.procurementItems.filter(x => x.project_id === p.id),
     travel_items: db.store.travelItems.filter(t => t.project_id === p.id),
     category_cost: calculateCategoryCost(db.store.workItems.filter(w => w.project_id === p.id)),
     estimate_stats: {
-      total_experts: Object.keys(estimateSummary).length,
-      avg_days_by_item: estimateSummary
+      total_experts: new Set(allEst.map(e => e.expert_id)).size,
+      avg_days_by_item: {}
     }
+  });
+});
+
+// ==================== 管理员：批次工作量评估汇总 ====================
+app.get('/api/sessions/:id/workload-summary', auth(['admin', 'rd']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sid);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const projects = db.filterByDept('projects', req.user).filter(p => p.session_id === sid);
+  const evaluators = (db.store.sessionAssignments || [])
+    .filter(a => a.session_id === sid && (a.user_role === 'expert' || a.user_role === 'accountant'))
+    .sort((a, b) => a.id - b.id).slice(0, 5)
+    .map((a, i) => ({ slot: i + 1, user_id: a.user_id, user_name: a.user_name, role: a.user_role }));
+  const projectSummaries = projects.map(p => {
+    const wis = db.store.workItems.filter(w => w.project_id === p.id);
+    let totalAdjusted = 0, evaluatedWI = 0;
+    const items = wis.map(w => {
+      const r = computeWorkItemRollup(p.id, w.id, evaluators) || {};
+      totalAdjusted += r.adjusted_cost || 0;
+      if ((r.expert_count || 0) > 0) evaluatedWI++;
+      return {
+        work_item_id: w.id, work_task: w.work_task, work_item: w.work_item, category: w.category,
+        expert_days: r.expert_days || [], expert_count: r.expert_count || 0,
+        expert_days_avg: r.expert_days_avg || 0, adjusted_cost: r.adjusted_cost || 0
+      };
+    });
+    return {
+      project_id: p.id, project_name: p.project_name, status: p.status,
+      work_item_count: wis.length, evaluated_count: evaluatedWI,
+      total_adjusted_cost: Math.round(totalAdjusted * 100) / 100, items
+    };
+  });
+  const evaluatorProgress = evaluators.map(ev => {
+    const projCount = projects.length;
+    const submitted = projects.filter(p => db.store.expertEstimates.some(e => e.project_id === p.id && e.expert_id === ev.user_id)).length;
+    return { ...ev, projects_assigned: projCount, projects_submitted: submitted, completion: projCount > 0 ? Math.round(submitted / projCount * 100) / 100 : 0 };
+  });
+  const batch_total_adjusted_cost = Math.round(projectSummaries.reduce((s, p) => s + p.total_adjusted_cost, 0) * 100) / 100;
+  const batch_work_item_count = projectSummaries.reduce((s, p) => s + p.work_item_count, 0);
+  const batch_evaluated_count = projectSummaries.reduce((s, p) => s + p.evaluated_count, 0);
+  res.json({
+    session_id: sid, session_name: session.name, evaluators, projects: projectSummaries,
+    batch_total_adjusted_cost, batch_work_item_count, batch_evaluated_count, evaluator_progress: evaluatorProgress
   });
 });
 
