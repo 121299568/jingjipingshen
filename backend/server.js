@@ -809,7 +809,17 @@ app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
     return res.status(400).json({ error: '工作项不存在或不属于该项目' });
   }
   const existing = db.store.expertEstimates.find(e => e.expert_id === req.user.id && e.project_id === pid && e.work_item_id === parseInt(work_item_id));
-  if (existing) return res.status(400).json({ error: '您已经提交过该项评估' });
+  const roleLabel = req.user.role === 'accountant' ? '会计师事务所' : '专家';
+  if (existing) {
+    // 已提交过：允许专家/会计师重新修改评估值（覆盖更新），仍受归档锁约束
+    existing.days = daysNum;
+    existing.comment = comment || existing.comment || '';
+    existing.updated_at = new Date().toISOString();
+    persistWorkItemRollup(pid, parseInt(work_item_id));
+    db.save();
+    db.logWorkflow(pid, 'update_estimate', `${roleLabel}${existing.expert_name}重新评估工作项${work_item_id}: ${daysNum}人天（覆盖原值）`, req.user.id);
+    return res.json(existing);
+  }
   const estimate = {
     id: db.nextId(db.store.expertEstimates),
     project_id: pid,
@@ -827,7 +837,6 @@ app.post('/api/estimates', auth(['expert', 'accountant']), (req, res) => {
   // 提交评估后落库工作项的 5 人评估汇总（平均人天 / 调整后费用）
   persistWorkItemRollup(pid, parseInt(work_item_id));
   db.save();
-  const roleLabel = req.user.role === 'accountant' ? '会计师事务所' : '专家';
   db.logWorkflow(pid, 'submit_estimate', `${roleLabel}${estimate.expert_name}评估工作项${work_item_id}: ${daysNum}人天`, req.user.id);
   res.json(estimate);
 });

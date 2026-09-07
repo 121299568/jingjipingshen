@@ -1115,7 +1115,7 @@ function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
       const exp=(w.expert_days||[]).map(d=>d!=null?d:'-').join('</td><td>');
       const avg=w.expert_days_avg!=null?w.expert_days_avg:'-';
       const adj=w.adjusted_cost!=null?w.adjusted_cost:(w.cost||0);
-      const inputCell=isExpert&&!w.my_submitted
+      const inputCell=isExpert
         ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="'+(w.person_days!=null?w.person_days:'?')+'" min="0" step="'+estimateStep+'" value="'+(w.my_days!=null?w.my_days:(w.person_days!=null?w.person_days:''))+'">'
         :(w.expert_days_list||[]).join(' / ')||'-';
       h+='<td>'+exp+'</td><td class="fw-bold">'+avg+'</td><td class="fw-bold text-success">¥'+Number(adj).toLocaleString()+'</td><td>'+inputCell+'</td>';
@@ -1124,6 +1124,7 @@ function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
   });
   h+='</tbody></table></div>';
   if(showExpert&&isExpert&&items.length>0){
+    const anySubmitted=items.some(w=>w.my_submitted);
     h+='<div class="p-2 d-flex justify-content-between align-items-center flex-wrap gap-2">'+
       '<div class="btn-group btn-group-sm" role="group" aria-label="调整步长">'+
         '<span class="btn btn-sm btn-outline-secondary disabled">调整步长</span>'+
@@ -1132,7 +1133,8 @@ function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
         '<button type="button" class="btn btn-sm btn-outline-primary est-step '+(estimateStep===3?'active':'')+'" onclick="setEstimateStep(3,this)">3</button>'+
         '<button type="button" class="btn btn-sm btn-outline-primary est-step '+(estimateStep===5?'active':'')+'" onclick="setEstimateStep(5,this)">5</button>'+
       '</div>'+
-      '<button class="btn btn-sm btn-success" onclick="submitEstimate('+currentProjectId+')"><i class="bi bi-check-circle"></i> 提交我的评估</button>'+
+      (anySubmitted?'<span class="text-muted small">已提交过，可修改后重新提交</span>':'')+
+      '<button class="btn btn-sm btn-success" onclick="submitEstimate('+currentProjectId+')"><i class="bi bi-check-circle"></i> '+(anySubmitted?'更新我的评估':'提交我的评估')+'</button>'+
     '</div>';
   }
   return h;
@@ -1185,7 +1187,7 @@ async function submitEstimate(projectId){
       const r=await fetch(API+'/estimates',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify(est)});
       if(!r.ok){const d=await r.json();throw new Error(d.error||'提交失败');}
     }
-    alert('评估提交成功！');
+    alert('评估已保存成功！（已提交过的项将更新为最新值）');
     loadCostDetail(projectId);
   }catch(e){alert('提交失败: '+e.message);}
 }
