@@ -977,7 +977,9 @@ function downloadSessionEstimation(sessionId){
 
 // COST ANALYSIS
 function getCostVisibleProjects(){
-  return projects||[];
+  // 仅显示已启动评审（进行中 in_progress）的批次下的项目
+  const activeIds=new Set((sessions||[]).filter(s=>s.status==='in_progress').map(s=>s.id));
+  return (projects||[]).filter(p=>activeIds.has(p.session_id));
 }
 async function loadCostProjectsStatus(){
   const visible=getCostVisibleProjects();
@@ -1030,11 +1032,15 @@ function updateCostSelect(){
 }
 async function renderCostAnalysis(){
   await loadCostProjectsStatus();
+  const visible=getCostVisibleProjects();
+  // 若当前选中的项目不在「已启动评审的批次」内，重置后自动选首个未提交
+  if(currentProjectId && !visible.some(p=>String(p.id)===String(currentProjectId))){
+    currentProjectId=null;
+  }
   renderCostProjectFilter();
   if(currentProjectId){
     await loadCostDetail(currentProjectId);
   }else{
-    const visible=getCostVisibleProjects();
     const firstUnsubmitted=visible.find(p=>!costProjectStatus[p.id]);
     const defaultPid=firstUnsubmitted?firstUnsubmitted.id:(visible[0]?visible[0].id:null);
     if(defaultPid) await selectCostProject(defaultPid);
