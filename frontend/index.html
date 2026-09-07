@@ -309,12 +309,11 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 
     <!-- WORKLOAD SUMMARY (管理员/研发) -->
     <div id="page-workload-summary" class="page">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6>工作量评估汇总（5 人专家重评估）</h6>
-        <select id="wlSessionSelect" class="form-select w-auto" onchange="loadWorkloadSummary(this.value)">
-          <option value="">-- 请选择评审批次 --</option>
-        </select>
+      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h6 class="mb-0">工作量评估汇总（5 人专家重评估）</h6>
+        <div id="wlSessionName" class="text-muted small"></div>
       </div>
+      <div id="wlProjectFilter" class="mb-3"></div>
       <div id="wlBatchCards" class="row g-3 mb-3"></div>
       <div id="wlEvaluatorBar" class="mb-3"></div>
       <div id="wlProjects"></div>
@@ -528,6 +527,7 @@ let currentUser=null, sessions=[], projects=[], users=[], files=[], userGroups=[
 let currentProjectId=null, uploadingCategory='', editingUserId=null, costResult=null, selectedCostCategory=null;
 let currentAssignSessionId=null, currentSessionAssignments=[];
 let openBatches=null;
+let wlSelectedProjectId='all', wlCurrentData=null;
 
 document.addEventListener('DOMContentLoaded',()=>{
   const saved=localStorage.getItem('currentUser');
@@ -1358,13 +1358,13 @@ function exportTableToCSV(){
 
 // ==================== 评估汇总（管理员/研发）====================
 function renderWorkloadSummary(){
-  const sel=document.getElementById('wlSessionSelect');if(!sel)return;
-  sel.innerHTML='<option value="">-- 请选择评审批次 --</option>'+(sessions||[]).map(s=>'<option value="'+s.id+'">'+esc(s.name||('批次'+s.id))+'</option>').join('');
-  // 默认选中第一个批次
-  if((sessions||[]).length){sel.value=sessions[0].id;loadWorkloadSummary(sessions[0].id);}
+  wlSelectedProjectId='all'; wlCurrentData=null;
+  const nameEl=document.getElementById('wlSessionName'); if(nameEl) nameEl.textContent='';
+  if((sessions||[]).length){loadWorkloadSummary(sessions[0].id);}
   else{clearWorkloadSummary();}
 }
 function clearWorkloadSummary(){
+  document.getElementById('wlProjectFilter').innerHTML='';
   document.getElementById('wlBatchCards').innerHTML='';
   document.getElementById('wlEvaluatorBar').innerHTML='';
   document.getElementById('wlProjects').innerHTML='';
@@ -1376,9 +1376,12 @@ async function loadWorkloadSummary(sid){
     const r=await fetch(API+'/sessions/'+sid+'/workload-summary',{headers:authH()});
     if(!r.ok){const d=await r.json().catch(()=>({}));alert('加载失败: '+(d.error||r.status));return;}
     const data=await r.json();
+    wlCurrentData=data;
+    const nameEl=document.getElementById('wlSessionName'); if(nameEl) nameEl.textContent='批次：'+(data.session_name||('批次'+data.session_id));
     document.getElementById('wlEmpty').style.display='none';
     renderWorkloadCards(data);
     renderEvaluatorBar(data);
+    renderProjectFilter(data);
     renderWorkloadProjects(data);
   }catch(e){alert('加载出错: '+e.message);}
 }
@@ -1404,18 +1407,50 @@ function renderEvaluatorBar(d){
       return '<div class="col-md-4 col-lg-3"><div class="border rounded p-2"><div class="d-flex justify-content-between"><span>专家'+ev.slot+' · '+esc(ev.user_name||'')+'</span><span class="badge '+color+'">'+pct+'%</span></div><div class="small text-muted">已评 '+ev.projects_submitted+' / '+ev.projects_assigned+' 个项目</div></div></div>';
     }).join('')+'</div></div></div>';
 }
+function renderProjectFilter(d){
+  const cont=document.getElementById('wlProjectFilter'); if(!cont) return;
+  const projects=d.projects||[];
+  if(!projects.length){cont.innerHTML=''; return;}
+  const allActive=wlSelectedProjectId==='all';
+  const chips=['<button type="button" class="btn btn-sm '+(allActive?'btn-primary':'btn-outline-primary')+' wl-proj-chip" onclick="selectWlProject(\'all\')">全部</button>'];
+  projects.forEach((p,idx)=>{
+    const num=String(idx+1).padStart(2,'0');
+    const hasEval=p.evaluated_count>0;
+    const selected=String(p.project_id)===wlSelectedProjectId;
+    let baseCls='btn btn-sm position-relative wl-proj-chip ';
+    if(selected) baseCls+=(hasEval?'btn-success':'btn-secondary');
+    else baseCls+=(hasEval?'btn-outline-success':'btn-outline-secondary');
+    const badge=hasEval?'<span class="position-absolute top-0 start-100 translate-middle p-1 bg-success border border-light rounded-circle"><span class="visually-hidden">已提交</span></span>':'';
+    const title=(p.project_name||('项目'+p.project_id))+(hasEval?'（已提交评估）':'（未提交评估）');
+    chips.push('<button type="button" class="'+baseCls+'" title="'+esc(title)+'" onclick="selectWlProject('+p.project_id+')">'+num+badge+'</button>');
+  });
+  cont.innerHTML='<div class="d-flex flex-wrap gap-2 align-items-center">'+
+    '<span class="text-muted small me-1">快速过滤项目:</span>'+chips.join('')+
+  '</div>';
+}
+function selectWlProject(pid){
+  wlSelectedProjectId=String(pid);
+  if(!wlCurrentData) return;
+  renderProjectFilter(wlCurrentData);
+  renderWorkloadProjects(wlCurrentData);
+}
 function renderWorkloadProjects(d){
   const evs=d.evaluators||[];
   const head='<th>工作项</th>'+(evs.map(ev=>'<th>专家'+ev.slot+'<br><small class="text-muted">'+esc(ev.user_name||'')+'</small></th>').join('')+'<th>有效数</th><th>平均人天</th><th>调整后费用</th>');
   let html='';
-  (d.projects||[]).forEach(p=>{
-    html+='<div class="card card-custom mb-3"><div class="card-header bg-white d-flex justify-content-between"><h6 class="mb-0">'+esc(p.project_name||('项目'+p.project_id))+'</h6><span class="text-muted small">调整后费用合计 ¥'+Number(p.total_adjusted_cost||0).toLocaleString()+' · 已评估 '+p.evaluated_count+'/'+p.work_item_count+'</span></div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>'+head+'</tr></thead><tbody>';
-    (p.items||[]).forEach(it=>{
-      const exp=(it.expert_days||[]).map(x=>x!=null?x:'-').join('</td><td>');
-      html+='<tr><td>'+esc(it.work_task||'')+' / '+esc(it.work_item||'')+'</td><td>'+exp+'</td><td>'+(it.expert_count||0)+'</td><td class="fw-bold">'+(it.expert_days_avg||0)+'</td><td class="fw-bold text-success">¥'+Number(it.adjusted_cost||0).toLocaleString()+'</td></tr>';
+  const list=wlSelectedProjectId==='all'?(d.projects||[]):(d.projects||[]).filter(p=>String(p.project_id)===wlSelectedProjectId);
+  if(!list.length){
+    html='<div class="text-muted text-center py-4">所选项目暂无数据。</div>';
+  }else{
+    list.forEach(p=>{
+      html+='<div class="card card-custom mb-3"><div class="card-header bg-white d-flex justify-content-between"><h6 class="mb-0">'+esc(p.project_name||('项目'+p.project_id))+'</h6><span class="text-muted small">调整后费用合计 ¥'+Number(p.total_adjusted_cost||0).toLocaleString()+' · 已评估 '+p.evaluated_count+'/'+p.work_item_count+'</span></div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>'+head+'</tr></thead><tbody>';
+      (p.items||[]).forEach(it=>{
+        const exp=(it.expert_days||[]).map(x=>x!=null?x:'-').join('</td><td>');
+        html+='<tr><td>'+esc(it.work_task||'')+' / '+esc(it.work_item||'')+'</td><td>'+exp+'</td><td>'+(it.expert_count||0)+'</td><td class="fw-bold">'+(it.expert_days_avg||0)+'</td><td class="fw-bold text-success">¥'+Number(it.adjusted_cost||0).toLocaleString()+'</td></tr>';
+      });
+      html+='</tbody></table></div></div></div>';
     });
-    html+='</tbody></table></div></div></div>';
-  });
+  }
   document.getElementById('wlProjects').innerHTML=html||'<div class="text-muted text-center py-4">该批次暂无项目。</div>';
 }
 
