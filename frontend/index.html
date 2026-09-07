@@ -1085,6 +1085,13 @@ function renderCostDetail(cost){
   // 第三方测试、知识产权等无明细的成本项
   db.innerHTML='<div class="p-3 text-muted">该成本项在基本信息表中填写，无进一步明细。</div>';
 }
+let estimateStep=0.5;
+function setEstimateStep(val, btn){
+  estimateStep=val;
+  document.querySelectorAll('input[id^="input_"]').forEach(inp=>{ inp.step=val; });
+  document.querySelectorAll('.est-step').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+}
 function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
   if(!items.length)return '<p class="text-muted text-center py-4">暂无明细</p>';
   const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
@@ -1109,7 +1116,7 @@ function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
       const avg=w.expert_days_avg!=null?w.expert_days_avg:'-';
       const adj=w.adjusted_cost!=null?w.adjusted_cost:(w.cost||0);
       const inputCell=isExpert&&!w.my_submitted
-        ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="'+(w.person_days!=null?w.person_days:'?')+'" min="0" step="0.5" value="'+(w.my_days!=null?w.my_days:(w.person_days!=null?w.person_days:''))+'">'
+        ?'<input type="number" class="form-control form-control-sm" id="input_'+w.id+'" placeholder="'+(w.person_days!=null?w.person_days:'?')+'" min="0" step="'+estimateStep+'" value="'+(w.my_days!=null?w.my_days:(w.person_days!=null?w.person_days:''))+'">'
         :(w.expert_days_list||[]).join(' / ')||'-';
       h+='<td>'+exp+'</td><td class="fw-bold">'+avg+'</td><td class="fw-bold text-success">¥'+Number(adj).toLocaleString()+'</td><td>'+inputCell+'</td>';
     }
@@ -1117,7 +1124,16 @@ function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
   });
   h+='</tbody></table></div>';
   if(showExpert&&isExpert&&items.length>0){
-    h+='<div class="p-2 text-end"><button class="btn btn-sm btn-success" onclick="submitEstimate('+currentProjectId+')"><i class="bi bi-check-circle"></i> 提交我的评估</button></div>';
+    h+='<div class="p-2 d-flex justify-content-between align-items-center flex-wrap gap-2">'+
+      '<div class="btn-group btn-group-sm" role="group" aria-label="调整步长">'+
+        '<span class="btn btn-sm btn-outline-secondary disabled">调整步长</span>'+
+        '<button type="button" class="btn btn-sm btn-outline-primary est-step '+(estimateStep===0.5?'active':'')+'" onclick="setEstimateStep(0.5,this)">0.5</button>'+
+        '<button type="button" class="btn btn-sm btn-outline-primary est-step '+(estimateStep===1?'active':'')+'" onclick="setEstimateStep(1,this)">1</button>'+
+        '<button type="button" class="btn btn-sm btn-outline-primary est-step '+(estimateStep===3?'active':'')+'" onclick="setEstimateStep(3,this)">3</button>'+
+        '<button type="button" class="btn btn-sm btn-outline-primary est-step '+(estimateStep===5?'active':'')+'" onclick="setEstimateStep(5,this)">5</button>'+
+      '</div>'+
+      '<button class="btn btn-sm btn-success" onclick="submitEstimate('+currentProjectId+')"><i class="bi bi-check-circle"></i> 提交我的评估</button>'+
+    '</div>';
   }
   return h;
 }
