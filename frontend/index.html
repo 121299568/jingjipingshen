@@ -139,7 +139,10 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div id="page-sessions" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6>评审批次列表</h6>
-        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addSessionModal"><i class="bi bi-plus"></i>新建批次</button>
+        <div class="d-flex gap-2">
+          <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#summaryImportModal"><i class="bi bi-file-earmark-excel"></i>Excel导入（评审汇总表）</button>
+          <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addSessionModal"><i class="bi bi-plus"></i>新建批次</button>
+        </div>
       </div>
       <div class="card card-custom"><div class="card-body p-0">
         <table class="table table-hover mb-0"><thead><tr><th>ID</th><th>批次名称</th><th>状态</th><th>评审时间</th><th>项目数</th><th>操作</th></tr></thead>
@@ -153,7 +156,6 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
         <h6>项目资料管理（按评审批次）</h6>
         <div class="d-flex gap-2">
           <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addProjectModal"><i class="bi bi-plus"></i>新建项目</button>
-          <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#importExcelModal"><i class="bi bi-file-earmark-excel"></i>Excel导入</button>
         </div>
       </div>
       <div id="missingNotice" class="alert alert-warning d-none mb-3">
@@ -396,18 +398,34 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
   </div></div>
 </div>
 
-<div class="modal fade" id="importExcelModal" tabindex="-1">
-  <div class="modal-dialog"><div class="modal-content">
-    <div class="modal-header"><h5>从Excel导入项目</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal fade" id="summaryImportModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5>Excel 导入评审汇总表</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
-      <div class="mb-3"><label class="form-label">评审批次</label><select class="form-select" id="importSessionId"><option value="">（不关联）</option></select></div>
-      <div class="mb-3"><label class="form-label">上传Excel</label><input type="file" class="form-control" id="fileInput" accept=".xlsx,.xls"></div>
-      <div id="importStatus"></div>
+      <div class="alert alert-info small mb-3">
+        <i class="bi bi-info-circle"></i> 模板为「汇总表」格式：<b>序号 / 项目编号 / 项目名称 / 项目承建部门 / 项目类型 / 合同额（元）/ 内部信息系统填报预估成本（元）</b>。导入后按项目明细自动在系统内创建项目条目；后续事业部上传成本估算表时，将自动校验合同额与内部填报预估成本。
+      </div>
+      <div class="mb-3">
+        <label class="form-label">导入方式</label>
+        <select class="form-select" id="summaryMode" onchange="toggleSummaryMode()">
+          <option value="attach">挂接到已有批次</option>
+          <option value="create">根据表格直接创建新批次</option>
+        </select>
+      </div>
+      <div class="mb-3" id="summaryAttachBox">
+        <label class="form-label">选择批次</label><select class="form-select" id="summarySessionId"><option value="">（请选择）</option></select>
+      </div>
+      <div id="summaryCreateBox" style="display:none">
+        <div class="mb-3"><label class="form-label">新批次名称</label><input type="text" class="form-control" id="summarySessionName" placeholder="默认取表格标题行，如「2026年第十四批经济评审」"></div>
+        <div class="mb-3"><label class="form-label">评审时间</label><input type="datetime-local" class="form-control" id="summarySessionTime"></div>
+      </div>
+      <div class="mb-3"><label class="form-label">上传 Excel（汇总表）</label><input type="file" class="form-control" id="summaryFileInput" accept=".xlsx,.xls"></div>
+      <div id="summaryImportStatus"></div>
     </div>
     <div class="modal-footer">
-      <button type="button" class="btn btn-outline-secondary" onclick="downloadTemplate()"><i class="bi bi-download"></i>下载导入模板</button>
+      <button type="button" class="btn btn-outline-secondary" onclick="downloadSummaryTemplate()"><i class="bi bi-download"></i>下载模板</button>
       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-      <button type="button" class="btn btn-primary" onclick="doImport()">导入</button>
+      <button type="button" class="btn btn-primary" onclick="doSummaryImport()">导入</button>
     </div>
   </div></div>
 </div>
@@ -655,9 +673,9 @@ function renderUploadProgressChart(){
 
 // SESSIONS
 function populateSessionSelect(){
-  ['projSessionId','importSessionId'].forEach(id=>{
+  ['projSessionId','summarySessionId'].forEach(id=>{
     const el=document.getElementById(id);
-    if(el)el.innerHTML='<option value="">（不关联）</option>'+sessions.map(s=>'<option value="'+s.id+'">'+esc(s.name||s.session_name)+'</option>').join('');
+    if(el)el.innerHTML='<option value="">（请选择）</option>'+sessions.map(s=>'<option value="'+s.id+'">'+esc(s.name||s.session_name)+'</option>').join('');
   });
 }
 function renderSessions(){
@@ -715,7 +733,7 @@ function renderProjects(){
   if(!openBatches)openBatches=new Set();
   groups.forEach(g=>{if(g.open&&!openBatches.has(g.key))openBatches.add(g.key);});
   if(groups.length===0){
-    box.innerHTML='<div class="card card-custom"><div class="card-body text-muted text-center py-5"><i class="bi bi-folder2-open fs-1 d-block mb-2"></i>暂无评审批次<br><span class="small">请先在「评审批次」页创建批次，再通过 Excel导入 或 新建项目 挂接项目</span></div></div>';
+    box.innerHTML='<div class="card card-custom"><div class="card-body text-muted text-center py-5"><i class="bi bi-folder2-open fs-1 d-block mb-2"></i>暂无评审批次<br><span class="small">请先在「评审批次」页创建批次，或通过「Excel导入（评审汇总表）」批量导入，或「新建项目」挂接项目</span></div></div>';
     return;
   }
   box.innerHTML=groups.map(g=>{
@@ -760,7 +778,7 @@ function renderProjects(){
       (total>0?'<div class="table-responsive"><table class="table table-hover mb-0">'+
         '<thead class="table-light"><tr><th>ID</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th><th>最后操作时间</th>'+
         '<th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">投标</th><th class="text-center">合同</th><th>操作</th></tr></thead>'+
-        '<tbody>'+rows+'</tbody></table></div>':'<div class="batch-empty">该批次暂无项目，请通过「Excel导入」或「新建项目」挂接到本批次</div>')+
+        '<tbody>'+rows+'</tbody></table></div>':'<div class="batch-empty">该批次暂无项目，请通过「Excel导入（评审汇总表）」批量导入或「新建项目」挂接</div>')+
     '</div>';
     return '<div class="batch-drawer '+(isOpen?'open':'')+' '+(g.archived?'archived':'')+'" data-batch="'+g.key+'">'+head+body+'</div>';
   }).join('');
@@ -1727,21 +1745,40 @@ function saveProject(){
   fetch(API+'/projects',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({project_name:name,biz_department:dept,contract_amount:amount?Number(amount):0,session_id:sessionId||null,status:'draft'})})
     .then(r=>r.json()).then(d=>{projects.push(d);bootstrap.Modal.getInstance(document.getElementById('addProjectModal')).hide();renderProjects();populateSessionSelect();});
 }
-function doImport(){
-  const file=document.getElementById('fileInput').files[0];
-  const statusEl=document.getElementById('importStatus');
-  if(!file){alert('请选择Excel文件');return;}
-  if(!file.name.match(/\.xlsx?$/i)){alert('请选择.xlsx或.xls格式的文件');return;}
-  statusEl.innerHTML='<div class="alert alert-info">正在解析Excel...</div>';
-  const formData=new FormData();
-  formData.append('file',file);
-  formData.append('session_id',document.getElementById('importSessionId').value||'');
-  fetch(API+'/projects/import-excel',{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:formData})
-    .then(r=>r.json().then(data=>({ok:r.ok,data}))).then(({ok,data})=>{
-      if(!ok||data.error){statusEl.innerHTML='<div class="alert alert-danger">导入失败：'+(esc(data.error)||'未知错误')+'</div>';return;}
-      statusEl.innerHTML='<div class="alert alert-success">导入成功！</div>';
-      setTimeout(()=>{bootstrap.Modal.getInstance(document.getElementById('importExcelModal')).hide();loadAll();},1500);
-    }).catch(e=>{statusEl.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';});
+function toggleSummaryMode(){
+  const m=document.getElementById('summaryMode').value;
+  document.getElementById('summaryAttachBox').style.display=m==='attach'?'block':'none';
+  document.getElementById('summaryCreateBox').style.display=m==='create'?'block':'none';
+}
+function downloadSummaryTemplate(){
+  fetch(API+'/template/summary-xlsx',{headers:authH()})
+  .then(r=>{if(!r.ok)return r.json().then(e=>Promise.reject(e));return r.blob();})
+  .then(b=>{const url=URL.createObjectURL(b);const a=document.createElement('a');a.href=url;a.download='评审汇总表导入模板.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);})
+  .catch(e=>alert('下载模板失败: '+(e&&e.error||e&&e.message||'未知错误')));
+}
+async function doSummaryImport(){
+  const file=document.getElementById('summaryFileInput').files[0];
+  const statusEl=document.getElementById('summaryImportStatus');
+  const mode=document.getElementById('summaryMode').value;
+  if(!file){alert('请选择 Excel 文件');return;}
+  if(!file.name.match(/\.xlsx?$/i)){alert('请选择 .xlsx 或 .xls 格式的文件');return;}
+  if(mode==='attach' && !document.getElementById('summarySessionId').value){alert('请选择要挂接的批次');return;}
+  statusEl.innerHTML='<div class="alert alert-info">正在解析汇总表...</div>';
+  const fd=new FormData();
+  fd.append('file',file);
+  fd.append('mode',mode);
+  if(mode==='attach')fd.append('session_id',document.getElementById('summarySessionId').value);
+  else{
+    fd.append('session_name',document.getElementById('summarySessionName').value.trim());
+    fd.append('review_time',document.getElementById('summarySessionTime').value);
+  }
+  try{
+    const r=await fetch(API+'/sessions/import-summary',{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:fd});
+    const data=await r.json();
+    if(!r.ok||data.error){statusEl.innerHTML='<div class="alert alert-danger">导入失败：'+(esc(data.error)||'未知错误')+'</div>';return;}
+    statusEl.innerHTML='<div class="alert alert-success">导入成功！创建批次「'+esc(data.session_name)+'」，新增项目 '+data.created+' 个（跳过重复 '+data.skipped+' 个，表格共 '+data.total+' 行）。</div>';
+    setTimeout(()=>{const m=document.getElementById('summaryImportModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();loadAll();},1800);
+  }catch(e){statusEl.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';}
 }
 
 function updateSessionStatus(sessionId,newStatus){

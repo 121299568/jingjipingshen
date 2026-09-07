@@ -641,6 +641,85 @@ app.get('/api/template/import-xlsx', auth(['admin', 'rd', 'biz']), (req, res) =>
   }
 });
 
+// ==================== 评审汇总表导入（批次级，支持挂接 / 新建批次）====================
+app.post('/api/sessions/import-summary', auth(['admin', 'rd', 'biz']), upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: '请选择文件' });
+  const mode = req.body.mode === 'attach' ? 'attach' : 'create';
+  try {
+    const { parseSummaryExcel } = require('./parse-summary-excel');
+    const parsed = parseSummaryExcel(req.file.path);
+    let session, session_id;
+    if (mode === 'attach') {
+      session_id = parseInt(req.body.session_id);
+      session = db.store.reviewSessions.find(s => s.id === session_id);
+      if (!session) return res.status(404).json({ error: '所选批次不存在' });
+    } else {
+      const name = (req.body.session_name && String(req.body.session_name).trim()) || parsed.batch_name || '未命名评审批次';
+      session = {
+        id: db.nextId(db.store.reviewSessions),
+        name,
+        review_time: req.body.review_time || null,
+        note: '',
+        meeting_location: '',
+        meeting_agenda: '',
+        checklist: [],
+        status: 'pending',
+        creator_id: req.user.id,
+        created_at: new Date().toISOString()
+      };
+      db.store.reviewSessions.push(session);
+      session_id = session.id;
+    }
+    const created = [];
+    let skipped = 0;
+    parsed.projects.forEach(row => {
+      if (!row.project_name) return;
+      const dup = db.store.projects.some(p =>
+        p.session_id === session_id &&
+        ((row.project_code && p.project_code === row.project_code) ||
+         (!row.project_code && p.project_name === row.project_name))
+      );
+      if (dup) { skipped++; return; }
+      const p = {
+        id: db.nextId(db.store.projects),
+        session_id,
+        project_name: row.project_name,
+        project_code: row.project_code || '',
+        biz_department: row.biz_department || '',
+        project_type: row.project_type || '',
+        contract_amount: row.contract_amount != null ? row.contract_amount : 0,
+        internal_estimated_cost: row.internal_estimated_cost != null ? row.internal_estimated_cost : null,
+        status: 'draft',
+        cost_summary: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        creator_id: req.user.id
+      };
+      db.store.projects.push(p);
+      created.push(p.id);
+    });
+    db.save();
+    if (mode === 'create') db.logWorkflow(null, 'session_import', `汇总表导入创建批次「${session.name}」，导入项目 ${created.length} 个（跳过重复 ${skipped} 个）`, req.user.id);
+    else db.logWorkflow(null, 'session_import', `汇总表导入挂接批次「${session.name}」，新增项目 ${created.length} 个（跳过重复 ${skipped} 个）`, req.user.id);
+    res.json({ session_id, session_name: session.name, total: parsed.projects.length, created: created.length, skipped, project_ids: created });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== 评审汇总表导入模板下载 ====================
+app.get('/api/template/summary-xlsx', auth(['admin', 'rd', 'biz']), (req, res) => {
+  try {
+    const { buildSummaryTemplate } = require('./template-summary-xlsx');
+    const buf = buildSummaryTemplate();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent('评审汇总表导入模板.xlsx')}`);
+    res.send(buf);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== 年终工作汇报（供统计分析页查看 / 报告生成引用）====================
 app.get('/api/work-report', auth(), (req, res) => res.json(workReport));
 app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) => {
@@ -699,6 +778,23 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
   db.store.files.push(file);
   // 若上传的是成本估算表（xlsx），自动抽取工作明细与成本项，供工作量评估页使用
   if (finalCategory === 'estimation' && parsed && !parsed.__parseError) {
+    // ===== 双数字校验：与导入评审汇总表的基线字段比对 =====
+    const vIssues = [];
+    const pContract = project.contract_amount != null ? Number(project.contract_amount) : null;
+    const eContract = parsed.project.contract_amount != null ? Number(parsed.project.contract_amount) : null;
+    if (pContract != null && eContract != null && Math.abs(pContract - eContract) > 1) {
+      vIssues.push(`合同额不一致：本次成本估算表为 ¥${eContract.toLocaleString()}，汇总表基线为 ¥${pContract.toLocaleString()}`);
+    }
+    const estCost = parsed.cost_summary && parsed.cost_summary.total_cost != null ? Number(parsed.cost_summary.total_cost) : null;
+    const internalCost = project.internal_estimated_cost != null ? Number(project.internal_estimated_cost) : null;
+    if (internalCost != null && estCost != null && estCost >= internalCost) {
+      vIssues.push(`估算成本 ¥${estCost.toLocaleString()} 不小于汇总表「内部信息系统填报预估成本」 ¥${internalCost.toLocaleString()}，不能通过`);
+    }
+    if (vIssues.length) {
+      try { fs.unlinkSync(newPath); } catch (_) {}
+      db.store.files = db.store.files.filter(f => f.id !== file.id);
+      return res.status(400).json({ error: '成本估算表校验未通过：' + vIssues.join('；'), validation: vIssues });
+    }
     try {
       // 先清掉该项目已有的明细，避免重复累加
       db.store.workItems = db.store.workItems.filter(w => w.project_id !== projectId);
