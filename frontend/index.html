@@ -307,9 +307,12 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div id="page-workload-summary" class="page">
       <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
         <h6 class="mb-0">工作量评估汇总（5 人专家重评估）</h6>
-        <div id="wlSessionName" class="text-muted small"></div>
+        <div class="d-flex align-items-center gap-2">
+          <div id="wlSessionName" class="text-muted small"></div>
+          <button class="btn btn-sm btn-outline-success" id="wlExportBtn" onclick="exportWorkloadSummary()" style="display:none"><i class="bi bi-download"></i> 导出本批次汇总表</button>
+        </div>
       </div>
-      <div id="wlProjectFilter" class="mb-3"></div>
+      <div id="wlBatchFilter" class="mb-3"></div>
       <div id="wlBatchCards" class="row g-3 mb-3"></div>
       <div id="wlEvaluatorBar" class="mb-3"></div>
       <div id="wlProjects"></div>
@@ -524,7 +527,7 @@ let currentProjectId=null, uploadingCategory='', editingUserId=null, costResult=
 let costProjectStatus={};
 let currentAssignSessionId=null, currentSessionAssignments=[];
 let openBatches=null;
-let wlSelectedProjectId='all', wlCurrentData=null;
+let wlCurrentData=null;
 
 document.addEventListener('DOMContentLoaded',()=>{
   const saved=localStorage.getItem('currentUser');
@@ -1410,18 +1413,26 @@ function exportTableToCSV(){
 }
 
 // ==================== 评估汇总（管理员/研发）====================
+let wlSelectedSessionId=null;
 function renderWorkloadSummary(){
-  wlSelectedProjectId='all'; wlCurrentData=null;
+  wlSelectedSessionId=null; wlCurrentData=null;
   const nameEl=document.getElementById('wlSessionName'); if(nameEl) nameEl.textContent='';
-  if((sessions||[]).length){loadWorkloadSummary(sessions[0].id);}
+  document.getElementById('wlExportBtn').style.display='none';
+  const sorted=(sessions||[]).slice().sort((a,b)=>b.id-a.id); // 最近创建的批次在前（含进行中）
+  if(sorted.length){selectWlSession(sorted[0].id);}
   else{clearWorkloadSummary();}
 }
 function clearWorkloadSummary(){
-  document.getElementById('wlProjectFilter').innerHTML='';
+  document.getElementById('wlBatchFilter').innerHTML='';
   document.getElementById('wlBatchCards').innerHTML='';
   document.getElementById('wlEvaluatorBar').innerHTML='';
   document.getElementById('wlProjects').innerHTML='';
   document.getElementById('wlEmpty').style.display='block';
+  document.getElementById('wlExportBtn').style.display='none';
+}
+async function selectWlSession(sid){
+  wlSelectedSessionId=String(sid);
+  await loadWorkloadSummary(sid);
 }
 async function loadWorkloadSummary(sid){
   if(!sid){clearWorkloadSummary();return;}
@@ -1432,11 +1443,31 @@ async function loadWorkloadSummary(sid){
     wlCurrentData=data;
     const nameEl=document.getElementById('wlSessionName'); if(nameEl) nameEl.textContent='批次：'+(data.session_name||('批次'+data.session_id));
     document.getElementById('wlEmpty').style.display='none';
+    document.getElementById('wlExportBtn').style.display='inline-block';
     renderWorkloadCards(data);
     renderEvaluatorBar(data);
-    renderProjectFilter(data);
+    renderBatchFilter();
     renderWorkloadProjectTable(data);
   }catch(e){alert('加载出错: '+e.message);}
+}
+function renderBatchFilter(){
+  const cont=document.getElementById('wlBatchFilter'); if(!cont) return;
+  const sorted=(sessions||[]).slice().sort((a,b)=>b.id-a.id);
+  if(!sorted.length){cont.innerHTML=''; return;}
+  const statusMap={pending:['待启动','bg-secondary'],in_progress:['评审中','bg-warning text-dark'],completed:['已归档','bg-success']};
+  const chips=sorted.map(s=>{
+    const selected=String(s.id)===wlSelectedSessionId;
+    const st=statusMap[s.status]||['未知','bg-light'];
+    const baseCls=selected?'btn-primary':(s.status==='in_progress'?'btn-outline-warning':'btn-outline-secondary');
+    const name=esc(s.name||('批次'+s.id));
+    const badge='<span class="position-absolute top-0 start-100 translate-middle badge rounded-pill '+st[1]+'">'+st[0]+'</span>';
+    return '<button type="button" class="btn btn-sm position-relative '+baseCls+'" title="'+name+'" onclick="selectWlSession('+s.id+')">'+name+badge+'</button>';
+  });
+  cont.innerHTML='<div class="d-flex flex-wrap gap-2 align-items-center"><span class="text-muted small me-1">快速过滤批次:</span>'+chips.join('')+'</div>';
+}
+function exportWorkloadSummary(){
+  if(!wlSelectedSessionId){alert('请先选择一个批次');return;}
+  window.location.href=API+'/sessions/'+wlSelectedSessionId+'/workload-summary/export?token='+encodeURIComponent(localStorage.getItem('token'));
 }
 function renderWorkloadCards(d){
   const completion=d.batch_work_item_count>0?Math.round(d.batch_evaluated_count/d.batch_work_item_count*100):0;
@@ -1460,36 +1491,9 @@ function renderEvaluatorBar(d){
       return '<div class="col-md-4 col-lg-3"><div class="border rounded p-2"><div class="d-flex justify-content-between"><span>专家'+ev.slot+' · '+esc(ev.user_name||'')+'</span><span class="badge '+color+'">'+pct+'%</span></div><div class="small text-muted">已评 '+ev.projects_submitted+' / '+ev.projects_assigned+' 个项目</div></div></div>';
     }).join('')+'</div></div></div>';
 }
-function renderProjectFilter(d){
-  const cont=document.getElementById('wlProjectFilter'); if(!cont) return;
-  const projects=d.projects||[];
-  if(!projects.length){cont.innerHTML=''; return;}
-  const allActive=wlSelectedProjectId==='all';
-  const chips=['<button type="button" class="btn btn-sm '+(allActive?'btn-primary':'btn-outline-primary')+' wl-proj-chip" onclick="selectWlProject(\'all\')">全部</button>'];
-  projects.forEach((p,idx)=>{
-    const num=String(idx+1).padStart(2,'0');
-    const hasEval=p.evaluated_count>0;
-    const selected=String(p.project_id)===wlSelectedProjectId;
-    let baseCls='btn btn-sm position-relative wl-proj-chip ';
-    if(selected) baseCls+=(hasEval?'btn-success':'btn-secondary');
-    else baseCls+=(hasEval?'btn-outline-success':'btn-outline-secondary');
-    const badge=hasEval?'<span class="position-absolute top-0 start-100 translate-middle p-1 bg-success border border-light rounded-circle"><span class="visually-hidden">已提交</span></span>':'';
-    const title=(p.project_name||('项目'+p.project_id))+(hasEval?'（已提交评估）':'（未提交评估）');
-    chips.push('<button type="button" class="'+baseCls+'" title="'+esc(title)+'" onclick="selectWlProject('+p.project_id+')">'+num+badge+'</button>');
-  });
-  cont.innerHTML='<div class="d-flex flex-wrap gap-2 align-items-center">'+
-    '<span class="text-muted small me-1">快速过滤项目:</span>'+chips.join('')+
-  '</div>';
-}
-function selectWlProject(pid){
-  wlSelectedProjectId=String(pid);
-  if(!wlCurrentData) return;
-  renderProjectFilter(wlCurrentData);
-  renderWorkloadProjectTable(wlCurrentData);
-}
 function fmtWlMoney(n){const v=Number(n);return (isNaN(v)||n==null)?'¥0':'¥'+v.toLocaleString();}
 function renderWorkloadProjectTable(d){
-  const list=wlSelectedProjectId==='all'?(d.projects||[]):(d.projects||[]).filter(p=>String(p.project_id)===wlSelectedProjectId);
+  const list=(d.projects||[]);
   if(!list.length){document.getElementById('wlProjects').innerHTML='<div class="text-muted text-center py-4">该批次暂无项目。</div>';return;}
   const cols=[
     {k:'idx',label:'序号'},{k:'project_name',label:'项目名称'},{k:'biz_department',label:'项目承建部门'},

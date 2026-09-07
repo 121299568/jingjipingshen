@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const archiver = require('archiver');
 const rateLimit = require('express-rate-limit');
+const XLSX = require('xlsx');
 
 const config = require('./src/config');
 const db = require('./src/db');
@@ -1126,11 +1127,11 @@ app.get('/api/projects/:id/cost', auth(), (req, res) => {
 });
 
 // ==================== 管理员：批次工作量评估汇总 ====================
-app.get('/api/sessions/:id/workload-summary', auth(['admin', 'rd']), (req, res) => {
-  const sid = parseInt(req.params.id);
+// 构建某批次的 5 人专家评估汇总（GET 与导出共用）
+function buildWorkloadSummary(sid, user) {
   const session = db.store.reviewSessions.find(s => s.id === sid);
-  if (!session) return res.status(404).json({ error: '批次不存在' });
-  const projects = db.filterByDept('projects', req.user).filter(p => p.session_id === sid);
+  if (!session) return null;
+  const projects = db.filterByDept('projects', user).filter(p => p.session_id === sid);
   const evaluators = (db.store.sessionAssignments || [])
     .filter(a => a.session_id === sid && (a.user_role === 'expert' || a.user_role === 'accountant'))
     .sort((a, b) => a.id - b.id).slice(0, 5)
@@ -1166,10 +1167,68 @@ app.get('/api/sessions/:id/workload-summary', auth(['admin', 'rd']), (req, res) 
   const batch_total_adjusted_cost = Math.round(projectSummaries.reduce((s, p) => s + p.total_adjusted_cost, 0) * 100) / 100;
   const batch_work_item_count = projectSummaries.reduce((s, p) => s + p.work_item_count, 0);
   const batch_evaluated_count = projectSummaries.reduce((s, p) => s + p.evaluated_count, 0);
-  res.json({
+  return {
     session_id: sid, session_name: session.name, evaluators, projects: projectSummaries,
     batch_total_adjusted_cost, batch_work_item_count, batch_evaluated_count, evaluator_progress: evaluatorProgress
+  };
+}
+
+app.get('/api/sessions/:id/workload-summary', auth(['admin', 'rd']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const data = buildWorkloadSummary(sid, req.user);
+  if (!data) return res.status(404).json({ error: '批次不存在' });
+  res.json(data);
+});
+
+// 导出某批次「项目经济评审结果汇总表」为 xlsx（与前端 21 列一致，含合计行）
+app.get('/api/sessions/:id/workload-summary/export', auth(['admin', 'rd']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const data = buildWorkloadSummary(sid, req.user);
+  if (!data) return res.status(404).json({ error: '批次不存在' });
+  const headers = ['序号', '项目名称', '项目承建部门', '项目类型', '合同额', '项目总成本估算',
+    '项目估算利润率(%)', '长期职工成本估算', '中实职工成本估算', '华兆职工成本估算', '人员外包估算',
+    '专业分包估算', '分包占比(%)', '采购估算', '差旅费估算', '第三方测试估算', '知识产权估算',
+    '是否属于数字化', '业务方向', '业务子方向', '产品方向'];
+  const moneyKeys = ['contract_amount', 'total_cost', 'long_term_cost', 'zhongshi_cost', 'huazhao_cost',
+    'outsourcing_cost', 'subcontract_cost', 'procurement_cost', 'travel_cost', 'third_party_test_cost', 'ip_cost'];
+  const totals = {}; moneyKeys.forEach(k => totals[k] = 0);
+  const rows = (data.projects || []).map((p, idx) => {
+    const cs = p.cost_summary || {};
+    const tc = Number(cs.total_cost) || 0, sub = Number(cs.subcontract_cost) || 0;
+    const row = {
+      idx: idx + 1, project_name: p.project_name, biz_department: p.biz_department, project_type: p.project_type,
+      contract_amount: Number(p.contract_amount) || 0, total_cost: tc,
+      profit_rate: cs.profit_rate != null ? Math.round(Number(cs.profit_rate) * 100 * 100) / 100 : null,
+      long_term_cost: Number(cs.long_term_cost) || 0, zhongshi_cost: Number(cs.zhongshi_cost) || 0,
+      huazhao_cost: Number(cs.huazhao_cost) || 0, outsourcing_cost: Number(cs.outsourcing_cost) || 0,
+      subcontract_cost: sub, subcontract_ratio: tc > 0 ? Math.round(sub / tc * 100 * 100) / 100 : null,
+      procurement_cost: Number(cs.procurement_cost) || 0, travel_cost: Number(cs.travel_cost) || 0,
+      third_party_test_cost: Number(cs.third_party_test_cost) || 0, ip_cost: Number(cs.ip_cost) || 0,
+      is_digital: p.is_digital ? '是' : '否', business_direction: p.business_direction || '',
+      business_sub_direction: p.business_sub_direction || '', product_direction: p.product_direction || ''
+    };
+    moneyKeys.forEach(k => totals[k] += Number(row[k]) || 0);
+    return [row.idx, row.project_name, row.biz_department, row.project_type, row.contract_amount, row.total_cost,
+      row.profit_rate, row.long_term_cost, row.zhongshi_cost, row.huazhao_cost, row.outsourcing_cost,
+      row.subcontract_cost, row.subcontract_ratio, row.procurement_cost, row.travel_cost,
+      row.third_party_test_cost, row.ip_cost, row.is_digital, row.business_direction,
+      row.business_sub_direction, row.product_direction];
   });
+  const totalRow = ['', '合计', '', '', totals.contract_amount, totals.total_cost, null,
+    totals.long_term_cost, totals.zhongshi_cost, totals.huazhao_cost, totals.outsourcing_cost,
+    totals.subcontract_cost, totals.total_cost > 0 ? Math.round(totals.subcontract_cost / totals.total_cost * 100 * 100) / 100 : null,
+    totals.procurement_cost, totals.travel_cost, totals.third_party_test_cost, totals.ip_cost, '', '', '', ''];
+  const aoa = [headers, ...rows, totalRow];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wscols = headers.map((h, i) => ({ wch: i === 1 ? 28 : (i === 18 || i === 19 || i === 20 ? 16 : 12) }));
+  ws['!cols'] = wscols;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '项目经济评审结果汇总表');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const fname = `批次${sid}_项目经济评审结果汇总表_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="batch_${sid}_summary.xlsx"; filename*=UTF-8''${encodeURIComponent(fname)}`);
+  res.send(buf);
 });
 
 // ==================== 统计分析 ====================
