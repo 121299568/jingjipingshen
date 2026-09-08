@@ -759,6 +759,19 @@ function workReportDefaultText() {
     .filter(p => !/^表\d+/.test(p.trim()))
     .join('\n\n');
 }
+
+// 动态生成工作汇报标题/日期（按当前时间）
+function getWorkReportTitleDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  return {
+    title: `${year}年年终项目经济评审工作汇报`,
+    department: '研发中心',
+    date: `（${year}年${month}月${day}日）`
+  };
+}
 // 依据系统真实数据计算的基础数字
 function computeWorkReportStats() {
   const projects = db.store.projects || [];
@@ -891,8 +904,8 @@ function buildWorkReportTables() {
   function profitTable(index, caption, dimKeys, aggMap) {
     const lead = '类别\n' + (index === 2 ? '部门' : '项目类型');
     const head = [
-      [{ t: lead, r: 2 }, { t: '合同额（万元）', c: 1 }, { t: '估算总成本（万元）', c: 2 }, { t: '利润率', c: 2 }],
-      ['', '', '评审前', '评审后', '评审前', '评审后']
+      [{ t: lead, r: 2 }, { t: '合同额（万元）', r: 2 }, { t: '估算总成本（万元）', c: 2 }, { t: '利润率', c: 2 }],
+      ['评审前', '评审后', '评审前', '评审后']
     ];
     const rows = dimKeys.map(k => {
       const a = aggMap[k];
@@ -908,7 +921,7 @@ function buildWorkReportTables() {
   {
     const head = [
       [{ t: '类别', r: 2 }, { t: '公司总体', c: 2 }, { t: '成本占比', c: 2 }],
-      ['', '评审前', '评审后', '评审前', '评审后']
+      ['评审前', '评审后', '评审前', '评审后']
     ];
     const rows = [['合同额', wan(totContract), wan(totContract), '', '']];
     COST_CATS.forEach(cat => {
@@ -926,7 +939,7 @@ function buildWorkReportTables() {
     groups.push({ label: '公司总体', subs: ['评审前', '评审后'] });
     const head = [
       [{ t: '部门\n类别', r: 2 }, ...groups.map(g => ({ t: g.label, c: 2 }))],
-      ['', ...groups.flatMap(g => ['评审前', '评审后'])]
+      [...groups.flatMap(g => ['评审前', '评审后'])]
     ];
     const rows = [['合同额', ...depts.map(d => [wan(byDept[d].contract), wan(byDept[d].contract)]).flat(), wan(totContract), wan(totContract)]];
     COST_CATS.forEach(cat => {
@@ -945,7 +958,7 @@ function buildWorkReportTables() {
     const groups = types.map(t => ({ label: t, subs: ['评审前', '评审后'] }));
     const head = [
       [{ t: '部门', r: 2 }, ...groups.map(g => ({ t: g.label, c: 2 }))],
-      ['', ...groups.flatMap(g => ['评审前', '评审后'])]
+      [...groups.flatMap(g => ['评审前', '评审后'])]
     ];
     const rows = depts.map(d => {
       const row = [d];
@@ -967,7 +980,7 @@ function buildWorkReportTables() {
     groups.push({ label: '公司总体', subs: ['评审前', '评审后'] });
     const head = [
       [{ t: '项目类型\n费用类别', r: 2 }, ...groups.map(g => ({ t: g.label, c: 2 }))],
-      ['', ...groups.flatMap(g => ['评审前', '评审后'])]
+      [...groups.flatMap(g => ['评审前', '评审后'])]
     ];
     const rows = [['合同额', ...types.map(t => [wan(byType[t].contract), wan(byType[t].contract)]).flat(), wan(totContract), wan(totContract)]];
     COST_CATS.forEach(cat => {
@@ -994,10 +1007,11 @@ app.get('/api/work-report', auth(), (req, res) => {
       else header = String(saved);
     } catch (e) { header = String(saved); }
   }
+  const meta = getWorkReportTitleDate();
   res.json({
-    title: workReport.title,
-    department: workReport.department,
-    date: workReport.date,
+    title: meta.title,
+    department: meta.department,
+    date: meta.date,
     stats: computeWorkReportStats(),
     tables: buildWorkReportTables(),
     header, footer,
@@ -1753,8 +1767,26 @@ function generateSummaryReport(stats, includeWorkReport) {
     sessions.map(s => '<tr><td>' + esc(s.id) + '</td><td>' + esc(s.name || s.session_name || '-') + '</td><td>' + esc(s.status) + '</td><td>' + projects.filter(p => p.session_id === s.id).length + '</td></tr>').join('') +
     '</table>';
   if (includeWorkReport) {
+    const meta = getWorkReportTitleDate();
+    const saved = getSetting('work_report_text');
+    let header = '', footer = '';
+    if (saved != null) {
+      try {
+        const o = JSON.parse(saved);
+        if (o && typeof o === 'object') { header = o.header || ''; footer = o.footer || ''; }
+      } catch (e) {}
+    }
+    const wr = {
+      title: meta.title,
+      department: meta.department,
+      date: meta.date,
+      header,
+      footer,
+      tables: buildWorkReportTables(),
+      stats: computeWorkReportStats()
+    };
     html += '<div style="margin-top:40px;border-top:2px dashed #ccc;padding-top:20px">' +
-      renderWorkReportHtml(workReport) + '</div>';
+      renderWorkReportHtml(wr) + '</div>';
   }
   html += '</body></html>';
   return html;
@@ -1785,39 +1817,51 @@ function generateExpertReport(stats) {
     '</table></body></html>';
 }
 
-// 将年终工作汇报（文字 + 7 张表）渲染为 HTML，按原文顺序把「表N 标题」与对应表格交错插入。
+// 将年终工作汇报（文字 + 7 张表）渲染为 HTML
 function renderWorkReportHtml(wr) {
   if (!wr || !wr.title) return '';
   const tablesByIndex = {};
   (wr.tables || []).forEach(t => { if (t && t.index != null) tablesByIndex[t.index] = t; });
-  let html = '<h2>年终工作汇报（' + esc(wr.title) + '）</h2>';
+  let html = '<h2>' + esc(wr.title) + '</h2>';
   html += '<p style="color:#666">' + esc(wr.department || '') + ' ' + esc(wr.date || '') + '</p>';
-  const cls = (wr.paragraphs || []).find(p => /商密/.test(p));
-  if (cls) html += '<p style="color:#c00;font-size:12px">密级：' + esc(cls) + '</p>';
+  if (wr.header && wr.header.trim()) {
+    html += '<div style="line-height:1.8;margin:8px 0;white-space:pre-wrap">' + esc(wr.header) + '</div>';
+  }
   html += '<hr>';
-  (wr.paragraphs || []).forEach(p => {
-    if (/商密/.test(p)) return;
-    if (p === wr.title || p === wr.department || p === wr.date) return;
-    const m = p.trim().match(/^表(\d+)/);
-    if (m) {
-      const idx = parseInt(m[1], 10);
-      html += '<h3>' + esc(p.trim()) + '</h3>';
-      if (tablesByIndex[idx]) { html += renderWorkReportTable(tablesByIndex[idx]); delete tablesByIndex[idx]; }
-    } else if (p.trim()) {
-      html += '<p style="line-height:1.8;margin:8px 0">' + esc(p) + '</p>';
-    }
+  Object.keys(tablesByIndex).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach(k => {
+    const t = tablesByIndex[k];
+    html += '<h3>' + esc(t.caption || ('表' + k)) + '</h3>';
+    html += renderWorkReportTable(t);
   });
-  // 兜底：未被段落引用到的表也补渲染
-  Object.keys(tablesByIndex).forEach(k => { html += '<h3>表' + esc(k) + '</h3>' + renderWorkReportTable(tablesByIndex[k]); });
+  if (wr.footer && wr.footer.trim()) {
+    html += '<hr><div style="line-height:1.8;margin:8px 0;white-space:pre-wrap">' + esc(wr.footer) + '</div>';
+  }
   return html;
 }
 function renderWorkReportTable(t) {
   if (!t || !Array.isArray(t.rows) || !t.rows.length) return '';
-  let h = '<table class="wr-table"><thead><tr>';
-  (t.rows[0] || []).forEach(c => h += '<th>' + esc(String(c == null ? '' : c).split('\n').join('<br>')) + '</th>');
-  h += '</tr></thead><tbody>';
-  t.rows.slice(1).forEach(row => {
-    h += '<tr>' + (row || []).map(c => '<td>' + esc(String(c == null ? '' : c).split('\n').join('<br>')) + '</td>').join('') + '</tr>';
+  const renderCell = s => esc(String(s == null ? '' : s)).split('\n').join('<br>');
+  const norm = c => typeof c === 'string' ? { t: c } : c;
+  let h = '<table class="wr-table"><thead>';
+  // 优先使用 head 数组（支持 rowspan/colspan），否则退化为 rows[0] 作表头
+  if (Array.isArray(t.head) && t.head.length) {
+    t.head.forEach(row => {
+      h += '<tr>';
+      (row || []).forEach(c => {
+        const cc = norm(c);
+        const attr = (cc.r > 1 ? ' rowspan="' + cc.r + '"' : '') + (cc.c > 1 ? ' colspan="' + cc.c + '"' : '');
+        h += '<th' + attr + '>' + renderCell(cc.t) + '</th>';
+      });
+      h += '</tr>';
+    });
+  } else {
+    h += '<tr>';
+    (t.rows[0] || []).forEach(c => h += '<th>' + renderCell(c) + '</th>');
+    h += '</tr>';
+  }
+  h += '</thead><tbody>';
+  t.rows.forEach(row => {
+    h += '<tr>' + (row || []).map(c => '<td>' + renderCell(c) + '</td>').join('') + '</tr>';
   });
   h += '</tbody></table>';
   return h;

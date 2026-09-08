@@ -561,7 +561,7 @@ function showMainApp(){
   document.getElementById('currentUserDisplay').textContent=currentUser.username+' ('+getRoleName(currentUser.role)+')'+(currentUser.business_dept?' ['+currentUser.business_dept+']':'');
   // 评估汇总页仅管理员/研发可见
   const navWorkload=document.getElementById('nav-workload-summary');
-  if(navWorkload)navWorkload.style.display=(currentUser.role==='admin'||currentUser.role==='rd')?'block':'none';
+  if(navWorkload)navWorkload.style.display=(currentUser.role==='admin'||currentUser.role==='rd')?'flex':'none';
   // 用户管理仅管理员可见
   const navUsers=document.getElementById('nav-users');
   if(navUsers)navUsers.style.display=(currentUser.role==='admin')?'flex':'none';
@@ -1604,15 +1604,16 @@ async function saveWorkReportText(){
 function escHtml(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function renderWorkReportTable(t){
   if(!t||!Array.isArray(t.rows)||!t.rows.length)return '';
+  const renderCell=s=>escHtml(String(s==null?'':s)).split('\n').join('<br>');
   const norm=c=>typeof c==='string'?{t:c}:c;
   let h='<table class="wr-tbl"><thead>';
   (t.head||[]).forEach(row=>{
     h+='<tr>';
-    (row||[]).forEach(c=>{const cc=norm(c);const attr=(cc.r>1?' rowspan="'+cc.r+'"':'')+(cc.c>1?' colspan="'+cc.c+'"':'');h+='<th'+attr+'>'+escHtml(String(cc.t==null?'':cc.t).split('\n').join('<br>'))+'</th>';});
+    (row||[]).forEach(c=>{const cc=norm(c);const attr=(cc.r>1?' rowspan="'+cc.r+'"':'')+(cc.c>1?' colspan="'+cc.c+'"':'');h+='<th'+attr+'>'+renderCell(cc.t)+'</th>';});
     h+='</tr>';
   });
   h+='</thead><tbody>';
-  t.rows.forEach(row=>{h+='<tr>'+(row||[]).map(c=>'<td>'+escHtml(String(c==null?'':c).split('\n').join('<br>'))+'</td>').join('')+'</tr>';});
+  t.rows.forEach(row=>{h+='<tr>'+(row||[]).map(c=>'<td>'+renderCell(c)+'</td>').join('')+'</tr>';});
   h+='</tbody></table>';return h;
 }
 function renderWorkReportHtml(wr){
