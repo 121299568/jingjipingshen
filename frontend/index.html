@@ -15,8 +15,9 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 .login-card{background:#fff;border-radius:16px;padding:40px;width:400px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
 .sidebar{position:fixed;left:0;top:0;bottom:0;width:220px;background:var(--dark);color:#fff;z-index:100;overflow-y:auto}
 .sidebar-brand{padding:20px 16px;font-size:16px;font-weight:bold;border-bottom:1px solid rgba(255,255,255,.1)}
-.nav-item{padding:12px 20px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:14px}
-.nav-item:hover,.nav-item.active{background:rgba(255,255,255,.1)}
+.nav-item{padding:12px 20px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:14px;border-left:3px solid transparent;transition:background .15s,border-color .15s}
+.nav-item:hover{background:rgba(255,255,255,.06)}
+.nav-item.active{background:rgba(102,126,234,.18);border-left-color:#667eea;font-weight:600}
 .main{margin-left:220px;padding:20px 24px}
 .page{display:none}.page.active{display:block}
 .card-custom{border:none;box-shadow:0 2px 12px rgba(0,0,0,.08);border-radius:12px}
@@ -108,7 +109,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div class="nav-item" data-page="cost-analysis"><i class="bi bi-graph-down-arrow"></i>工作量评估</div>
     <div class="nav-item" data-page="stats"><i class="bi bi-bar-chart"></i>统计分析</div>
     <div class="nav-item" data-page="workload-summary" id="nav-workload-summary"><i class="bi bi-clipboard-data"></i>评估汇总</div>
-    <div class="nav-item" data-page="users"><i class="bi bi-people"></i>用户管理</div>
+    <div class="nav-item" data-page="users" id="nav-users"><i class="bi bi-people"></i>用户管理</div>
     <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>退出登录</div>
   </aside>
 
@@ -123,16 +124,14 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 
     <!-- DASHBOARD -->
     <div id="page-dashboard" class="page active">
-      <div class="row g-3 mb-4">
-        <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#667eea,#764ba2)"><div class="stat-label">评审批次</div><div class="stat-num" id="s-sessions">0</div></div></div>
-        <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#11998e,#38ef7d)"><div class="stat-label">项目总数</div><div class="stat-num" id="s-projects">0</div></div></div>
-        <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#eb3349,#f45c43)"><div class="stat-label">缺少估算表</div><div class="stat-num" id="s-missing">0</div></div></div>
-        <div class="col-md-3"><div class="stat-card" style="background:linear-gradient(135deg,#fc4a1a,#f7b733)"><div class="stat-label">待评估项目</div><div class="stat-num" id="s-pending">0</div></div></div>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="mb-0">工作台<span class="text-muted small ms-2" id="dashGreeting"></span></h6>
+        <span class="text-muted small" id="dashRoleTip"></span>
       </div>
-      <div class="row g-3">
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white">资料上传进度</div><div class="card-body"><canvas id="uploadProgressChart"></canvas></div></div></div>
-        <div class="col-md-6"><div class="card card-custom"><div class="card-header bg-white">近期活动</div><div class="card-body" id="recentActivity"></div></div></div>
-      </div>
+      <!-- 4 张统计卡（按角色动态切换） -->
+      <div class="row g-3 mb-4" id="dashCards"></div>
+      <!-- 角色专属面板（评审人/事业部/研发） -->
+      <div class="row g-3" id="dashRolePanels"></div>
     </div>
 
     <!-- SESSIONS -->
@@ -348,7 +347,9 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
                 </div>
                 <div class="tab-pane fade" id="tab-groups">
                   <div class="p-3">
-                    <button class="btn btn-sm btn-primary mb-3" onclick="addUserGroupInline()"><i class="bi bi-plus"></i> 新建分组</button>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                      <span class="text-muted small">分组的新建/编辑请使用页面右上角「用户分组」按钮</span>
+                    </div>
                     <table class="table table-hover"><thead><tr><th>ID</th><th>分组名称</th><th>描述</th><th>成员数</th><th>操作</th></tr></thead>
                     <tbody id="groupTbody"></tbody></table>
                   </div>
@@ -450,7 +451,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
       <div class="mb-3"><label class="form-label">用户名</label><input type="text" class="form-control" id="newUsername" required></div>
       <div class="mb-3"><label class="form-label">姓名</label><input type="text" class="form-control" id="newRealName" required></div>
       <div class="mb-3"><label class="form-label">密码</label><input type="text" class="form-control" id="newPassword" value="123456"></div>
-      <div class="mb-3"><label class="form-label">角色</label><select class="form-select" id="newRole"><option>admin</option><option>biz</option><option>rd</option><option>expert</option><option>accountant</option></select></div>
+      <div class="mb-3"><label class="form-label">角色</label><select class="form-select" id="newRole"><option value="admin">管理员</option><option value="rd">研发中心</option><option value="biz">事业部</option><option value="expert">评审专家</option><option value="accountant">会计师事务所</option></select></div>
       <div class="mb-3"><label class="form-label">部门</label><input type="text" class="form-control" id="newDept"></div>
       <div class="mb-3"><label class="form-label">事业部</label><select class="form-select" id="newBizDept"><option value="">（不适用）</option><option>电网事业部</option><option>系统集成事业部</option><option>电力气象事业部</option><option>人工智能事业部</option><option>管理事业部</option><option>能源事业部</option></select></div>
       <div class="mb-3"><label class="form-label">用户分组</label><select class="form-select" id="newUserGroup"><option value="">（无）</option></select></div>
@@ -465,7 +466,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div class="modal-body">
       <input type="hidden" id="editUserId">
       <div class="mb-3"><label class="form-label">姓名</label><input type="text" class="form-control" id="editRealName" required></div>
-      <div class="mb-3"><label class="form-label">角色</label><select class="form-select" id="editRole"><option>admin</option><option>biz</option><option>rd</option><option>expert</option><option>accountant</option></select></div>
+      <div class="mb-3"><label class="form-label">角色</label><select class="form-select" id="editRole"><option value="admin">管理员</option><option value="rd">研发中心</option><option value="biz">事业部</option><option value="expert">评审专家</option><option value="accountant">会计师事务所</option></select></div>
       <div class="mb-3"><label class="form-label">部门</label><input type="text" class="form-control" id="editDept"></div>
       <div class="mb-3"><label class="form-label">事业部</label><select class="form-select" id="editBizDept"><option value="">（不适用）</option><option>电网事业部</option><option>系统集成事业部</option><option>电力气象事业部</option><option>人工智能事业部</option><option>管理事业部</option><option>能源事业部</option></select></div>
       <div class="mb-3"><label class="form-label">用户分组</label><select class="form-select" id="editUserGroup"><option value="">（无）</option></select></div>
@@ -561,6 +562,9 @@ function showMainApp(){
   // 评估汇总页仅管理员/研发可见
   const navWorkload=document.getElementById('nav-workload-summary');
   if(navWorkload)navWorkload.style.display=(currentUser.role==='admin'||currentUser.role==='rd')?'block':'none';
+  // 用户管理仅管理员可见
+  const navUsers=document.getElementById('nav-users');
+  if(navUsers)navUsers.style.display=(currentUser.role==='admin')?'flex':'none';
   loadAll();
 }
 function doLogout(){localStorage.clear();location.reload();}
@@ -577,6 +581,9 @@ function bindNav(){
 }
 function toggleSidebar(){document.querySelector('.sidebar')?.classList.toggle('open');document.getElementById('sidebarBackdrop')?.classList.toggle('show');}
 function navigateTo(page){
+  // 权限闸门：用户管理仅管理员；评估汇总仅管理员/研发
+  if(page==='users' && (!currentUser || currentUser.role!=='admin')){alert('仅管理员可访问用户管理');return;}
+  if(page==='workload-summary' && (!currentUser || (currentUser.role!=='admin' && currentUser.role!=='rd'))){alert('仅管理员/研发可访问评估汇总');return;}
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
@@ -641,33 +648,163 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
   }catch(err){alert('登录失败: 无法连接服务器 ('+err.message+')，请确认后端已启动');}
 });
 
-// DASHBOARD
+// DASHBOARD（按角色展示）
 async function renderDashboard(){
+  if(!currentUser)return;
+  const role=currentUser.role;
+  const greetEl=document.getElementById('dashGreeting');
+  const tipEl=document.getElementById('dashRoleTip');
+  const roleName=getRoleName(role);
+  if(greetEl)greetEl.textContent='欢迎，'+esc(currentUser.real_name||currentUser.username)+'（'+roleName+'）';
+  if(tipEl){
+    const tips={
+      admin:'全局视角：所有批次、所有项目、所有用户',
+      rd:'研发中心视角：批次管理、预审、分配、发起确认、归档',
+      biz:'事业部视角：仅本事业部项目；请及时上传资料、确认成果',
+      expert:'评审专家视角：仅看到分配到批次的项目',
+      accountant:'会计师事务所视角：参与评估与校核'
+    };
+    tipEl.textContent=tips[role]||'';
+  }
   try{
     const r=await fetch(API+'/stats/summary',{headers:authH()});
-    const s=await r.json();
-    document.getElementById('s-sessions').textContent=s.total_sessions||0;
-    document.getElementById('s-projects').textContent=s.total_projects||0;
-    const missingEst=projects.filter(p=>!files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
-    document.getElementById('s-missing').textContent=missingEst;
-    document.getElementById('s-missing').className='stat-num';
-    document.getElementById('s-pending').textContent=s.pending_tasks?.length||0;
-    document.getElementById('recentActivity').innerHTML=(s.recent_activity?.length?s.recent_activity.map(a=>{
-      const t=a.at?new Date(a.at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
-      return '<div class="small mb-2"><div class="text-muted" style="font-size:11px">'+esc(t)+'</div><div><i class="bi bi-circle-fill text-primary me-1" style="font-size:6px;vertical-align:middle"></i>'+esc(a.operator_name)+' '+esc(a.action)+'：'+esc(a.remark)+'</div></div>';
-    }).join(''):'<p class="text-muted small">暂无活动</p>');
-    renderUploadProgressChart();
+    const s=await r.json().catch(()=>({}));
+    const isMissingEst=p=>!files.some(f=>f.project_id===p.id&&f.file_category==='estimation');
+    // 角色专属数据由后端在 /stats/summary 中返回
+    const mySessionIds=s.my_session_ids||[];
+    const myEvaluatedProjIds=new Set(s.my_evaluated_project_ids||[]);
+    const myProjects=projects.filter(p=>mySessionIds.includes(p.session_id)||myEvaluatedProjIds.has(p.id));
+    const bizProjects=projects.filter(p=>p.biz_department===(s.biz_dept||currentUser.business_dept));
+    let cards=[],panels=[];
+    if(role==='admin'){
+      const inProgress=(sessions||[]).filter(x=>x.status==='in_progress').length;
+      const missing=projects.filter(isMissingEst).length;
+      const pendingEval=projects.filter(p=>p.status==='reviewing'||p.status==='draft').length;
+      cards=[
+        {label:'评审批次（进行中）',val:inProgress+' / '+(sessions||[]).length,color:'linear-gradient(135deg,#667eea,#764ba2)'},
+        {label:'项目总数',val:(s.total_projects||projects.length),color:'linear-gradient(135deg,#11998e,#38ef7d)'},
+        {label:'缺少估算表',val:missing,color:'linear-gradient(135deg,#eb3349,#f45c43)'},
+        {label:'待预审/待评估',val:pendingEval,color:'linear-gradient(135deg,#fc4a1a,#f7b733)'}
+      ];
+      panels=[
+        {col:'col-md-6',html:renderUploadProgressCard(false)},
+        {col:'col-md-6',html:renderRecentActivityCard(s.recent_activity)}
+      ];
+    }else if(role==='rd'){
+      const inProgress=(sessions||[]).filter(x=>x.status==='in_progress').length;
+      const pendingPre=projects.filter(p=>p.status==='draft'||p.status==='rejected').length;
+      const pendingConfirm=projects.filter(p=>p.status==='reviewing').length;
+      const pendingFinalize=projects.filter(p=>p.status==='pending_confirm'&&p.biz_confirmed).length;
+      cards=[
+        {label:'进行中批次',val:inProgress,color:'linear-gradient(135deg,#667eea,#764ba2)'},
+        {label:'待预审项目',val:pendingPre,color:'linear-gradient(135deg,#11998e,#38ef7d)'},
+        {label:'待发起确认',val:pendingConfirm,color:'linear-gradient(135deg,#3498db,#2980b9)'},
+        {label:'可归档项目',val:pendingFinalize,color:'linear-gradient(135deg,#fc4a1a,#f7b733)'}
+      ];
+      panels=[
+        {col:'col-md-6',html:renderUploadProgressCard(false)},
+        {col:'col-md-6',html:renderRecentActivityCard(s.recent_activity)}
+      ];
+    }else if(role==='biz'){
+      const deptName=currentUser.business_dept||'本事业部';
+      const total=bizProjects.length;
+      const missing=bizProjects.filter(isMissingEst).length;
+      const pendingConfirm=bizProjects.filter(p=>p.status==='pending_confirm').length;
+      const draft=bizProjects.filter(p=>p.status==='draft').length;
+      cards=[
+        {label:deptName+'·项目总数',val:total,color:'linear-gradient(135deg,#667eea,#764ba2)'},
+        {label:'缺估算表',val:missing,color:'linear-gradient(135deg,#eb3349,#f45c43)'},
+        {label:'待事业部确认',val:pendingConfirm,color:'linear-gradient(135deg,#11998e,#38ef7d)'},
+        {label:'草稿待完善',val:draft,color:'linear-gradient(135deg,#fc4a1a,#f7b733)'}
+      ];
+      panels=[
+        {col:'col-md-6',html:renderUploadProgressCard(bizProjects)},
+        {col:'col-md-6',html:renderRecentActivityCard(s.recent_activity)}
+      ];
+    }else if(role==='expert'||role==='accountant'){
+      const assigned=myProjects.length;
+      const todo=myProjects.filter(p=>!myEvaluatedProjIds.has(p.id)).length;
+      const done=myProjects.length-todo;
+      const workItems=s.my_work_item_count||0;
+      cards=[
+        {label:'分配给我的项目',val:assigned,color:'linear-gradient(135deg,#667eea,#764ba2)'},
+        {label:'待我评估',val:todo,color:'linear-gradient(135deg,#eb3349,#f45c43)'},
+        {label:'我已评估',val:done,color:'linear-gradient(135deg,#11998e,#38ef7d)'},
+        {label:'涉及工作项',val:workItems,color:'linear-gradient(135deg,#fc4a1a,#f7b733)'}
+      ];
+      panels=[
+        {col:'col-md-7',html:renderMyAssignedProjectsPanel(myProjects,myEvaluatedProjIds)},
+        {col:'col-md-5',html:renderMyRecentEstimatesPanel(s.my_recent_estimates||[])}
+      ];
+    }else{
+      cards=[
+        {label:'项目总数',val:projects.length,color:'linear-gradient(135deg,#667eea,#764ba2)'},
+        {label:'缺少估算表',val:projects.filter(isMissingEst).length,color:'linear-gradient(135deg,#eb3349,#f45c43)'},
+        {label:'待评估',val:s.pending_tasks?.length||0,color:'linear-gradient(135deg,#fc4a1a,#f7b733)'},
+        {label:'评审批次',val:sessions.length,color:'linear-gradient(135deg,#11998e,#38ef7d)'}
+      ];
+      panels=[
+        {col:'col-md-6',html:renderUploadProgressCard(false)},
+        {col:'col-md-6',html:renderRecentActivityCard(s.recent_activity)}
+      ];
+    }
+    document.getElementById('dashCards').innerHTML=cards.map(c=>
+      '<div class="col-md-3"><div class="stat-card" style="background:'+c.color+'"><div class="stat-label">'+esc(c.label)+'</div><div class="stat-num">'+esc(String(c.val))+'</div></div></div>'
+    ).join('');
+    document.getElementById('dashRolePanels').innerHTML=panels.map(p=>'<div class="'+p.col+'">'+p.html+'</div>').join('');
+    renderUploadProgressChart(role==='biz'?bizProjects:null);
   }catch(e){console.error(e);}
 }
 
-function renderUploadProgressChart(){
+function renderUploadProgressCard(bizOnly){
+  const title=bizOnly?'本事业部资料上传进度':'资料上传进度';
+  return '<div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">'+title+'</h6></div><div class="card-body"><canvas id="uploadProgressChart"></canvas></div></div>';
+}
+function renderRecentActivityCard(items){
+  const list=items||[];
+  const html=list.length?list.map(a=>{
+    const t=a.at?new Date(a.at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+    return '<div class="small mb-2"><div class="text-muted" style="font-size:11px">'+esc(t)+'</div><div><i class="bi bi-circle-fill text-primary me-1" style="font-size:6px;vertical-align:middle"></i>'+esc(a.operator_name)+' '+esc(a.action)+'：'+esc(a.remark)+'</div></div>';
+  }).join(''):'<p class="text-muted small">暂无活动</p>';
+  return '<div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">近期活动</h6></div><div class="card-body" style="max-height:280px;overflow-y:auto">'+html+'</div></div>';
+}
+function renderMyAssignedProjectsPanel(myProjects,evaluatedSet){
+  if(!myProjects.length)return '<div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">我负责的项目</h6></div><div class="card-body text-muted small">暂未分配到任何项目，请等待研发中心在批次中分配评审人员。</div></div>';
+  const rows=myProjects.slice(0,20).map(p=>{
+    const done=evaluatedSet.has(p.id);
+    const sess=(sessions||[]).find(s=>s.id===p.session_id);
+    return '<tr><td>'+esc((sess&&sess.name)||'-')+'</td><td>'+esc(p.project_name||'-')+'</td><td>'+esc(p.biz_department||'-')+'</td><td>'+(done?'<span class="badge bg-success">已评估</span>':'<span class="badge bg-warning text-dark">待评估</span>')+'</td><td><button class="btn btn-sm btn-outline-primary" onclick="goToCost('+p.id+')"><i class="bi bi-pencil-square"></i> 去评估</button></td></tr>';
+  }).join('');
+  return '<div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">我负责的项目（最多展示 20 条）</h6></div><div class="card-body p-0"><table class="table table-hover mb-0"><thead><tr><th>批次</th><th>项目</th><th>承建事业部</th><th>状态</th><th>操作</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+function renderMyRecentEstimatesPanel(recent){
+  if(!recent||!recent.length){
+    return '<div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">我最近的评估</h6></div><div class="card-body text-muted small">尚无评估记录，请进入「工作量评估」开始工作。</div></div>';
+  }
+  const html='<div class="list-group list-group-flush">'+recent.map(e=>{
+    const p=projects.find(x=>x.id===e.project_id);
+    const t=e.updated_at;
+    return '<div class="list-group-item px-0"><div class="d-flex justify-content-between"><div class="small">工作项 #'+(e.work_item_id||'-')+(p?' <span class="text-muted">· '+esc(p.project_name)+'</span>':'')+'</div><div class="text-muted" style="font-size:11px">'+esc(t?new Date(t).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'')+'</div></div><div class="small text-muted">人天：<b>'+esc(String(e.days||0))+'</b>'+(e.comment?' · '+esc(e.comment):'')+'</div></div>';
+  }).join('')+'</div>';
+  return '<div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">我最近的评估</h6></div><div class="card-body" style="max-height:360px;overflow-y:auto">'+html+'</div></div>';
+}
+function goToCost(pid){
+  window.__dashGotoProjectId=pid;
+  navigateTo('cost-analysis');
+  setTimeout(()=>{if(typeof selectCostProject==='function')selectCostProject(pid);},150);
+}
+
+function renderUploadProgressChart(scopeProjects){
   const ctx=document.getElementById('uploadProgressChart');
   if(!ctx)return;
   if(ctx._c)ctx._c.destroy();
   const types=['estimation','feasibility','bid','award','contract','profit','subcontract','tech_spec'];
   const labels=['估算表','可研','招标','中标','合同','利润率','分包','技术规范'];
-  const uploaded=types.map(t=>files.filter(f=>f.file_category===t).length);
-  const total=projects.length||1;
+  const projScope=scopeProjects||projects;
+  const projIds=new Set(projScope.map(p=>p.id));
+  const scopeFiles=files.filter(f=>projIds.has(f.project_id));
+  const uploaded=types.map(t=>scopeFiles.filter(f=>f.file_category===t).length);
+  const total=projScope.length||1;
   ctx._c=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'已上传文件数',data:uploaded,backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#10b981','#f59e0b','#ec4899','#6b7280','#0ea5e9'],borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:total,ticks:{precision:0}}}}});
 }
 
@@ -1495,14 +1632,18 @@ function exportWorkloadSummary(){
 }
 function renderWorkloadCards(d){
   const completion=d.batch_work_item_count>0?Math.round(d.batch_evaluated_count/d.batch_work_item_count*100):0;
+  const reduction=Number(d.batch_total_reduction||0);
+  const reductionLabel=reduction>=0?'批次核减费用总计':'批次超支费用总计';
+  const reductionColor=reduction>=0?'#27ae60':'#e74c3c';
+  const reductionTip='原预估成本 ¥'+Number(d.batch_total_original_cost||0).toLocaleString()+' − 专家评估后预估成本 ¥'+Number(d.batch_total_adjusted_cost||0).toLocaleString();
   const cards=[
-    {label:'批次调整核减费用总计',val:'¥'+Number(d.batch_total_adjusted_cost||0).toLocaleString(),color:'#667eea'},
+    {label:reductionLabel,val:(reduction>=0?'-':'+')+'¥'+Math.abs(reduction).toLocaleString(),color:reductionColor,title:reductionTip},
     {label:'工作项已评估',val:d.batch_evaluated_count+' / '+d.batch_work_item_count,color:'#11998e'},
     {label:'评估完成度',val:completion+'%',color:'#eb3349'},
     {label:'评审人数',val:(d.evaluators||[]).length+' 人',color:'#fc4a1a'}
   ];
   document.getElementById('wlBatchCards').innerHTML=cards.map(c=>
-    '<div class="col-md-3"><div class="card card-custom"><div class="card-body p-3 text-center"><div class="text-muted small">'+c.label+'</div><div class="h5 fw-bold mt-1" style="color:'+c.color+'">'+c.val+'</div></div></div></div>'
+    '<div class="col-md-3"><div class="card card-custom"><div class="card-body p-3 text-center"><div class="text-muted small">'+c.label+'</div><div class="h5 fw-bold mt-1" style="color:'+c.color+'"'+(c.title?' title="'+esc(c.title)+'"':'')+'>'+c.val+'</div></div></div></div>'
   ).join('');
 }
 function renderEvaluatorBar(d){
@@ -1687,17 +1828,6 @@ function createUserGroup(){
     }).catch(e=>alert('创建失败: '+e.message));
 }
 
-function addUserGroupInline(){
-  const name=prompt('请输入分组名称');
-  if(!name)return;
-  fetch(API+'/user-groups',{method:'POST',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({name})})
-    .then(r=>r.json()).then(d=>{
-      if(d.error){alert(d.error);return;}
-      userGroups.push(d);
-      populateUserGroupSelects();
-    }).catch(e=>alert('创建失败: '+e.message));
-}
-
 function deleteUserGroup(groupId){
   if(!confirm('确定删除该分组？组内用户的分组关联将被解除。'))return;
   fetch(API+'/user-groups/'+groupId,{method:'DELETE',headers:authH()})
@@ -1725,13 +1855,22 @@ async function loadUserPermissions(userId){
   }catch(e){}
 }
 
-function saveUserPermissions(){
+async function saveUserPermissions(){
   const userId=document.getElementById('permUserSelect').value;
   if(!userId){alert('请先选择用户');return;}
   const checked=Array.from(document.querySelectorAll('#permCheckboxes input:checked')).map(c=>c.value);
-  fetch(API+'/users/'+userId+'/permissions',{method:'PUT',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({permissions:checked})})
-    .then(r=>r.json()).then(d=>{alert('权限保存成功！');})
-    .catch(e=>alert('保存失败: '+e.message));
+  const btn=event?.target||document.querySelector('#tab-permissions .btn-primary');
+  const origText=btn?btn.innerHTML:'';
+  try{
+    if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>保存中…';}
+    const r=await fetch(API+'/users/'+userId+'/permissions',{method:'PUT',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({permissions:checked})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){alert('保存失败: '+(d.error||('HTTP '+r.status)));return;}
+    alert('权限保存成功！');
+    // 重新加载该用户的权限，刷新勾选状态（确认已落库）
+    await loadUserPermissions(userId);
+  }catch(e){alert('保存失败: '+e.message);}
+  finally{if(btn){btn.disabled=false;btn.innerHTML=origText;}}
 }
 
 // SAVE FUNCTIONS

@@ -363,13 +363,20 @@ app.get('/api/permissions', auth(['admin']), (req, res) => res.json(db.store.use
 app.put('/api/users/:id/permissions', auth(['admin']), (req, res) => {
   const userId = parseInt(req.params.id);
   if (!db.store.users.find(u => u.id === userId)) return res.status(404).json({ error: '用户不存在' });
-  const { permissions } = req.body;
+  const { permissions } = req.body || {};
   if (!Array.isArray(permissions)) return res.status(400).json({ error: '权限必须是数组' });
-  let perm = db.store.userPermissions.find(p => p.user_id === userId);
-  if (perm) perm.permissions = permissions;
-  else db.store.userPermissions.push({ id: db.nextId(db.store.userPermissions), user_id: userId, permissions });
+  // 规范化：去重 + 转为字符串
+  const cleanPerms = Array.from(new Set(permissions.map(p => String(p))));
+  // 整体替换该用户的权限记录（避免引用替换被脏检查忽略）
+  const idx = db.store.userPermissions.findIndex(p => p.user_id === userId);
+  if (idx >= 0) {
+    db.store.userPermissions[idx] = { ...db.store.userPermissions[idx], permissions: cleanPerms };
+  } else {
+    db.store.userPermissions.push({ id: db.nextId(db.store.userPermissions), user_id: userId, permissions: cleanPerms });
+  }
   db.save();
-  res.json(perm);
+  // 返回最新值，便于前端校验落库
+  res.json(db.store.userPermissions.find(p => p.user_id === userId));
 });
 app.get('/api/users/:id/permissions', auth(['admin']), (req, res) => {
   const perm = db.store.userPermissions.find(p => p.user_id === parseInt(req.params.id));
@@ -1244,6 +1251,7 @@ function buildWorkloadSummary(sid, user) {
     return {
       project_id: p.id, project_name: p.project_name, status: p.status,
       contract_amount: Number(p.contract_amount) || 0,
+      internal_estimated_cost: p.internal_estimated_cost != null ? Number(p.internal_estimated_cost) : null,
       biz_department: p.biz_department || '-',
       project_type: p.project_type || '',
       is_digital: p.is_digital || false,
@@ -1261,11 +1269,16 @@ function buildWorkloadSummary(sid, user) {
     return { ...ev, projects_assigned: projCount, projects_submitted: submitted, completion: projCount > 0 ? Math.round(submitted / projCount * 100) / 100 : 0 };
   });
   const batch_total_adjusted_cost = Math.round(projectSummaries.reduce((s, p) => s + p.total_adjusted_cost, 0) * 100) / 100;
+  // 批次原预估成本（汇总表里登记的"内部信息系统填报预估成本"求和）
+  const batch_total_original_cost = Math.round(projectSummaries.reduce((s, p) => s + (Number(p.internal_estimated_cost) || 0), 0) * 100) / 100;
+  // 核减费用 = 原预估成本 - 专家评估完以后的预估成本
+  const batch_total_reduction = Math.round((batch_total_original_cost - batch_total_adjusted_cost) * 100) / 100;
   const batch_work_item_count = projectSummaries.reduce((s, p) => s + p.work_item_count, 0);
   const batch_evaluated_count = projectSummaries.reduce((s, p) => s + p.evaluated_count, 0);
   return {
     session_id: sid, session_name: session.name, evaluators, projects: projectSummaries,
-    batch_total_adjusted_cost, batch_work_item_count, batch_evaluated_count, evaluator_progress: evaluatorProgress
+    batch_total_adjusted_cost, batch_total_original_cost, batch_total_reduction,
+    batch_work_item_count, batch_evaluated_count, evaluator_progress: evaluatorProgress
   };
 }
 
@@ -1526,8 +1539,9 @@ function renderWorkReportTable(t) {
 
 app.get('/api/stats/summary', auth(), (req, res) => {
   const s = db.store;
+  const user = req.user;
   const totalCost = s.projects.reduce((sum, p) => sum + (parseFloat(p.contract_amount) || 0), 0);
-  res.json({
+  const payload = {
     total_sessions: s.reviewSessions.length,
     completed_sessions: s.reviewSessions.filter(x => x.status === 'completed').length,
     pending_sessions: s.reviewSessions.filter(x => x.status === 'pending').length,
@@ -1543,7 +1557,28 @@ app.get('/api/stats/summary', auth(), (req, res) => {
       remark: l.remark || ''
     })),
     pending_tasks: s.projects.filter(p => p.status === 'pending' || p.status === 'reviewing').map(p => p.project_name)
-  });
+  };
+  // 角色专属数据（工作台按角色展示用）
+  if (user.role === 'expert' || user.role === 'accountant') {
+    const mySessIds = (s.sessionAssignments || []).filter(a => a.user_id === user.id).map(a => a.session_id);
+    const myEvalProjIds = Array.from(new Set(s.expertEstimates.filter(e => e.expert_id === user.id).map(e => e.project_id)));
+    const myVisibleProjIds = new Set(s.projects.filter(p => mySessIds.includes(p.session_id) || myEvalProjIds.includes(p.id)).map(p => p.id));
+    payload.my_session_ids = mySessIds;
+    payload.my_evaluated_project_ids = myEvalProjIds;
+    payload.my_visible_project_ids = Array.from(myVisibleProjIds);
+    payload.my_work_item_count = s.workItems.filter(w => myVisibleProjIds.has(w.project_id)).length;
+    payload.my_recent_estimates = s.expertEstimates
+      .filter(e => e.expert_id === user.id)
+      .slice(-10)
+      .reverse()
+      .map(e => ({
+        id: e.id, project_id: e.project_id, work_item_id: e.work_item_id,
+        days: e.days, comment: e.comment, updated_at: e.updated_at || e.created_at || ''
+      }));
+  } else if (user.role === 'biz') {
+    payload.biz_dept = user.business_dept || '';
+  }
+  res.json(payload);
 });
 app.get('/api/stats/cost-structure', auth(), (req, res) => {
   const labels = ['长期职工', '中实职工', '华兆职工', '人员外包', '专业分包', '采购', '差旅'];
