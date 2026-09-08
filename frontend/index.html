@@ -266,7 +266,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
           </div>
           <button class="btn btn-primary btn-sm" onclick="generateReport()"><i class="bi bi-file-earmark-text"></i>生成报告</button>
           <button class="btn btn-success btn-sm" onclick="downloadReport()"><i class="bi bi-download"></i>下载报告</button>
-          <button class="btn btn-outline-secondary btn-sm" onclick="viewWorkReport()"><i class="bi bi-journal-text"></i>年终工作汇报</button>
+          <button class="btn btn-outline-secondary btn-sm" id="btnWorkReport" onclick="viewWorkReport()"><i class="bi bi-journal-text"></i>年终工作汇报</button>
         </div>
       </div>
       <div class="row g-3 mb-4" id="statsOverview">
@@ -567,6 +567,8 @@ function showMainApp(){
   if(navUsers)navUsers.style.display=(currentUser.role==='admin')?'flex':'none';
   // 评审批次页按钮按角色隐藏（与后端接口鉴权一致）
   applySessionsRoleGating();
+  // 年终工作汇报按钮：管理员/研发 或 拥有 view_work_report 权限者可见
+  applyWorkReportGating();
   loadAll();
 }
 function doLogout(){localStorage.clear();location.reload();}
@@ -578,6 +580,14 @@ function applySessionsRoleGating(){
   const b2=document.getElementById('btnNewSession');
   if(b1)b1.style.display=(role==='admin'||role==='rd'||role==='biz')?'inline-block':'none';
   if(b2)b2.style.display=(role==='admin'||role==='rd')?'inline-block':'none';
+}
+// 年终工作汇报按钮显隐：admin/rd 默认可看；也可通过 view_work_report 权限分配给任意账号
+function hasPerm(code){return Array.isArray(currentUser.permissions)&&currentUser.permissions.includes(code);}
+function applyWorkReportGating(){
+  const b=document.getElementById('btnWorkReport');
+  if(!b)return;
+  const can=currentUser.role==='admin'||currentUser.role==='rd'||hasPerm('view_work_report');
+  b.style.display=can?'inline-block':'none';
 }
 function authH(){const t=localStorage.getItem('token');return t?{Authorization:'Bearer '+t}:{};}
 // XSS 转义：所有插入 innerHTML 的用户可控字符串都必须经过它
@@ -605,7 +615,7 @@ function navigateTo(page){
     case'projects':populateSessionSelect();renderProjects();break;
     case'upload':break;
     case'cost-analysis':updateCostSelect();renderCostAnalysis();break;
-    case'stats':loadStatsRich();break;
+    case'stats':applyWorkReportGating();loadStatsRich();break;
     case'workload-summary':renderWorkloadSummary();break;
     case'users':renderUsers();loadUserGroups();loadPermissionOptions();break;
   }
@@ -1542,10 +1552,48 @@ function downloadTemplate(){
   .catch(e=>alert('下载模板失败: '+(e&&e.error||e&&e.message||'未知错误')));
 }
 function viewWorkReport(){
-  fetch(API+'/work-report',{headers:authH()}).then(r=>r.json()).then(wr=>{
-    if(!wr||!wr.title){alert('未找到工作汇报数据');return;}
-    showReportPreview(renderWorkReportHtml(wr));
+  fetch(API+'/work-report',{headers:authH()}).then(r=>r.json()).then(d=>{
+    const st=d.stats||{};
+    const wan=v=>(Number(v||0)/10000).toLocaleString('zh-CN',{maximumFractionDigits:2})+' 万元';
+    const cards=[
+      ['涉及事业部',st.department_count],
+      ['评审批次',st.session_count],
+      ['评审项目',st.project_count],
+      ['合同总额',wan(st.contract_total)],
+      ['评审前预估成本',wan(st.original_cost_total)],
+      ['评审后预估成本',wan(st.adjusted_cost_total)],
+      ['审减额',wan(st.reduction_total)],
+      ['利润率',(st.profit_rate!=null?(st.profit_rate*100).toFixed(2)+'%':'-')]
+    ];
+    let statsHtml='<div class="row g-2 mb-4">'+cards.map(c=>'<div class="col-md-3"><div class="card bg-light"><div class="card-body p-2 text-center"><div class="text-muted small">'+esc(c[0])+'</div><div class="h6 fw-bold mb-0">'+esc(String(c[1]))+'</div></div></div></div>').join('')+'</div>';
+    const isAdmin=currentUser.role==='admin';
+    let editHtml='';
+    if(isAdmin){
+      editHtml='<hr><div class="mb-1"><b>年度工作汇报正文（管理员可手填，保存后全员可见；首次进入为 25 年报告模板，请据实修改）</b></div>'+
+        '<textarea id="wrCustomText" class="form-control" rows="10" placeholder="请填写年度工作汇报的文字叙述内容…">'+esc(d.customText||'')+'</textarea>'+
+        '<div class="mt-2 text-end"><button class="btn btn-primary btn-sm" onclick="saveWorkReportText()"><i class="bi bi-check2"></i> 保存手填文字</button></div>';
+    }else{
+      editHtml='<hr><div class="card card-custom"><div class="card-header bg-white"><b>年度工作汇报正文</b></div><div class="card-body"><pre style="white-space:pre-wrap;font-family:inherit;margin:0">'+esc(d.customText||'（管理员尚未填写）')+'</pre></div></div>';
+    }
+    const modalHtml='<div class="modal fade" id="workReportModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">年终工作汇报</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">'+statsHtml+editHtml+'</div></div></div></div>';
+    const old=document.getElementById('workReportModal');if(old)old.remove();
+    document.body.insertAdjacentHTML('beforeend',modalHtml);
+    new bootstrap.Modal(document.getElementById('workReportModal')).show();
   }).catch(e=>alert('加载工作汇报失败: '+e.message));
+}
+async function saveWorkReportText(){
+  const ta=document.getElementById('wrCustomText');
+  if(!ta){alert('找不到编辑框');return;}
+  const txt=ta.value;
+  const btn=event&&event.target;const orig=btn?btn.innerHTML:'';
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>保存中…';}
+  try{
+    const r=await fetch(API+'/work-report/text',{method:'PUT',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({text:txt})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){alert('保存失败: '+(d.error||('HTTP '+r.status)));}
+    else{alert('已保存');}
+  }catch(e){alert('保存失败: '+e.message);}
+  finally{if(btn){btn.disabled=false;btn.innerHTML=orig;}}
 }
 function escHtml(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function renderWorkReportTable(t){

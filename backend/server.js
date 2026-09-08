@@ -105,6 +105,14 @@ function auth(requiredRoles) {
   };
 }
 
+// 解析用户实际权限：admin 拥有全部；其余按 userPermissions 记录，无记录则用角色的默认权限
+function resolveUserPermissions(user) {
+  if (user.role === 'admin') return PERMISSION_OPTIONS.map(p => p.code);
+  const perm = db.store.userPermissions.find(p => p.user_id === user.id);
+  if (perm && Array.isArray(perm.permissions)) return perm.permissions;
+  return PERMISSION_OPTIONS.filter(p => p.default_roles && p.default_roles.includes(user.role)).map(p => p.code);
+}
+
 function pick(obj, allowed) {
   const r = {};
   for (const k of allowed) if (obj[k] !== undefined) r[k] = obj[k];
@@ -270,7 +278,8 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
     token,
     user: {
       id: user.id, username: user.username, role: user.role,
-      department: user.department, real_name: user.real_name, business_dept: user.business_dept
+      department: user.department, real_name: user.real_name, business_dept: user.business_dept,
+      permissions: resolveUserPermissions(user)
     }
   });
 });
@@ -382,7 +391,7 @@ app.get('/api/users/:id/permissions', auth(['admin']), (req, res) => {
   const perm = db.store.userPermissions.find(p => p.user_id === parseInt(req.params.id));
   res.json(perm ? perm.permissions : []);
 });
-app.get('/api/permission-options', auth(), (req, res) => res.json([
+const PERMISSION_OPTIONS = [
   { code: 'view_projects', name: '查看项目', default_roles: ['admin', 'biz', 'rd', 'expert', 'accountant'] },
   { code: 'upload_files', name: '上传资料', default_roles: ['admin', 'biz', 'rd'] },
   { code: 'download_files', name: '下载单文件', default_roles: ['admin', 'biz', 'rd', 'expert', 'accountant'] },
@@ -392,8 +401,10 @@ app.get('/api/permission-options', auth(), (req, res) => res.json([
   { code: 'submit_estimate', name: '提交工作量评估', default_roles: ['expert', 'accountant'] },
   { code: 'confirm_estimate', name: '确认/驳回评估', default_roles: ['expert', 'accountant'] },
   { code: 'manage_users', name: '用户管理', default_roles: ['admin'] },
-  { code: 'view_stats', name: '查看统计分析', default_roles: ['admin', 'rd', 'biz'] }
-]));
+  { code: 'view_stats', name: '查看统计分析', default_roles: ['admin', 'rd', 'biz'] },
+  { code: 'view_work_report', name: '查看年终工作报告', default_roles: ['admin', 'rd'] }
+];
+app.get('/api/permission-options', auth(), (req, res) => res.json(PERMISSION_OPTIONS));
 
 // ==================== 评审批次 ====================
 app.get('/api/sessions', auth(), (req, res) => {
@@ -728,7 +739,76 @@ app.get('/api/template/summary-xlsx', auth(['admin', 'rd', 'biz']), (req, res) =
 });
 
 // ==================== 年终工作汇报（供统计分析页查看 / 报告生成引用）====================
-app.get('/api/work-report', auth(), (req, res) => res.json(workReport));
+// ==================== 年终工作汇报（实时统计 + 管理员手填文字）====================
+function getSetting(key) {
+  const s = (db.store.settings || []).find(x => x.setting_key === key);
+  return s ? s.setting_value : null;
+}
+function setSetting(key, value) {
+  if (!db.store.settings) db.store.settings = [];
+  let s = db.store.settings.find(x => x.setting_key === key);
+  if (!s) { s = { id: db.nextId(db.store.settings), setting_key: key, setting_value: value, updated_at: new Date().toISOString() }; db.store.settings.push(s); }
+  else { s.setting_value = value; s.updated_at = new Date().toISOString(); }
+  db.save();
+}
+// 首次进入时作为手填模板的默认文字（取 25 年报告正文段落，去掉标题/密级/表标题行）
+function workReportDefaultText() {
+  return (workReport.paragraphs || [])
+    .filter(p => p && !/商密/.test(p))
+    .filter(p => p !== workReport.title && p !== workReport.department && p !== workReport.date)
+    .filter(p => !/^表\d+/.test(p.trim()))
+    .join('\n\n');
+}
+// 依据系统真实数据计算的基础数字
+function computeWorkReportStats() {
+  const projects = db.store.projects || [];
+  const sessions = db.store.reviewSessions || [];
+  const depts = new Set(projects.map(p => p.biz_department).filter(Boolean));
+  let contractTotal = 0, originalCostTotal = 0, adjustedCostTotal = 0;
+  projects.forEach(p => {
+    contractTotal += Number(p.contract_amount) || 0;
+    const base = (p.internal_estimated_cost != null ? Number(p.internal_estimated_cost) : 0);
+    originalCostTotal += base;
+    const wis = (db.store.workItems || []).filter(w => w.project_id === p.id);
+    let projAdj = 0, evaluated = false;
+    wis.forEach(w => {
+      const r = computeWorkItemRollup(p.id, w.id);
+      if (r && r.adjusted_cost > 0) { projAdj += r.adjusted_cost; evaluated = true; }
+    });
+    // 该项目尚未完成评估时，评审后成本回退等于原预估（该部分核减记 0），避免核减额被虚高成全部原预估
+    if (!evaluated) projAdj = base;
+    adjustedCostTotal += projAdj;
+  });
+  const reduction = Math.round((originalCostTotal - adjustedCostTotal) * 100) / 100;
+  const profitRate = contractTotal > 0 ? Math.round(adjustedCostTotal / contractTotal * 10000) / 10000 : 0;
+  return {
+    department_count: depts.size,
+    session_count: sessions.length,
+    project_count: projects.length,
+    contract_total: Math.round(contractTotal * 100) / 100,
+    original_cost_total: Math.round(originalCostTotal * 100) / 100,
+    adjusted_cost_total: Math.round(adjustedCostTotal * 100) / 100,
+    reduction_total: reduction,
+    profit_rate: profitRate
+  };
+}
+app.get('/api/work-report', auth(), (req, res) => {
+  const saved = getSetting('work_report_text');
+  res.json({
+    title: workReport.title,
+    department: workReport.department,
+    date: workReport.date,
+    stats: computeWorkReportStats(),
+    customText: saved != null ? saved : workReportDefaultText(),
+    isDefault: saved == null
+  });
+});
+app.put('/api/work-report/text', auth(['admin']), (req, res) => {
+  const { text } = req.body || {};
+  if (typeof text !== 'string') return res.status(400).json({ error: 'text 必须为字符串' });
+  setSetting('work_report_text', text);
+  res.json({ ok: true });
+});
 app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: '请选择文件' });
   const projectId = parseInt(req.params.id);
