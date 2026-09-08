@@ -1565,30 +1565,36 @@ function viewWorkReport(){
       ['审减额',wan(st.reduction_total)],
       ['利润率',(st.profit_rate!=null?(st.profit_rate*100).toFixed(2)+'%':'-')]
     ];
-    let statsHtml='<div class="row g-2 mb-4">'+cards.map(c=>'<div class="col-md-3"><div class="card bg-light"><div class="card-body p-2 text-center"><div class="text-muted small">'+esc(c[0])+'</div><div class="h6 fw-bold mb-0">'+esc(String(c[1]))+'</div></div></div></div>').join('')+'</div>';
+    const statsHtml='<div class="row g-2 mb-3">'+cards.map(c=>'<div class="col-md-3"><div class="card bg-light"><div class="card-body p-2 text-center"><div class="text-muted small">'+esc(c[0])+'</div><div class="h6 fw-bold mb-0">'+esc(String(c[1]))+'</div></div></div></div>').join('')+'</div>';
     const isAdmin=currentUser.role==='admin';
-    let editHtml='';
-    if(isAdmin){
-      editHtml='<hr><div class="mb-1"><b>年度工作汇报正文（管理员可手填，保存后全员可见；首次进入为 25 年报告模板，请据实修改）</b></div>'+
-        '<textarea id="wrCustomText" class="form-control" rows="10" placeholder="请填写年度工作汇报的文字叙述内容…">'+esc(d.customText||'')+'</textarea>'+
-        '<div class="mt-2 text-end"><button class="btn btn-primary btn-sm" onclick="saveWorkReportText()"><i class="bi bi-check2"></i> 保存手填文字</button></div>';
-    }else{
-      editHtml='<hr><div class="card card-custom"><div class="card-header bg-white"><b>年度工作汇报正文</b></div><div class="card-body"><pre style="white-space:pre-wrap;font-family:inherit;margin:0">'+esc(d.customText||'（管理员尚未填写）')+'</pre></div></div>';
-    }
-    const modalHtml='<div class="modal fade" id="workReportModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">年终工作汇报</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">'+statsHtml+editHtml+'</div></div></div></div>';
+    // 开头编辑区
+    const headerHtml=isAdmin
+      ? '<div class="mb-1"><b>开头说明（管理员可编辑，用于内容说明）</b></div><textarea id="wrHeader" class="form-control" rows="4" placeholder="请在此填写报告开头的总体说明…">'+esc(d.header||'')+'</textarea>'
+      : '<div class="card card-custom"><div class="card-header bg-white"><b>开头说明</b></div><div class="card-body"><pre style="white-space:pre-wrap;font-family:inherit;margin:0">'+esc(d.header||'（管理员尚未填写）')+'</pre></div></div>';
+    // 7 张表
+    const tablesHtml=(d.tables||[]).map(t=>'<div class="mb-3"><div class="fw-bold mb-1">'+esc(t.caption||'')+'</div>'+renderWorkReportTable(t)+'</div>').join('');
+    // 结尾编辑区
+    const footerHtml=isAdmin
+      ? '<div class="mb-1 mt-3"><b>结尾补充（管理员可编辑，用于内容补充）</b></div><textarea id="wrFooter" class="form-control" rows="4" placeholder="请在此填写报告结尾的补充内容…">'+esc(d.footer||'')+'</textarea>'
+      : '<div class="card card-custom mt-3"><div class="card-header bg-white"><b>结尾补充</b></div><div class="card-body"><pre style="white-space:pre-wrap;font-family:inherit;margin:0">'+esc(d.footer||'（管理员尚未填写）')+'</pre></div></div>';
+    const saveBar=isAdmin?'<div class="mt-3 text-end"><button class="btn btn-primary btn-sm" onclick="saveWorkReportText()"><i class="bi bi-check2"></i> 保存开头/结尾说明</button></div>':'';
+    const modalHtml='<div class="modal fade" id="workReportModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">年终工作汇报</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">'+
+      statsHtml+
+      '<div class="text-center mb-2"><h4 class="mb-1">'+esc(d.title||'')+'</h4><div class="text-muted small">'+esc(d.department||'')+'　'+esc(d.date||'')+'</div></div>'+
+      '<hr>'+headerHtml+'<hr><h6 class="text-muted">评审数据明细</h6>'+tablesHtml+'<hr>'+footerHtml+saveBar+
+      '</div></div></div></div><style>.wr-tbl{border-collapse:collapse;width:100%;font-size:13px;margin:4px 0}.wr-tbl th,.wr-tbl td{border:1px solid #cbd5e1;padding:5px 8px}.wr-tbl thead th{background:#eef2ff;font-weight:600;text-align:center}.wr-tbl tbody td{text-align:right}.wr-tbl tbody td:first-child{text-align:left;font-weight:600}</style>';
     const old=document.getElementById('workReportModal');if(old)old.remove();
     document.body.insertAdjacentHTML('beforeend',modalHtml);
     new bootstrap.Modal(document.getElementById('workReportModal')).show();
   }).catch(e=>alert('加载工作汇报失败: '+e.message));
 }
 async function saveWorkReportText(){
-  const ta=document.getElementById('wrCustomText');
-  if(!ta){alert('找不到编辑框');return;}
-  const txt=ta.value;
+  const h=document.getElementById('wrHeader'),f=document.getElementById('wrFooter');
+  if(!h||!f){alert('找不到编辑框');return;}
   const btn=event&&event.target;const orig=btn?btn.innerHTML:'';
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>保存中…';}
   try{
-    const r=await fetch(API+'/work-report/text',{method:'PUT',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({text:txt})});
+    const r=await fetch(API+'/work-report/text',{method:'PUT',headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({header:h.value,footer:f.value})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){alert('保存失败: '+(d.error||('HTTP '+r.status)));}
     else{alert('已保存');}
@@ -1598,10 +1604,15 @@ async function saveWorkReportText(){
 function escHtml(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function renderWorkReportTable(t){
   if(!t||!Array.isArray(t.rows)||!t.rows.length)return '';
-  let h='<table style="border-collapse:collapse;width:100%;margin:10px 0;font-size:13px"><thead><tr>';
-  (t.rows[0]||[]).forEach(c=>h+='<th style="border:1px solid #ccc;padding:6px;background:#667eea;color:#fff">'+escHtml(String(c==null?'':c).split('\n').join('<br>'))+'</th>');
-  h+='</tr></thead><tbody>';
-  t.rows.slice(1).forEach(row=>{h+='<tr>'+(row||[]).map(c=>'<td style="border:1px solid #ccc;padding:6px">'+escHtml(String(c==null?'':c).split('\n').join('<br>'))+'</td>').join('')+'</tr>';});
+  const norm=c=>typeof c==='string'?{t:c}:c;
+  let h='<table class="wr-tbl"><thead>';
+  (t.head||[]).forEach(row=>{
+    h+='<tr>';
+    (row||[]).forEach(c=>{const cc=norm(c);const attr=(cc.r>1?' rowspan="'+cc.r+'"':'')+(cc.c>1?' colspan="'+cc.c+'"':'');h+='<th'+attr+'>'+escHtml(String(cc.t==null?'':cc.t).split('\n').join('<br>'))+'</th>';});
+    h+='</tr>';
+  });
+  h+='</thead><tbody>';
+  t.rows.forEach(row=>{h+='<tr>'+(row||[]).map(c=>'<td>'+escHtml(String(c==null?'':c).split('\n').join('<br>'))+'</td>').join('')+'</tr>';});
   h+='</tbody></table>';return h;
 }
 function renderWorkReportHtml(wr){

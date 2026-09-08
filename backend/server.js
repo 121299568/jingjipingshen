@@ -764,23 +764,26 @@ function computeWorkReportStats() {
   const projects = db.store.projects || [];
   const sessions = db.store.reviewSessions || [];
   const depts = new Set(projects.map(p => p.biz_department).filter(Boolean));
+  const WIs = db.store.workItems || [];
+  const preW2 = w => Number(w.cost) || 0;
   let contractTotal = 0, originalCostTotal = 0, adjustedCostTotal = 0;
   projects.forEach(p => {
-    contractTotal += Number(p.contract_amount) || 0;
+    const contract = Number(p.contract_amount) || 0;
+    contractTotal += contract;
     const base = (p.internal_estimated_cost != null ? Number(p.internal_estimated_cost) : 0);
     originalCostTotal += base;
-    const wis = (db.store.workItems || []).filter(w => w.project_id === p.id);
-    let projAdj = 0, evaluated = false;
-    wis.forEach(w => {
-      const r = computeWorkItemRollup(p.id, w.id);
-      if (r && r.adjusted_cost > 0) { projAdj += r.adjusted_cost; evaluated = true; }
-    });
-    // 该项目尚未完成评估时，评审后成本回退等于原预估（该部分核减记 0），避免核减额被虚高成全部原预估
-    if (!evaluated) projAdj = base;
-    adjustedCostTotal += projAdj;
+    const wis = WIs.filter(w => w.project_id === p.id);
+    const evaluated = wis.some(w => Number(w.adjusted_cost) > 0);
+    let adj = base;
+    if (evaluated) {
+      const itemCost = wis.reduce((a, w) => a + preW2(w), 0);
+      const itemAdj = wis.reduce((a, w) => a + (Number(w.adjusted_cost) > 0 ? Number(w.adjusted_cost) : preW2(w)), 0);
+      adj = itemAdj + Math.max(0, base - itemCost);   // 未细化到 workItem 的部分按原预估带入，评审后不虚低
+    }
+    adjustedCostTotal += adj;
   });
   const reduction = Math.round((originalCostTotal - adjustedCostTotal) * 100) / 100;
-  const profitRate = contractTotal > 0 ? Math.round(adjustedCostTotal / contractTotal * 10000) / 10000 : 0;
+  const profitRate = contractTotal > 0 ? Math.round((contractTotal - adjustedCostTotal) / contractTotal * 10000) / 10000 : 0;
   return {
     department_count: depts.size,
     session_count: sessions.length,
@@ -792,21 +795,224 @@ function computeWorkReportStats() {
     profit_rate: profitRate
   };
 }
+// 依据系统真实数据动态生成 7 张结构化表格（模板取自 25 年报告，维度与数值取实时）
+function buildWorkReportTables() {
+  const s = db.store;
+  const projects = s.projects || [];
+  const workItems = s.workItems || [];
+  const travelItems = s.travelItems || [];
+  const procurementItems = s.procurementItems || [];
+
+  const depts = [...new Set(projects.map(p => p.biz_department).filter(Boolean))].sort();
+  const types = [...new Set(projects.map(p => p.project_type).filter(Boolean))].sort();
+  const projDept = {}, projType = {};
+  projects.forEach(p => { projDept[p.id] = p.biz_department || ''; projType[p.id] = p.project_type || ''; });
+
+  const preW = w => Number(w.cost) || 0;
+  const adjW = w => { const a = Number(w.adjusted_cost); return a > 0 ? a : preW(w); };
+  const contract = p => Number(p.contract_amount) || 0;
+  // 评审前 = 项目级 internal_estimated_cost（事业部填报预估，完整）；明细成本仅作分类分解。
+  // 已评估项目：评审后 = 各 workItem 调整后成本 + 未细化到 workItem 的部分（按原预估带入），避免评审后虚低。
+  const projPre = p => Number(p.internal_estimated_cost) || 0;
+  function projAdj(p) {
+    const wis = workItems.filter(w => w.project_id === p.id);
+    const evaluated = wis.some(w => Number(w.adjusted_cost) > 0);
+    if (!evaluated) return projPre(p);
+    const itemCost = wis.reduce((a, w) => a + preW(w), 0);
+    const itemAdj = wis.reduce((a, w) => a + (Number(w.adjusted_cost) > 0 ? Number(w.adjusted_cost) : preW(w)), 0);
+    const carry = Math.max(0, projPre(p) - itemCost);
+    return itemAdj + carry;
+  }
+  const byDept = {}; depts.forEach(d => byDept[d] = { contract: 0, pre: 0, adj: 0, count: 0 });
+  const byType = {}; types.forEach(t => byType[t] = { contract: 0, pre: 0, adj: 0, count: 0 });
+  const cntDT = {}; depts.forEach(d => { cntDT[d] = {}; types.forEach(t => cntDT[d][t] = 0); });
+  projects.forEach(p => {
+    const d = projDept[p.id], t = projType[p.id];
+    const c = contract(p), pre = projPre(p), adj = projAdj(p);
+    if (d && byDept[d]) { byDept[d].contract += c; byDept[d].pre += pre; byDept[d].adj += adj; byDept[d].count++; }
+    if (t && byType[t]) { byType[t].contract += c; byType[t].pre += pre; byType[t].adj += adj; byType[t].count++; }
+    if (d && t && cntDT[d] && cntDT[d][t] != null) cntDT[d][t]++;
+  });
+  const totContract = projects.reduce((a, p) => a + contract(p), 0);
+  const totPre = projects.reduce((a, p) => a + projPre(p), 0);
+  const totAdj = projects.reduce((a, p) => a + projAdj(p), 0);
+
+  const wan = n => Math.round((n / 10000) * 100) / 100;
+  const pct = (a, b) => (b > 0 ? (Math.round((a / b) * 10000) / 100) + '%' : '—');
+  const profit = (c, adj) => (c > 0 ? (Math.round((c - adj) / c * 10000) / 100) + '%' : '—');
+
+  // 成本类别：系统 5 类(英文键) + 采购/差旅(来自 procurement/travel) + 第三方测试/知识产权(系统暂无→0)
+  const COST_CATS = [
+    { key: 'long_term', label: '长期职工成本' },
+    { key: 'zhongshi', label: '中实职工成本' },
+    { key: 'huazhao', label: '华兆职工成本' },
+    { key: 'outsourcing', label: '人员外包成本' },
+    { key: 'subcontract', label: '专业分包成本' },
+    { key: 'procurement', label: '采购成本', src: 'proc' },
+    { key: 'travel', label: '差旅费', src: 'travel' },
+    { key: 'third_test', label: '第三方测试费', src: 'zero' },
+    { key: 'ip', label: '知识产权费', src: 'zero' }
+  ];
+  function matchDim(pid, dept, type) {
+    if (dept && projDept[pid] !== dept) return false;
+    if (type && projType[pid] !== type) return false;
+    return true;
+  }
+  function catPre(key, dept, type) {
+    if (key === 'procurement') return procurementItems.filter(x => matchDim(x.project_id, dept, type)).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+    if (key === 'travel') return travelItems.filter(x => matchDim(x.project_id, dept, type)).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+    if (key === 'third_test' || key === 'ip') return 0;
+    return workItems.filter(w => w.category === key && matchDim(w.project_id, dept, type)).reduce((a, w) => a + preW(w), 0);
+  }
+  function catAdj(key, dept, type) {
+    if (key === 'procurement') return procurementItems.filter(x => matchDim(x.project_id, dept, type)).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+    if (key === 'travel') return travelItems.filter(x => matchDim(x.project_id, dept, type)).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+    if (key === 'third_test' || key === 'ip') return 0;
+    return workItems.filter(w => w.category === key && matchDim(w.project_id, dept, type)).reduce((a, w) => a + adjW(w), 0);
+  }
+
+  const tables = [];
+
+  // 表1 评审项目统计：项目类型(rows) × 部门(cols) + 合计
+  {
+    const head = [[{ t: '部门\n类型' }, ...depts.map(d => ({ t: d })), { t: '合计' }]];
+    const rows = types.map(t => {
+      const row = [t]; let sum = 0;
+      depts.forEach(d => { const v = cntDT[d][t] || 0; row.push(v); sum += v; });
+      row.push(sum); return row;
+    });
+    const totRow = ['合计']; let gt = 0;
+    depts.forEach(d => { let c = 0; types.forEach(t => c += cntDT[d][t] || 0); totRow.push(c); gt += c; });
+    totRow.push(gt); rows.push(totRow);
+    tables.push({ index: 1, caption: '表1 评审项目统计', head, rows });
+  }
+
+  // 表2/表3 利润表（按部门 / 按项目类型）
+  function profitTable(index, caption, dimKeys, aggMap) {
+    const lead = '类别\n' + (index === 2 ? '部门' : '项目类型');
+    const head = [
+      [{ t: lead, r: 2 }, { t: '合同额（万元）', c: 1 }, { t: '估算总成本（万元）', c: 2 }, { t: '利润率', c: 2 }],
+      ['', '', '评审前', '评审后', '评审前', '评审后']
+    ];
+    const rows = dimKeys.map(k => {
+      const a = aggMap[k];
+      return [k, wan(a.contract), wan(a.pre), wan(a.adj), profit(a.contract, a.pre), profit(a.contract, a.adj)];
+    });
+    rows.push(['公司总体', wan(totContract), wan(totPre), wan(totAdj), profit(totContract, totPre), profit(totContract, totAdj)]);
+    tables.push({ index, caption: '表' + index + ' ' + caption, head, rows });
+  }
+  profitTable(2, '各部门利润情况', depts, byDept);
+  profitTable(3, '各项目类型利润情况', types, byType);
+
+  // 表4 公司总体分项成本
+  {
+    const head = [
+      [{ t: '类别', r: 2 }, { t: '公司总体', c: 2 }, { t: '成本占比', c: 2 }],
+      ['', '评审前', '评审后', '评审前', '评审后']
+    ];
+    const rows = [['合同额', wan(totContract), wan(totContract), '', '']];
+    COST_CATS.forEach(cat => {
+      const pre = catPre(cat.key), adj = catAdj(cat.key);
+      rows.push([cat.label, wan(pre), wan(adj), pct(pre, totPre), pct(adj, totAdj)]);
+    });
+    rows.push(['估算总成本', wan(totPre), wan(totAdj), pct(totPre, totPre), pct(totAdj, totAdj)]);
+    rows.push(['利润率', '', '', profit(totContract, totPre), profit(totContract, totAdj)]);
+    tables.push({ index: 4, caption: '表4 公司项目评审总体情况分项汇总', head, rows });
+  }
+
+  // 表5 按部门成本分析：成本类别(rows) × 部门(cols, 评审前/评审后) + 公司总体
+  {
+    const groups = depts.map(d => ({ label: d, subs: ['评审前', '评审后'] }));
+    groups.push({ label: '公司总体', subs: ['评审前', '评审后'] });
+    const head = [
+      [{ t: '部门\n类别', r: 2 }, ...groups.map(g => ({ t: g.label, c: 2 }))],
+      ['', ...groups.flatMap(g => ['评审前', '评审后'])]
+    ];
+    const rows = [['合同额', ...depts.map(d => [wan(byDept[d].contract), wan(byDept[d].contract)]).flat(), wan(totContract), wan(totContract)]];
+    COST_CATS.forEach(cat => {
+      const row = [cat.label];
+      depts.forEach(d => row.push(wan(catPre(cat.key, d)), wan(catAdj(cat.key, d))));
+      row.push(wan(catPre(cat.key)), wan(catAdj(cat.key)));
+      rows.push(row);
+    });
+    rows.push(['估算总成本', ...depts.map(d => [wan(byDept[d].pre), wan(byDept[d].adj)]).flat(), wan(totPre), wan(totAdj)]);
+    rows.push(['利润率', ...depts.map(d => [profit(byDept[d].contract, byDept[d].pre), profit(byDept[d].contract, byDept[d].adj)]).flat(), profit(totContract, totPre), profit(totContract, totAdj)]);
+    tables.push({ index: 5, caption: '表5 公司项目按部门成本分析', head, rows });
+  }
+
+  // 表6 按部门及项目类型成本分析：部门(rows) × 项目类型(cols, 评审前利润率/评审后利润率)
+  {
+    const groups = types.map(t => ({ label: t, subs: ['评审前', '评审后'] }));
+    const head = [
+      [{ t: '部门', r: 2 }, ...groups.map(g => ({ t: g.label, c: 2 }))],
+      ['', ...groups.flatMap(g => ['评审前', '评审后'])]
+    ];
+    const rows = depts.map(d => {
+      const row = [d];
+      types.forEach(t => {
+        const ps = projects.filter(p => projDept[p.id] === d && projType[p.id] === t);
+        const c = ps.reduce((a, p) => a + contract(p), 0);
+        const pre = ps.reduce((a, p) => a + projPre(p), 0);
+        const adj = ps.reduce((a, p) => a + projAdj(p), 0);
+        row.push(profit(c, pre), profit(c, adj));
+      });
+      return row;
+    });
+    tables.push({ index: 6, caption: '表6 公司项目按部门及项目类型成本分析', head, rows });
+  }
+
+  // 表7 按项目类型成本分析：成本类别(rows) × 项目类型(cols, 评审前/评审后) + 公司总体
+  {
+    const groups = types.map(t => ({ label: t, subs: ['评审前', '评审后'] }));
+    groups.push({ label: '公司总体', subs: ['评审前', '评审后'] });
+    const head = [
+      [{ t: '项目类型\n费用类别', r: 2 }, ...groups.map(g => ({ t: g.label, c: 2 }))],
+      ['', ...groups.flatMap(g => ['评审前', '评审后'])]
+    ];
+    const rows = [['合同额', ...types.map(t => [wan(byType[t].contract), wan(byType[t].contract)]).flat(), wan(totContract), wan(totContract)]];
+    COST_CATS.forEach(cat => {
+      const row = [cat.label];
+      types.forEach(t => row.push(wan(catPre(cat.key, null, t)), wan(catAdj(cat.key, null, t))));
+      row.push(wan(catPre(cat.key)), wan(catAdj(cat.key)));
+      rows.push(row);
+    });
+    rows.push(['估算总成本', ...types.map(t => [wan(byType[t].pre), wan(byType[t].adj)]).flat(), wan(totPre), wan(totAdj)]);
+    rows.push(['利润率', ...types.map(t => [profit(byType[t].contract, byType[t].pre), profit(byType[t].contract, byType[t].adj)]).flat(), profit(totContract, totPre), profit(totContract, totAdj)]);
+    tables.push({ index: 7, caption: '表7 公司项目按项目类型成本分析', head, rows });
+  }
+
+  return tables;
+}
+
 app.get('/api/work-report', auth(), (req, res) => {
   const saved = getSetting('work_report_text');
+  let header = '', footer = '';
+  if (saved != null) {
+    try {
+      const o = JSON.parse(saved);
+      if (o && typeof o === 'object') { header = o.header || ''; footer = o.footer || ''; }
+      else header = String(saved);
+    } catch (e) { header = String(saved); }
+  }
   res.json({
     title: workReport.title,
     department: workReport.department,
     date: workReport.date,
     stats: computeWorkReportStats(),
-    customText: saved != null ? saved : workReportDefaultText(),
+    tables: buildWorkReportTables(),
+    header, footer,
     isDefault: saved == null
   });
 });
 app.put('/api/work-report/text', auth(['admin']), (req, res) => {
-  const { text } = req.body || {};
-  if (typeof text !== 'string') return res.status(400).json({ error: 'text 必须为字符串' });
-  setSetting('work_report_text', text);
+  const body = req.body || {};
+  let header = '', footer = '';
+  if (typeof body.text === 'string') header = body.text;          // 兼容旧调用
+  else {
+    header = typeof body.header === 'string' ? body.header : '';
+    footer = typeof body.footer === 'string' ? body.footer : '';
+  }
+  setSetting('work_report_text', JSON.stringify({ header, footer }));
   res.json({ ok: true });
 });
 app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) => {
