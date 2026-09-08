@@ -24,7 +24,7 @@ const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const COLLECTIONS = [
   'users', 'reviewSessions', 'projects', 'workItems', 'procurementItems',
   'travelItems', 'expertEstimates', 'confirmations', 'files', 'workflowLogs',
-  'userGroups', 'userPermissions', 'sessionAssignments'
+  'userGroups', 'userPermissions', 'sessionAssignments', 'settings'
 ];
 
 // ---------- 密码 ----------
@@ -76,7 +76,7 @@ function defaultStore() {
     }],
     projects: [], workItems: [], procurementItems: [], travelItems: [],
     expertEstimates: [], confirmations: [], files: [], workflowLogs: [],
-    userGroups: [], userPermissions: [], sessionAssignments: []
+    userGroups: [], userPermissions: [], sessionAssignments: [], settings: []
   };
 }
 

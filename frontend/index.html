@@ -103,14 +103,14 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 <div id="mainApp" class="app-wrap" style="display:none;min-height:100vh">
   <aside class="sidebar">
     <div class="sidebar-brand"><i class="bi bi-calculator"></i> 经济评审系统</div>
-    <div class="nav-item active" data-page="dashboard"><i class="bi bi-speedometer2"></i>工作台</div>
-    <div class="nav-item" data-page="sessions"><i class="bi bi-calendar-check"></i>评审批次</div>
-    <div class="nav-item" data-page="projects"><i class="bi bi-folder2-open"></i>项目资料</div>
-    <div class="nav-item" data-page="cost-analysis"><i class="bi bi-graph-down-arrow"></i>工作量评估</div>
-    <div class="nav-item" data-page="stats"><i class="bi bi-bar-chart"></i>统计分析</div>
-    <div class="nav-item" data-page="workload-summary" id="nav-workload-summary"><i class="bi bi-clipboard-data"></i>评估汇总</div>
-    <div class="nav-item" data-page="users" id="nav-users"><i class="bi bi-people"></i>用户管理</div>
-    <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>退出登录</div>
+    <div class="nav-item active" data-page="dashboard"><i class="bi bi-speedometer2"></i>&nbsp;工作台</div>
+    <div class="nav-item" data-page="sessions"><i class="bi bi-calendar-check"></i>&nbsp;评审批次</div>
+    <div class="nav-item" data-page="projects"><i class="bi bi-folder2-open"></i>&nbsp;项目资料</div>
+    <div class="nav-item" data-page="cost-analysis"><i class="bi bi-graph-down-arrow"></i>&nbsp;工作量评估</div>
+    <div class="nav-item" data-page="stats"><i class="bi bi-bar-chart"></i>&nbsp;统计分析</div>
+    <div class="nav-item" data-page="workload-summary" id="nav-workload-summary"><i class="bi bi-clipboard-data"></i>&nbsp;评估汇总</div>
+    <div class="nav-item" data-page="users" id="nav-users"><i class="bi bi-people"></i>&nbsp;用户管理</div>
+    <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>&nbsp;退出登录</div>
   </aside>
 
   <button class="menu-toggle" onclick="toggleSidebar()" aria-label="菜单"><i class="bi bi-list"></i></button>
@@ -139,8 +139,8 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6>评审批次列表</h6>
         <div class="d-flex gap-2">
-          <button class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#summaryImportModal"><i class="bi bi-file-earmark-excel"></i>Excel导入（评审汇总表）</button>
-          <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addSessionModal"><i class="bi bi-plus"></i>新建批次</button>
+          <button id="btnSummaryImport" class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#summaryImportModal"><i class="bi bi-file-earmark-excel"></i>Excel导入（评审汇总表）</button>
+          <button id="btnNewSession" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addSessionModal"><i class="bi bi-plus"></i>新建批次</button>
         </div>
       </div>
       <div class="card card-custom"><div class="card-body p-0">
@@ -565,10 +565,20 @@ function showMainApp(){
   // 用户管理仅管理员可见
   const navUsers=document.getElementById('nav-users');
   if(navUsers)navUsers.style.display=(currentUser.role==='admin')?'flex':'none';
+  // 评审批次页按钮按角色隐藏（与后端接口鉴权一致）
+  applySessionsRoleGating();
   loadAll();
 }
 function doLogout(){localStorage.clear();location.reload();}
 function getRoleName(r){return{admin:'管理员',biz:'事业部',rd:'研发',expert:'专家',accountant:'会计师'}[r]||r;}
+// 评审批次页按钮按角色隐藏（与后端 auth 一致：新建批次=admin/rd；Excel导入=admin/rd/biz）
+function applySessionsRoleGating(){
+  const role=currentUser&&currentUser.role;
+  const b1=document.getElementById('btnSummaryImport');
+  const b2=document.getElementById('btnNewSession');
+  if(b1)b1.style.display=(role==='admin'||role==='rd'||role==='biz')?'inline-block':'none';
+  if(b2)b2.style.display=(role==='admin'||role==='rd')?'inline-block':'none';
+}
 function authH(){const t=localStorage.getItem('token');return t?{Authorization:'Bearer '+t}:{};}
 // XSS 转义：所有插入 innerHTML 的用户可控字符串都必须经过它
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -591,7 +601,7 @@ function navigateTo(page){
   document.getElementById('pageTitle').textContent={dashboard:'工作台',sessions:'评审批次',projects:'项目资料',upload:'上传资料','cost-analysis':'工作量评估',stats:'统计分析','workload-summary':'评估汇总',users:'用户管理'}[page]||page;
   switch(page){
     case'dashboard':renderDashboard();break;
-    case'sessions':populateSessionSelect();renderSessions();break;
+    case'sessions':populateSessionSelect();applySessionsRoleGating();renderSessions();break;
     case'projects':populateSessionSelect();renderProjects();break;
     case'upload':break;
     case'cost-analysis':updateCostSelect();renderCostAnalysis();break;

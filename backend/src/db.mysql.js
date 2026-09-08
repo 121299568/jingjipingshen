@@ -92,7 +92,9 @@ const COL_TYPE = {
   expert_count: 'INT NOT NULL DEFAULT 0',
   expert_days_avg: 'DOUBLE NOT NULL DEFAULT 0',
   adjusted_cost: 'DOUBLE NOT NULL DEFAULT 0',
-  slot: 'INT DEFAULT NULL'
+  slot: 'INT DEFAULT NULL',
+  setting_key: 'VARCHAR(64) NOT NULL DEFAULT ""',
+  setting_value: 'TEXT'
 };
 
 // ---------- 集合 → 表定义 ----------
@@ -176,6 +178,12 @@ const SCHEMA = {
     cols: ['id', 'session_id', 'user_id', 'user_role', 'user_name', 'assigned_by', 'assigned_at'],
     bool: [], num: ['id', 'session_id', 'user_id', 'assigned_by'],
     indexes: ['KEY `idx_session_id` (`session_id`)', 'KEY `idx_user_id` (`user_id`)']
+  },
+  settings: {
+    table: 'settings',
+    cols: ['id', 'setting_key', 'setting_value', 'updated_at'],
+    bool: [], num: ['id'],
+    indexes: ['UNIQUE KEY `uk_setting_key` (`setting_key`)']
   }
 };
 
