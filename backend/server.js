@@ -134,6 +134,7 @@ function inferFileCategory(filename) {
   if (/利润|利润率|profit/i.test(name)) return 'profit';
   if (/招标|投标|bid|tender/i.test(name)) return 'bid';
   if (/中标|中选|award|winning/i.test(name)) return 'award';
+  if (/询价|询比|采购协议|物资采购|招标采购|采购文件|报价单/i.test(name)) return 'inquiry';
   if (/合同|协议|contract|agreement/i.test(name)) return 'contract';
   if (/分包|subcontract|外包/i.test(name)) return 'subcontract';
   if (/技术.*规范|规范.*书|技术.*规格|tech.*spec|specif/i.test(name)) return 'tech_spec';
@@ -143,7 +144,7 @@ function getFileCategoryName(cat) {
   const map = {
     estimation: '估算表', feasibility: '可研报告', bid: '招标文件',
     award: '中标通知书', contract: '合同文件', profit: '利润率评审表',
-    subcontract: '分包申请表', tech_spec: '技术规范书', other: '其他'
+    subcontract: '分包申请表', tech_spec: '技术规范书', inquiry: '询价单/采购协议', other: '其他'
   };
   return map[cat] || cat || '其他';
 }
@@ -163,6 +164,48 @@ function lastOperationAt(projectId) {
 function enrichProject(p) {
   if (!p) return p;
   return { ...p, last_operation_at: lastOperationAt(p.id) || p.updated_at || p.created_at || null };
+}
+
+// ==================== 通知 ====================
+// 站内通知：用于主动向预审人员/管理员/事业部经办人推送待办与提醒（无需外部邮件/短信网关）
+function addNotification({ user_id, role_scope, type, title, body, related_project_id, related_session_id, created_by }) {
+  const n = {
+    id: db.nextId(db.store.notifications),
+    user_id: user_id != null ? Number(user_id) : null,
+    role_scope: role_scope || null,
+    type: type || 'info',
+    title: title || '',
+    body: body || '',
+    related_project_id: related_project_id != null ? Number(related_project_id) : null,
+    related_session_id: related_session_id != null ? Number(related_session_id) : null,
+    read: false,
+    created_by: created_by != null ? Number(created_by) : null,
+    created_at: new Date().toISOString()
+  };
+  db.store.notifications.push(n);
+  db.save();
+  return n;
+}
+// 向指定角色的全部用户推送（rd/admin/biz/expert/accountant）
+function notifyRoles(roles, payload) {
+  if (!Array.isArray(roles)) roles = [roles];
+  const targets = (db.store.users || []).filter(u => roles.includes(u.role) && u.is_active !== false);
+  return targets.map(u => addNotification({ ...payload, user_id: u.id }));
+}
+// 向某事业部全部经办人推送
+function notifyDeptBiz(dept, payload) {
+  const targets = (db.store.users || []).filter(u => u.role === 'biz' && u.business_dept === dept && u.is_active !== false);
+  return targets.map(u => addNotification({ ...payload, user_id: u.id }));
+}
+
+// 是否需要专家/会计师工作量评估：人员外包成本 或 专业分包成本 任一项 >0 才需要；
+// 项目尚无成本估算表时保守按"需要评估"处理，避免漏评估。
+function needsEstimate(p) {
+  if (!p || !p.cost_summary) return true;
+  const cs = p.cost_summary || {};
+  const out = Number(cs.outsourcing_cost) || 0;
+  const sub = Number(cs.subcontract_cost) || 0;
+  return (out > 0 || sub > 0);
 }
 
 // ==================== 审批流辅助 ====================
@@ -502,6 +545,9 @@ app.get('/api/projects/:id', auth(), (req, res) => {
   }
   res.json({
     ...enrichProject(p),
+    needs_estimate: needsEstimate(p),
+    procurement_check: checkProcurementCompliance(p.id),
+    inquiry_prices: p.inquiry_prices || [],
     work_items: db.store.workItems.filter(w => w.project_id === p.id),
     procurement_items: db.store.procurementItems.filter(x => x.project_id === p.id),
     travel_items: db.store.travelItems.filter(t => t.project_id === p.id),
@@ -1140,6 +1186,8 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     file.parse_error = parsed.__parseError;
   }
   project.updated_at = new Date().toISOString();
+  // 采购成本合规比对：若采购成本不为零，自动比对询价单/协议上限价，超标则提醒预审/管理员
+  try { runProcurementCheckAndNotify(projectId, req.user.id); } catch (e) { console.error('采购合规检查失败:', e && e.message); }
   db.save();
   db.logWorkflow(projectId, 'upload_file', `上传${getFileCategoryName(autoCategory)}文件[${seq}]: ${file.originalname}`, req.user.id);
   res.json(file);
@@ -1368,16 +1416,33 @@ app.post('/api/projects/:id/pre-review', auth(['admin', 'rd']), (req, res) => {
 });
 
 // 研发中心汇总结果并发起成果确认（reviewing → pending_confirm）
+// 复用逻辑：发起成果确认（单项目 / 批量共用）。返回 {ok, reason}
+// 规则：人员外包成本与专业分包成本均为 0 的项目无需专家评估，可直接发起；
+// 其余项目必须已存在专家/会计师评估数据。发起时记录下发时间并通知对应事业部经办人。
+function doInitiateConfirmation(p, userId) {
+  if (p.status !== 'reviewing') return { ok: false, reason: '当前状态（' + p.status + '）不可发起确认' };
+  if (needsEstimate(p)) {
+    const estCount = db.store.expertEstimates.filter(e => e.project_id === p.id).length;
+    if (estCount === 0) return { ok: false, reason: '尚无专家/会计师评估数据，请先组织评审会并收集评估' };
+  }
+  p.status = 'pending_confirm';
+  p.skip_estimate = !needsEstimate(p);
+  if (!p.confirmation_issued_at) p.confirmation_issued_at = new Date().toISOString();
+  p.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(p.id, 'initiate_confirmation', '研发中心汇总结果并发起成果确认', userId);
+  notifyDeptBiz(p.biz_department, {
+    type: 'biz_confirm', title: '成果确认待办：' + (p.project_name || '项目'),
+    body: '您部门的项目「' + (p.project_name || '') + '」已发起成果确认，请登录系统确认经济评审结果汇总表。',
+    related_project_id: p.id, related_session_id: p.session_id, created_by: userId
+  });
+  return { ok: true };
+}
 app.post('/api/projects/:id/initiate-confirmation', auth(['admin', 'rd']), (req, res) => {
   const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '项目不存在' });
-  if (p.status !== 'reviewing') return res.status(400).json({ error: '仅评审中项目可发起确认（当前：' + p.status + '）' });
-  const estCount = db.store.expertEstimates.filter(e => e.project_id === p.id).length;
-  if (estCount === 0) return res.status(400).json({ error: '尚无专家/会计师评估数据，请先组织评审会并收集评估' });
-  p.status = 'pending_confirm';
-  p.updated_at = new Date().toISOString();
-  db.save();
-  db.logWorkflow(p.id, 'initiate_confirmation', '研发中心汇总结果并发起成果确认', req.user.id);
+  const r = doInitiateConfirmation(p, req.user.id);
+  if (!r.ok) return res.status(400).json({ error: r.reason });
   res.json(p);
 });
 
@@ -1454,6 +1519,225 @@ app.post('/api/projects/:id/confirm', auth(['admin', 'rd', 'biz']), (req, res) =
   res.json(p);
 });
 
+// ==================== 站内通知 ====================
+app.get('/api/notifications', auth(), (req, res) => {
+  const uid = req.user.id, role = req.user.role;
+  const list = (db.store.notifications || [])
+    .filter(n => (n.user_id && n.user_id === uid) || (n.role_scope && n.role_scope === role))
+    .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  res.json({ list, unread: list.filter(n => !n.read).length });
+});
+app.post('/api/notifications/:id/read', auth(), (req, res) => {
+  const n = (db.store.notifications || []).find(x => x.id === parseInt(req.params.id));
+  if (!n) return res.status(404).json({ error: '通知不存在' });
+  n.read = true; db.save();
+  res.json({ ok: true });
+});
+app.post('/api/notifications/read-all', auth(), (req, res) => {
+  const uid = req.user.id, role = req.user.role;
+  (db.store.notifications || []).forEach(n => {
+    if ((n.user_id && n.user_id === uid) || (n.role_scope && n.role_scope === role)) n.read = true;
+  });
+  db.save();
+  res.json({ ok: true });
+});
+
+// ==================== 采购成本合规比对 ====================
+// 汇总某项目的询价/协议上限价：自动解析 inquiry 类 Excel 文件 + 人工录入的 p.inquiry_prices
+function getInquiryPrices(p) {
+  const prices = [];
+  const seen = new Set();
+  const add = (it) => {
+    const key = (it.item_name || '') + '|' + (it.spec || '');
+    if (seen.has(key)) return;
+    seen.add(key);
+    prices.push({ item_name: it.item_name, spec: it.spec || '', unit_price: Number(it.unit_price) || 0, source: it.source || 'unknown' });
+  };
+  // 人工录入（Word/PDF 或无法直接解析时由预审/管理员在页面维护）
+  (p.inquiry_prices || []).forEach(add);
+  // 自动解析 Excel 询价单
+  const inquiryFiles = (db.store.files || []).filter(f => f.project_id === p.id && f.file_category === 'inquiry');
+  for (const f of inquiryFiles) {
+    const filePath = path.join(UPLOAD_DIR, f.filename);
+    if (!fs.existsSync(filePath)) continue;
+    if (!/\.(xlsx|xls)$/i.test(f.filename)) continue; // Word/PDF 暂不支持自动解析
+    try {
+      const { parseInquiryExcel } = require('./parse-excel');
+      const r = parseInquiryExcel(filePath);
+      (r.items || []).forEach(it => add({ ...it, source: 'excel:' + f.originalname }));
+    } catch (e) { /* 解析失败忽略，交由人工录入 */ }
+  }
+  return prices;
+}
+function issueKey(iss) { return iss.key + ':' + (iss.item_name || '') + ':' + (iss.spec || ''); }
+// 比对成本估算表采购明细与询价/协议上限价，返回违规项与已消除项
+function checkProcurementCompliance(projectId) {
+  const p = db.store.projects.find(x => x.id === projectId);
+  if (!p) return { error: '项目不存在' };
+  const procItems = db.store.procurementItems.filter(x => x.project_id === p.id);
+  const procCost = procItems.reduce((a, x) => a + (Number(x.amount) || 0), 0);
+  const prices = getInquiryPrices(p);
+  const hasInquiry = prices.length > 0;
+  const issues = [];
+  if (procCost > 0 && !hasInquiry) {
+    issues.push({ key: 'missing_inquiry', severity: 'high', item_name: '（整体）', spec: '', detail: '采购成本不为零，但未上传询价单/采购协议或录入上限价，无法比对。' });
+  }
+  const byNameSpec = {}, byName = {};
+  prices.forEach(pr => {
+    byNameSpec[(pr.item_name || '') + '|' + (pr.spec || '')] = pr;
+    if (!byName[pr.item_name || '']) byName[pr.item_name || ''] = pr;
+  });
+  procItems.forEach(pi => {
+    const name = pi.item_name || pi.name || '';
+    const spec = pi.spec || '';
+    const upper = byNameSpec[name + '|' + spec] || byName[name];
+    if (!upper) {
+      if (hasInquiry) issues.push({ key: 'unmatched', severity: 'low', item_name: name, spec, detail: '成本估算表采购项「' + name + (spec ? '(' + spec + ')' : '') + '」在询价单/协议中未找到对应货物，无法比对（建议补充询价）。' });
+      return;
+    }
+    let estPrice = Number(pi.unit_price) || 0;
+    if (!estPrice && (Number(pi.quantity) || 0) > 0) estPrice = (Number(pi.amount) || 0) / Number(pi.quantity);
+    if (estPrice > upper.unit_price) {
+      issues.push({
+        key: 'over_price', severity: 'high', item_name: name, spec,
+        est_price: Math.round(estPrice * 100) / 100, upper_price: upper.unit_price,
+        detail: '「' + name + (spec ? '(' + spec + ')' : '') + '」成本估算单价 ¥' + estPrice + ' 超出询价/协议上限价 ¥' + upper.unit_price + '。'
+      });
+    }
+  });
+  const resolved = (p.procurement_resolutions || []) || [];
+  const openIssues = issues.filter(iss => !resolved.some(r => r.issue_key === issueKey(iss)));
+  return {
+    procurement_cost: Math.round(procCost * 100) / 100,
+    has_inquiry: hasInquiry,
+    inquiry_count: prices.length,
+    issues, open_issues: openIssues, resolved_count: resolved.length,
+    resolved: resolved
+  };
+}
+// 采购合规检查并主动提醒（仅对新增的"高危未消除"问题通知，避免重复刷屏）
+function runProcurementCheckAndNotify(projectId, userId) {
+  const p = db.store.projects.find(x => x.id === projectId);
+  if (!p) return;
+  const procCost = db.store.procurementItems.filter(x => x.project_id === p.id).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+  if (procCost <= 0) return; // 无采购成本无需检查
+  const result = checkProcurementCompliance(projectId);
+  const highOpen = (result.open_issues || []).filter(i => i.severity === 'high');
+  if (!highOpen.length) return;
+  const notified = (p.procurement_notified_keys || []);
+  const newOnes = highOpen.filter(i => !notified.includes(issueKey(i)));
+  if (!newOnes.length) return;
+  const titles = newOnes.map(i => i.detail).join('；');
+  notifyRoles(['admin', 'rd'], {
+    type: 'procurement', title: '采购成本超标提醒：' + (p.project_name || '项目'),
+    body: '项目「' + (p.project_name || '') + '」采购成本比对发现 ' + newOnes.length + ' 项问题，请复核：' + titles,
+    related_project_id: p.id, related_session_id: p.session_id, created_by: userId
+  });
+  p.procurement_notified_keys = Array.from(new Set([...notified, ...newOnes.map(issueKey)]));
+  db.save();
+}
+
+// 人工录入/维护询价单或采购协议的上限价（事业部经办人可录；预审/管理员可改）
+app.post('/api/projects/:id/inquiry-prices', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  if (req.user.role === 'biz' && req.user.business_dept !== p.biz_department) {
+    return res.status(403).json({ error: '无权维护该项目询价价' });
+  }
+  const list = Array.isArray(req.body.items) ? req.body.items : [];
+  const cleaned = list.filter(it => it && it.item_name && Number(it.unit_price) >= 0).map(it => ({
+    item_name: String(it.item_name).trim(),
+    spec: String(it.spec || '').trim(),
+    unit_price: Number(it.unit_price) || 0,
+    source: 'manual'
+  }));
+  p.inquiry_prices = cleaned;
+  p.updated_at = new Date().toISOString();
+  try { runProcurementCheckAndNotify(p.id, req.user.id); } catch (e) { console.error('采购合规检查失败:', e && e.message); }
+  db.save();
+  db.logWorkflow(p.id, 'set_inquiry_prices', `维护询价/协议上限价 ${cleaned.length} 条`, req.user.id);
+  res.json({ ok: true, check: checkProcurementCompliance(p.id) });
+});
+
+// 预审人员/管理员复核后消除采购合规问题
+app.post('/api/projects/:id/procurement-resolve', auth(['admin', 'rd']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  const issueKeyParam = req.body.issue_key;
+  const note = (req.body.note || '').toString();
+  if (!issueKeyParam) return res.status(400).json({ error: '缺少 issue_key' });
+  // 兼容前端传入的"短 key"(iss.key) 或完整 issueKey：统一归一为完整 key 后再比对
+  const chk = checkProcurementCompliance(p.id);
+  const match = (chk.issues || []).find(i => i.key === issueKeyParam || issueKey(i) === issueKeyParam);
+  const targetKey = match ? issueKey(match) : issueKeyParam;
+  p.procurement_resolutions = p.procurement_resolutions || [];
+  if (p.procurement_resolutions.some(r => r.issue_key === targetKey)) {
+    return res.status(400).json({ error: '该问题已消除' });
+  }
+  p.procurement_resolutions.push({
+    issue_key: targetKey, note,
+    by: req.user.id, by_name: req.user.real_name, by_role: req.user.role,
+    at: new Date().toISOString()
+  });
+  p.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(p.id, 'resolve_procurement', `消除采购合规问题 ${targetKey}：${note}`, req.user.id);
+  res.json({ ok: true, check: checkProcurementCompliance(p.id) });
+});
+
+// ==================== 批量发起成果确认 / 批量确认 ====================
+// 按批次批量发起成果确认：遍历批次下"评审中"项目，满足评估要求的直接发起并向事业部发通知；
+// 不满足的（需评估但无评估数据）跳过并记录原因。采购合规问题按"软拦截"：允许发起但回带 warning。
+app.post('/api/sessions/:id/initiate-confirmation-batch', auth(['admin', 'rd']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const sess = db.store.reviewSessions.find(s => s.id === sid);
+  if (!sess) return res.status(404).json({ error: '批次不存在' });
+  const idFilter = Array.isArray(req.body.project_ids) ? req.body.project_ids.map(Number) : null;
+  const targets = db.store.projects.filter(p => p.session_id === sid && p.status === 'reviewing' && (!idFilter || idFilter.includes(p.id)));
+  const initiated = [], skipped = [], warnings = [];
+  targets.forEach(p => {
+    const r = doInitiateConfirmation(p, req.user.id);
+    if (r.ok) {
+      initiated.push({ id: p.id, name: p.project_name });
+      const chk = checkProcurementCompliance(p.id);
+      const openHigh = (chk.open_issues || []).filter(i => i.severity === 'high');
+      if (openHigh.length) warnings.push({ id: p.id, name: p.project_name, issues: openHigh.map(i => i.detail) });
+    } else {
+      skipped.push({ id: p.id, name: p.project_name, reason: r.reason });
+    }
+  });
+  res.json({ ok: true, initiated, skipped, warnings, message: `已发起 ${initiated.length} 个，跳过 ${skipped.length} 个` });
+});
+
+// 事业部批量确认/退回（biz 限本事业部；rd/admin 可代确认）。用于"按部门拆分的结果汇总表"批量闭环。
+app.post('/api/confirmations/batch', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const { project_ids, confirmed, comment } = req.body;
+  if (!Array.isArray(project_ids) || !project_ids.length) return res.status(400).json({ error: '缺少项目列表' });
+  const isBiz = req.user.role === 'biz';
+  const results = [];
+  for (const rawId of project_ids) {
+    const pid = Number(rawId);
+    const p = db.store.projects.find(x => x.id === pid);
+    if (!p) { results.push({ id: pid, ok: false, reason: '项目不存在' }); continue; }
+    if (p.status !== 'pending_confirm') { results.push({ id: pid, ok: false, reason: '非待确认状态' }); continue; }
+    if (isBiz && req.user.business_dept !== p.biz_department) { results.push({ id: pid, ok: false, reason: '非本事业部项目' }); continue; }
+    const c = !!confirmed;
+    const cm = (req.body.comment || '').toString();
+    if (!c && !cm.trim()) { results.push({ id: pid, ok: false, reason: '退回须填原因' }); continue; }
+    p.biz_confirmed = c;
+    p.biz_confirmed_by = req.user.id;
+    p.biz_confirmed_name = req.user.real_name;
+    p.biz_confirmed_at = new Date().toISOString();
+    p.biz_confirm_note = cm;
+    if (!c) p.status = 'reviewing';
+    p.updated_at = new Date().toISOString();
+    db.save();
+    db.logWorkflow(p.id, c ? 'biz_confirm' : 'biz_reject', (req.user.real_name || '事业部') + (c ? '确认成果' : '退回成果：' + cm), req.user.id);
+    results.push({ id: pid, ok: true, confirmed: c });
+  }
+  res.json({ ok: true, results });
+});
+
 // ==================== 工作量重评估（5 人专家评估聚合）====================
 // 取项目所属批次的评审人（专家+会计师），按分配顺序取前 5 位作为 专家1-5
 function getBatchEvaluators(projectId) {
@@ -1522,6 +1806,7 @@ app.get('/api/projects/:id/cost', auth(), (req, res) => {
     cost_summary: p.cost_summary || {},
     work_items,
     evaluators,
+    needs_estimate: needsEstimate(p),
     procurement_items: db.store.procurementItems.filter(x => x.project_id === p.id),
     travel_items: db.store.travelItems.filter(t => t.project_id === p.id),
     category_cost: calculateCategoryCost(db.store.workItems.filter(w => w.project_id === p.id)),
@@ -1711,7 +1996,9 @@ function computeDeptAnalysis(projects, files, sessions) {
           project_id: p.id, project_name: p.project_name,
           review_req_met: reviewReqMet, review_req_duration: reviewReqDuration,
           archive_met: archiveMet, archive_duration: archiveDuration,
-          completeness_at_start: completenessAtStart
+          completeness_at_start: completenessAtStart,
+          confirmation_issued_at: p.confirmation_issued_at || null,
+          biz_confirmed_at: p.biz_confirmed_at || null
         };
       });
       const avg = key => {
@@ -1732,6 +2019,13 @@ function computeDeptAnalysis(projects, files, sessions) {
         });
         cellCompleteness = den ? num / den : null;
       }
+      // 结果确认工作耗时：从下发当天(confirmation_issued_at) 到该部门本批次所有项目反馈完成(biz_confirmed_at 齐全)
+      const issued = projMetrics.map(m => m.confirmation_issued_at).filter(Boolean);
+      const done = projMetrics.map(m => m.biz_confirmed_at).filter(Boolean);
+      const confirmIssuedAt = issued.length ? issued.reduce((a, b) => a < b ? a : b) : null;
+      const confirmDoneAt = done.length ? done.reduce((a, b) => a > b ? a : b) : null;
+      const allConfirmed = projMetrics.length > 0 && projMetrics.every(m => m.biz_confirmed_at);
+      const confirmDuration = (confirmIssuedAt && allConfirmed) ? Math.round((new Date(confirmDoneAt).getTime() - new Date(confirmIssuedAt).getTime()) / DAY) : null;
       rows.push({
         dept, project_count: deptProjects.length,
         review_req_duration_avg: avg('review_req_duration'),
@@ -1739,6 +2033,10 @@ function computeDeptAnalysis(projects, files, sessions) {
         archive_duration_avg: avg('archive_duration'),
         archive_met_count: projMetrics.filter(m => m.archive_met).length,
         completeness_at_start: cellCompleteness,
+        confirm_issued_at: confirmIssuedAt,
+        confirm_done_at: allConfirmed ? confirmDoneAt : null,
+        confirm_all_done: allConfirmed,
+        confirm_duration_days: confirmDuration,
         projects: projMetrics
       });
     });

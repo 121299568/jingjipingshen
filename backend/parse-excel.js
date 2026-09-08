@@ -405,7 +405,67 @@ function parseProjectExcel(filePath) {
   return result;
 }
 
-module.exports = { parseProjectExcel };
+// 通用询价单/采购协议解析：扫描所有工作表，按表头关键词识别「货物名称/规格/单价」列，
+// 抽取每项货物定价，作为采购成本比对的"上限价"来源。兼容 Excel（xlsx/xls）。
+// 说明：Word/PDF 暂不支持自动抽取，需由人员在页面按货物录入上限价（见 server.js 的 inquiry_prices）。
+const INQUIRY_COLS = {
+  item: ['名称', '货物', '物品', '物料', '设备', '品名', '标的', '采购内容', '项目'],
+  spec: ['规格', '型号', '参数', '技术参数'],
+  unit_price: ['单价', '单元价', '含税单价', '未税单价'],
+  qty: ['数量', '台数', '套数', '个数', '工程量'],
+  amount: ['金额', '总价', '合价', '小计', '费用', '总额', '含税金额']
+};
+function matchInquiryCol(headers, kws) {
+  for (let c = 0; c < headers.length; c++) {
+    const h = str(headers[c]);
+    if (kws.some(k => h.includes(k))) return c;
+  }
+  return -1;
+}
+function parseInquiryExcel(filePath) {
+  let wb;
+  try { wb = XLSX.readFile(filePath, { cellFormula: true, raw: true }); }
+  catch (e) { return { __parseError: e && e.message, items: [] }; }
+  const items = [];
+  const seen = new Set();
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws || !ws['!ref']) continue;
+    const { grid } = expandGrid(ws, true);
+    const lastRow = grid.length - 1;
+    if (lastRow < 1) continue;
+    // 探测表头行：同时含"名称/货物/物品/品名"与"单价"的行
+    let hdr = -1;
+    for (let r = 0; r <= Math.min(lastRow, 12); r++) {
+      const rowStr = (grid[r] || []).map(c => str(c)).join('|');
+      if ((rowStr.includes('名称') || rowStr.includes('货物') || rowStr.includes('物品') || rowStr.includes('品名')) && rowStr.includes('单价')) { hdr = r; break; }
+    }
+    if (hdr < 0) continue;
+    const headers = grid[hdr] || [];
+    const cItem = matchInquiryCol(headers, INQUIRY_COLS.item);
+    const cSpec = matchInquiryCol(headers, INQUIRY_COLS.spec);
+    const cPrice = matchInquiryCol(headers, INQUIRY_COLS.unit_price);
+    const cQty = matchInquiryCol(headers, INQUIRY_COLS.qty);
+    const cAmt = matchInquiryCol(headers, INQUIRY_COLS.amount);
+    if (cItem < 0 || cPrice < 0) continue; // 该表不是询价明细
+    for (let r = hdr + 1; r <= lastRow; r++) {
+      const name = str(gv(grid, r, cItem));
+      if (!name) continue;
+      const price = num(gv(grid, r, cPrice));
+      if (price == null) continue;
+      const spec = cSpec >= 0 ? str(gv(grid, r, cSpec)) : '';
+      const qty = cQty >= 0 ? (num(gv(grid, r, cQty)) || 0) : 0;
+      const amount = cAmt >= 0 ? (num(gv(grid, r, cAmt)) || 0) : 0;
+      const key = name + '|' + spec;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({ item_name: name, spec, unit_price: price, quantity: qty, amount });
+    }
+  }
+  return { items };
+}
+
+module.exports = { parseProjectExcel, parseInquiryExcel };
 
 if (require.main === module) {
   const file = process.argv[2];

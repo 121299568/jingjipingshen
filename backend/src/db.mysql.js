@@ -94,7 +94,15 @@ const COL_TYPE = {
   adjusted_cost: 'DOUBLE NOT NULL DEFAULT 0',
   slot: 'INT DEFAULT NULL',
   setting_key: 'VARCHAR(64) NOT NULL DEFAULT ""',
-  setting_value: 'TEXT'
+  setting_value: 'TEXT',
+  type: 'VARCHAR(32) DEFAULT NULL',
+  title: 'VARCHAR(255) DEFAULT NULL',
+  body: 'TEXT',
+  role_scope: 'VARCHAR(32) DEFAULT NULL',
+  related_project_id: 'INT DEFAULT NULL',
+  related_session_id: 'INT DEFAULT NULL',
+  read: 'TINYINT(1) NOT NULL DEFAULT 0',
+  created_by: 'INT DEFAULT NULL'
 };
 
 // ---------- 集合 → 表定义 ----------
@@ -184,6 +192,13 @@ const SCHEMA = {
     cols: ['id', 'setting_key', 'setting_value', 'updated_at'],
     bool: [], num: ['id'],
     indexes: ['UNIQUE KEY `uk_setting_key` (`setting_key`)']
+  },
+  notifications: {
+    table: 'notifications',
+    cols: ['id', 'user_id', 'role_scope', 'type', 'title', 'body',
+      'related_project_id', 'related_session_id', 'read', 'created_by', 'created_at'],
+    bool: ['read'], num: ['id', 'user_id', 'related_project_id', 'related_session_id', 'created_by'],
+    indexes: ['KEY `idx_user_id` (`user_id`)', 'KEY `idx_read` (`read`)']
   }
 };
 
