@@ -1008,22 +1008,34 @@ async function handleDragDropUpload(fileList){
   let html='<div class="alert alert-info">正在上传 '+fileList.length+' 个文件...</div>';
   if(statusEl)statusEl.innerHTML=html;
   let success=0,fail=0;
+  const failures=[];
   for(const file of fileList){
     const fd=new FormData();
     fd.append('file',file);
     fd.append('category','auto');
+    let reason='';
     try{
       const r=await fetch(API+'/projects/'+currentProjectId+'/files',{method:'POST',headers:{'Authorization':'Bearer '+localStorage.getItem('token')},body:fd});
-      const data=await r.json();
+      let data={};
+      try{data=await r.json();}catch(_){data={error:'服务器返回异常'}};
       if(r.ok){
         success++;
         // 刷新files
         await refreshProjectFiles();
         renderUploadPage();
-      }else{fail++;}
-    }catch(e){fail++;}
+      }else{
+        fail++;
+        reason=data.error||(data.message)||('HTTP '+r.status);
+      }
+    }catch(e){fail++;reason=e.message||'网络错误';}
+    if(reason)failures.push({name:file.name,reason:reason});
   }
-  if(statusEl)statusEl.innerHTML='<div class="alert alert-'+(fail===0?'success':'warning')+'">上传完成：成功 '+success+' 个'+(fail>0?'，失败 '+fail+' 个':'')+'</div>';
+  let msg='<div class="alert alert-'+(fail===0?'success':'warning')+'">上传完成：成功 '+success+' 个'+(fail>0?'，失败 '+fail+' 个':'')+'</div>';
+  if(failures.length){
+    msg='<div class="alert alert-warning"><div class="fw-bold mb-1">上传完成：成功 '+success+' 个，失败 '+fail+' 个</div>'+
+      '<ul class="mb-0 ps-3 small">'+failures.map(f=>'<li><span class="fw-bold">'+esc(f.name)+'</span>：'+esc(f.reason)+'</li>').join('')+'</ul></div>';
+  }
+  if(statusEl)statusEl.innerHTML=msg;
   renderProjects();
 }
 

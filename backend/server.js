@@ -2096,6 +2096,23 @@ app.get('*', (req, res) => {
   else res.status(404).json({ error: 'Not found' });
 });
 
+// ==================== 全局错误处理（multer 文件大小/类型等返回 JSON）====================
+app.use((err, req, res, next) => {
+  if (err && err.name === 'MulterError') {
+    let message = '文件上传失败';
+    if (err.code === 'LIMIT_FILE_SIZE') message = '文件大小超过限制（单个最大 ' + config.maxFileSizeMB + 'MB）';
+    else if (err.code === 'LIMIT_FILE_COUNT') message = '单次上传文件数量超过限制';
+    else if (err.code === 'LIMIT_UNEXPECTED_FILE') message = '字段名不匹配，请使用 file 字段上传';
+    else if (err.message) message = err.message;
+    return res.status(400).json({ error: message });
+  }
+  if (err && err.message) {
+    console.error('Unhandled error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+  next(err);
+});
+
 function startServer() {
   app.listen(PORT, () => console.log(`✅ 经济评审后端 v4 已启动 (端口 ${PORT}, 驱动 ${config.dbDriver})`));
 }
