@@ -1925,7 +1925,10 @@ function renderWorkloadProjectTable(d){
       const v=row[c.k];
       if(c.money)return '<td class="text-end">'+fmtWlMoney(v)+'</td>';
       if(c.pct)return '<td class="text-end">'+(v==null?'-':Math.round(v*100)/100+'%')+'</td>';
-      return '<td>'+esc(v==null?'':v)+'</td>';
+      let txt=esc(v==null?'':v);
+      // 免评估项目明确标注，确保"无需专家评估"的项目在评估汇总表中可见、不缺失
+      if(c.k==='project_name' && p.needs_estimate===false) txt+=' <span class="badge bg-light text-dark border" title="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span>';
+      return '<td>'+txt+'</td>';
     }).join('')+'</tr>';
     moneyKeys.forEach(k=>totals[k]+=Number(row[k])||0);
   });

@@ -201,7 +201,11 @@ function notifyDeptBiz(dept, payload) {
 // 是否需要专家/会计师工作量评估：人员外包成本 或 专业分包成本 任一项 >0 才需要；
 // 项目尚无成本估算表时保守按"需要评估"处理，避免漏评估。
 function needsEstimate(p) {
-  if (!p || !p.cost_summary) return true;
+  // 免专家评估判定（与 Feature② 一致）：
+  // 无成本明细，或人员外包成本与专业分包成本均为 0 → 无需专家工作量评估。
+  // 注意：生产上"无需评估"的项目往往未上传成本估算表（cost_summary 为空），
+  // 此时也必须判定为免评估，否则会被批量发起确认误判为"缺评估数据"而跳过。
+  if (!p || !p.cost_summary) return false;
   const cs = p.cost_summary || {};
   const out = Number(cs.outsourcing_cost) || 0;
   const sub = Number(cs.subcontract_cost) || 0;
@@ -1847,6 +1851,7 @@ function buildWorkloadSummary(sid, user) {
       business_sub_direction: p.business_sub_direction || '',
       product_direction: p.product_direction || '',
       cost_summary: cs,
+      needs_estimate: needsEstimate(p),
       work_item_count: wis.length, evaluated_count: evaluatedWI,
       total_adjusted_cost: Math.round(totalAdjusted * 100) / 100
     };
