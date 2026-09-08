@@ -299,6 +299,12 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
           </div>
         </div></div>
       </div>
+      <div class="row g-3 mt-3">
+        <div class="col-12"><div class="card card-custom">
+          <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-clock-history"></i> 资料提交耗时 &amp; 评审开始当天完整度（批次 × 事业部）</h6></div>
+          <div class="card-body" id="deptAnalysisWrap"><p class="text-muted mb-0">加载中…</p></div>
+        </div></div>
+      </div>
       <div class="row g-3 mt-3" id="reportPreviewSection" style="display:none">
         <div class="col-12"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-file-earmark-preview"></i> 报告预览</h6></div><div class="card-body"><iframe id="reportPreviewFrame" style="width:100%;height:600px;border:1px solid #dee2e6;border-radius:4px"></iframe></div></div></div>
       </div>
@@ -1478,6 +1484,7 @@ async function loadStatsRich(){
     renderSessionChart(data.sessions);
     renderDeptTable(data.departments);
     populateDeptSelect(data.departments);
+    renderDeptAnalysis(data.deptAnalysis);
   }catch(e){console.error('Failed to load stats:',e);}
 }
 function renderStatsOverview(data){
@@ -1519,6 +1526,49 @@ function renderDeptTable(depts){
 function populateDeptSelect(depts){
   const select=document.getElementById('statsDepartment');if(!select)return;
   select.innerHTML='<option value="">全部事业部</option>'+depts.map(d=>'<option value="'+d.name+'">'+esc(d.name)+'</option>').join('');
+}
+function fmtDuration(d){
+  if(d==null)return '<span class="text-muted">—</span>';
+  if(d===0)return '<span class="text-secondary">当天</span>';
+  if(d<0)return '<span class="text-success">提前'+(-d)+'天</span>';
+  return '<span class="text-danger">滞后'+d+'天</span>';
+}
+function fmtPctBar(v){
+  if(v==null)return '<span class="text-muted">—</span>';
+  const pct=(v*100).toFixed(1);
+  const cls=v>=0.8?'bg-success':v>=0.5?'bg-warning':'bg-danger';
+  const tcls=v>=0.8?'text-success':v>=0.5?'text-warning':'text-danger';
+  return '<span class="'+tcls+' fw-bold">'+pct+'%</span><div class="progress mt-1" style="height:6px;width:120px"><div class="progress-bar '+cls+'" style="width:'+pct+'%"></div></div>';
+}
+function renderDeptAnalysis(d){
+  const wrap=document.getElementById('deptAnalysisWrap');if(!wrap)return;
+  if(!d||!d.length){wrap.innerHTML='<p class="text-muted text-center mb-0">暂无批次数据</p>';return;}
+  let html='';
+  d.forEach(s=>{
+    const startTxt=s.review_started_at?new Date(s.review_started_at).toLocaleString('zh-CN'):'<span class="text-muted">未记录评审开始时间</span>';
+    const statusTxt={pending:'待启动',in_progress:'评审中',completed:'已归档'}[s.status]||s.status;
+    const approxNote=s.is_approx_start?' <span class="badge bg-light text-secondary border ms-1" title="该批次未记录评审开始时间，此处用批次创建日近似">近似</span>':'';
+    html+='<div class="mb-4"><div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">'+
+      '<div><strong>'+esc(s.name||('批次'+s.id))+'</strong> <span class="badge bg-secondary ms-1">'+statusTxt+'</span>'+approxNote+'</div>'+
+      '<div class="small text-muted">评审开始：'+startTxt+'</div></div>';
+    if(!s.rows.length){html+='<p class="text-muted small mb-0">该批次暂无项目</p></div>';return;}
+    html+='<div class="table-responsive"><table class="table table-sm table-bordered align-middle mb-0"><thead class="table-light"><tr>'+
+      '<th>事业部</th><th>项目数</th>'+
+      '<th>满足评审要求耗时<br><small class="text-muted">成本估算表+合同</small></th><th>满足数</th>'+
+      '<th>满足归档要求耗时<br><small class="text-muted">资料全提交</small></th><th>满足数</th>'+
+      '<th>评审开始当天完整度</th></tr></thead><tbody>';
+    s.rows.forEach(r=>{
+      const rrd=r.review_req_duration_avg==null?null:Math.round(r.review_req_duration_avg);
+      const ard=r.archive_duration_avg==null?null:Math.round(r.archive_duration_avg);
+      html+='<tr><td>'+esc(r.dept)+'</td><td>'+r.project_count+'</td>'+
+        '<td>'+fmtDuration(rrd)+'</td><td>'+r.review_req_met_count+'/'+r.project_count+'</td>'+
+        '<td>'+fmtDuration(ard)+'</td><td>'+r.archive_met_count+'/'+r.project_count+'</td>'+
+        '<td>'+fmtPctBar(r.completeness_at_start)+'</td></tr>';
+    });
+    html+='</tbody></table></div>'+
+      '<div class="small text-muted mt-1">耗时以「评审开始当天」为基准：负数=评审开始前已提交（提前），正数=评审开始后才补齐（滞后）。归档要求=所属批次下发的资料清单全部类别提交。</div></div>';
+  });
+  wrap.innerHTML=html;
 }
 function generateReport(){
   const type=document.getElementById('statsReportType').value;

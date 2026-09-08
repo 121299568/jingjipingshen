@@ -429,7 +429,9 @@ app.post('/api/sessions', auth(['admin', 'rd']), (req, res) => {
     checklist: Array.isArray(req.body.checklist) ? req.body.checklist.filter(c => FILE_CATEGORIES.includes(c)) : [],
     status: body.status && validStatus.includes(body.status) ? body.status : 'pending',
     creator_id: req.user.id,
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    // 评审开始时间：批次转「评审中」时记录；此处若直接以 in_progress 创建也一并记录
+    review_started_at: body.status === 'in_progress' ? new Date().toISOString() : null
   };
   db.store.reviewSessions.push(s);
   db.save();
@@ -473,6 +475,7 @@ app.patch('/api/sessions/:id', auth(['admin', 'rd']), (req, res) => {
       }
     }
     s.status = newStatus;
+    if (newStatus === 'in_progress' && !s.review_started_at) s.review_started_at = new Date().toISOString();
     if (newStatus === 'completed') s.completed_at = new Date().toISOString();
     db.logWorkflow(null, newStatus === 'completed' ? 'archive_session' : 'update_session_status',
       (newStatus === 'completed' ? '归档批次：' : '更新批次状态为 ' + newStatus + '：') + (s.name || ''), req.user.id);
@@ -1650,6 +1653,107 @@ function getDetailedStats(user) {
   };
 }
 
+// 事业部分析：批次 × 部门 矩阵
+// 三项指标（均以「评审开始当天」为基准日，带符号天数：负=评审开始前已提交=提前）：
+//   1) 满足评审要求耗时 = 成本估算表 + 合同 均提交 之日 距评审开始的天数
+//   2) 满足归档要求耗时 = 批次下发的归档清单(checklist)全部类别均提交 之日 距评审开始的天数
+//   3) 评审开始当天资料完整度 = 评审开始当日，归档清单各类别已提交数 / 类别总数
+// 旧批次若未记录评审开始时间(in_progress/completed 但无 review_started_at)，回退用 created_at 并标记 is_approx_start
+function computeDeptAnalysis(projects, files, sessions) {
+  const DAY = 86400000;
+  const toMs = iso => { if (!iso) return null; const t = new Date(iso).getTime(); return isNaN(t) ? null : t; };
+  const dayDiff = (fromISO, toISO) => {
+    const a = toMs(fromISO), b = toMs(toISO);
+    if (a == null || b == null) return null;
+    return Math.round((b - a) / DAY);
+  };
+  const latestUpload = (pid, cat) => {
+    const fs = files.filter(f => f.project_id === pid && f.file_category === cat);
+    if (!fs.length) return null;
+    return fs.reduce((m, f) => (f.upload_time > m ? f.upload_time : m), fs[0].upload_time);
+  };
+  const sessionsOut = [];
+  sessions.forEach(s => {
+    const rawStart = s.review_started_at || null;
+    const reviewStart = rawStart || ((s.status === 'in_progress' || s.status === 'completed') ? s.created_at : null);
+    const isApproxStart = !rawStart && !!reviewStart;
+    const required = (Array.isArray(s.checklist) && s.checklist.length) ? s.checklist : FILE_CATEGORIES;
+    const sessProjects = projects.filter(p => p.session_id === s.id);
+    const deptSet = new Set(sessProjects.map(p => (p.biz_department || '未分类')).filter(Boolean));
+    const rows = [];
+    deptSet.forEach(dept => {
+      const deptProjects = sessProjects.filter(p => (p.biz_department || '未分类') === dept);
+      const projMetrics = deptProjects.map(p => {
+        // 满足评审要求：成本估算表 + 合同 均已提交
+        const est = latestUpload(p.id, 'estimation');
+        const con = latestUpload(p.id, 'contract');
+        const reviewReqMet = !!(est && con);
+        const reviewReqAt = reviewReqMet ? (est > con ? est : con) : null;
+        const reviewReqDuration = reviewStart ? dayDiff(reviewStart, reviewReqAt) : null;
+        // 满足归档要求：归档清单全部类别均已提交
+        const reqUploads = [];
+        let archiveMet = true;
+        required.forEach(cat => { const u = latestUpload(p.id, cat); if (u) reqUploads.push(u); else archiveMet = false; });
+        const archiveAt = archiveMet ? reqUploads.reduce((m, u) => (u > m ? u : m), reqUploads[0]) : null;
+        const archiveDuration = reviewStart ? dayDiff(reviewStart, archiveAt) : null;
+        // 评审开始当天资料完整度（按项目）
+        let completenessAtStart = null;
+        if (reviewStart) {
+          const st = new Date(reviewStart); st.setHours(0, 0, 0, 0);
+          const up = required.filter(cat => {
+            const u = latestUpload(p.id, cat); if (!u) return false;
+            const d = new Date(u); d.setHours(0, 0, 0, 0);
+            return d <= st;
+          }).length;
+          completenessAtStart = required.length ? up / required.length : 0;
+        }
+        return {
+          project_id: p.id, project_name: p.project_name,
+          review_req_met: reviewReqMet, review_req_duration: reviewReqDuration,
+          archive_met: archiveMet, archive_duration: archiveDuration,
+          completeness_at_start: completenessAtStart
+        };
+      });
+      const avg = key => {
+        const vals = projMetrics.map(m => m[key]).filter(v => v != null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      };
+      // 部门级评审开始当天完整度（跨项目合计占比）
+      let cellCompleteness = null;
+      if (reviewStart) {
+        const st = new Date(reviewStart); st.setHours(0, 0, 0, 0);
+        let num = 0, den = 0;
+        deptProjects.forEach(p => {
+          required.forEach(cat => {
+            den++;
+            const u = latestUpload(p.id, cat);
+            if (u) { const d = new Date(u); d.setHours(0, 0, 0, 0); if (d <= st) num++; }
+          });
+        });
+        cellCompleteness = den ? num / den : null;
+      }
+      rows.push({
+        dept, project_count: deptProjects.length,
+        review_req_duration_avg: avg('review_req_duration'),
+        review_req_met_count: projMetrics.filter(m => m.review_req_met).length,
+        archive_duration_avg: avg('archive_duration'),
+        archive_met_count: projMetrics.filter(m => m.archive_met).length,
+        completeness_at_start: cellCompleteness,
+        projects: projMetrics
+      });
+    });
+    rows.sort((a, b) => (b.completeness_at_start == null ? -1 : b.completeness_at_start) - (a.completeness_at_start == null ? -1 : a.completeness_at_start));
+    sessionsOut.push({
+      session_id: s.id, name: s.name, status: s.status,
+      review_started_at: rawStart, is_approx_start: isApproxStart,
+      review_time: s.review_time || null,
+      rows
+    });
+  });
+  sessionsOut.sort((a, b) => (b.review_started_at || '').localeCompare(a.review_started_at || ''));
+  return sessionsOut;
+}
+
 app.get('/api/stats/detailed', auth(), (req, res) => {
   const user = req.user;
   const { projects, files, sessions, estimates } = getDetailedStats(user);
@@ -1735,6 +1839,7 @@ app.get('/api/stats/detailed', auth(), (req, res) => {
       total_amount: projects.reduce((s, p) => s + Number(p.contract_amount || 0), 0)
     },
     sessions: sessionStats, departments: deptStats,
+    deptAnalysis: computeDeptAnalysis(projects, files, sessions),
     file_categories: fileCategoryStats, status_distribution: statusDist,
     estimates: estimateStats, monthly_trend: monthlyTrend, experts: expertAnalysis
   });
