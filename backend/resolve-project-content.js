@@ -1,13 +1,17 @@
 // 解析文件内容，按其中的项目编号/名称判断应挂接哪个项目。
-// 当前可解析：xlsx/xls（抽取全部单元格文本）。pdf/doc/docx 等无第三方库时不自动解析，
-// 交由调用方的「同文件夹归并」逻辑兜底（同文件夹内只要有文件解析出项目，其余文件一并挂接）。
+// 按扩展名自动选择解析器：
+//   .xlsx/.xls -> 抽取全部单元格文本（xlsx）
+//   .pdf       -> 抽取文本（pdf-parse）
+//   .docx      -> 抽取文本（mammoth，仅支持 OOXML 的 .docx，旧版 .doc 不支持）
+// 解析不出来的文件（如 .doc、图片、无文本的 pdf）返回空文本，
+// 交由调用方的「同文件夹归并」逻辑兜底（同文件夹内只要有文件解析出项目，其余一并挂接）。
 const path = require('path');
 
 function normStr(s) {
   return (s == null ? '' : String(s)).replace(/\s+/g, '').toLowerCase();
 }
 
-// 从 xlsx 抽取全部单元格文本，拼成一段用于检索的字符串
+// 从 xlsx 抽取全部单元格文本，拼成一段用于检索的字符串（同步）
 function extractXlsxText(filePath) {
   try {
     const XLSX = require('xlsx');
@@ -31,12 +35,48 @@ function extractXlsxText(filePath) {
   }
 }
 
-// projects: 当前批次下的项目数组（含 project_code / project_name / id）
-// 返回 { project, by } 或 null
-function resolveProjectByContent(filePath, projects) {
+// 从 PDF 抽取文本（pdf-parse，异步）
+async function extractPdfText(filePath) {
+  try {
+    const fs = require('fs');
+    const pdfParse = require('pdf-parse');
+    const buf = fs.readFileSync(filePath);
+    const data = await pdfParse(buf);
+    return (data && data.text) ? data.text : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+// 从 docx 抽取纯文本（mammoth，异步；仅 .docx 有效，.doc 会失败返回空）
+async function extractDocxText(filePath) {
+  try {
+    const mammoth = require('mammoth');
+    const result = await mammoth.extractRawText({ path: filePath });
+    return (result && result.value) ? result.value : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+// 依据扩展名选择解析器，返回文件全文文本
+async function extractText(filePath) {
   const ext = (path.extname(filePath) || '').toLowerCase();
+  try {
+    if (ext === '.xlsx' || ext === '.xls') return extractXlsxText(filePath);
+    if (ext === '.pdf') return await extractPdfText(filePath);
+    if (ext === '.docx') return await extractDocxText(filePath);
+  } catch (e) {
+    return '';
+  }
+  return '';
+}
+
+// projects: 当前批次下的项目数组（含 project_code / project_name / id）
+// 返回 { project, by } 或 null（异步）
+async function resolveProjectByContent(filePath, projects) {
   let text = '';
-  if (ext === '.xlsx' || ext === '.xls') text = extractXlsxText(filePath);
+  try { text = await extractText(filePath); } catch (e) { text = ''; }
   if (!text) return null;
   const nt = normStr(text);
   let best = null, bestScore = 0, bestBy = '';
@@ -71,4 +111,4 @@ function resolveProjectByContent(filePath, projects) {
   return best ? { project: best, by: bestBy } : null;
 }
 
-module.exports = { normStr, extractXlsxText, resolveProjectByContent };
+module.exports = { normStr, extractXlsxText, extractPdfText, extractDocxText, extractText, resolveProjectByContent };

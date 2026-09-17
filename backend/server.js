@@ -1229,7 +1229,7 @@ function extractCostIntoProject(project, parsed, userId) {
   db.logWorkflow(project.id, 'extract_cost', `[文件夹]解析成本估算表，抽取工作项${parsed.work_items.length}条、采购${parsed.procurement_items.length}条、差旅${parsed.travel_items.length}条`, userId);
 }
 
-function handleFolderUpload(req, res) {
+async function handleFolderUpload(req, res) {
   const sessionId = parseInt(req.params.id);
   const session = db.store.reviewSessions.find(s => s.id === sessionId);
   if (!session) return res.status(404).json({ error: '批次不存在' });
@@ -1241,15 +1241,15 @@ function handleFolderUpload(req, res) {
   try { overrides = JSON.parse(req.body.overrides || '{}') || {}; } catch (_) {}
   const projects = db.store.projects.filter(p => p.session_id === sessionId);
   const resolveContent = require('./resolve-project-content').resolveProjectByContent;
-  // 第一遍：逐文件解析归属（人工改派 > 文件内容识别 > 文件名兜底）
-  const pre = files.map((f, i) => {
+  // 第一遍：逐文件解析归属（人工改派 > 文件内容识别 > 文件名兜底）。内容识别为异步（pdf/docx 需读取文件内容）
+  const pre = await Promise.all(files.map(async (f, i) => {
     const rel = (relPaths[i] || f.originalname || '').toString();
     const realName = decodeFilename(f.originalname);
     const override = overrides[String(i)] || {};
     let match = null, matchedBy = '';
     if (override.projectId) { match = projects.find(p => p.id === parseInt(override.projectId)); if (match) matchedBy = 'manual'; }
     if (!match) {
-      const c = resolveContent(f.path, projects);
+      const c = await resolveContent(f.path, projects);
       if (c) { match = c.project; matchedBy = c.by; }
     }
     if (!match) {
@@ -1263,7 +1263,7 @@ function handleFolderUpload(req, res) {
       }
     }
     return { f, i, rel, realName, override, match, matchedBy };
-  });
+  }));
   // 第二遍：同文件夹归并——若某文件夹内有文件解析出项目，该文件夹下其余未匹配文件一并挂接到该项目
   const byFolder = {};
   for (const it of pre) {
@@ -1354,7 +1354,7 @@ function handleFolderUpload(req, res) {
 app.post('/api/sessions/:id/upload-folder', auth(['admin', 'rd', 'biz']), (req, res) => {
   folderUpload(req, res, (err) => {
     if (err) return res.status(400).json({ error: '上传失败：' + (err && err.message || err) });
-    try { handleFolderUpload(req, res); } catch (e) { console.error('文件夹上传处理异常:', e); res.status(500).json({ error: '处理失败：' + (e && e.message) }); }
+    handleFolderUpload(req, res).catch(e => { console.error('文件夹上传处理异常:', e); res.status(500).json({ error: '处理失败：' + (e && e.message) }); });
   });
 });
 
