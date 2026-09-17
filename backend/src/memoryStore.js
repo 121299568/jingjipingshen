@@ -128,11 +128,12 @@ function build() {
   const userPermissions = [];
   const settings = [];
   const notifications = [];
+  const annual = [];
 
   return {
     users, reviewSessions, projects, workItems, procurementItems,
     travelItems, expertEstimates, confirmations, files, workflowLogs,
-    userGroups, userPermissions, sessionAssignments: [], settings, notifications
+    userGroups, userPermissions, sessionAssignments: [], settings, notifications, annual
   };
 }
 

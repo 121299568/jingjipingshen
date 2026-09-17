@@ -298,7 +298,11 @@ function authorizeFile(req, res, next) {
   if (!file) return res.status(404).json({ error: '文件不存在' });
   if (user.role === 'admin' || user.role === 'rd') return next();
   const proj = db.store.projects.find(p => p.id === file.project_id);
-  if (!proj) return res.status(403).json({ error: '无权访问' });
+  if (!proj) {
+    // 收件箱文件（未分配到项目的文件夹批量上传）：仅上传者本人可访问
+    if (file.uploader_id && file.uploader_id === user.id) return next();
+    return res.status(403).json({ error: '无权访问' });
+  }
   if (user.role === 'biz' && user.business_dept && user.business_dept === proj.biz_department) return next();
   if (user.role === 'expert' || user.role === 'accountant') {
     if (isAssignedToProject(user, file.project_id)) return next();
@@ -1199,6 +1203,161 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
   res.json(file);
 });
 
+// ==================== 文件夹批量上传（按项目编号匹配 + 合同额二次校验）====================
+// 用于「线上线下双轨」：把一整个项目资料文件夹一次性上传，系统按文件名/子文件夹名中的
+// 项目编号(主)或项目名称(次)自动归属到对应项目；估算表解析出的合同额与项目登记合同额
+// 做二次比对（仅 warn 不阻塞，符合「一般成本估算表能对上、其余也不会错」的判定逻辑）。
+// 未能匹配到项目的文件进入该批次「收件箱」待人工分配。
+const folderUpload = upload.array('files', 500);
+
+function extractCostIntoProject(project, parsed, userId) {
+  db.store.workItems = db.store.workItems.filter(w => w.project_id !== project.id);
+  db.store.procurementItems = db.store.procurementItems.filter(x => x.project_id !== project.id);
+  db.store.travelItems = db.store.travelItems.filter(t => t.project_id !== project.id);
+  parsed.work_items.forEach(w => db.store.workItems.push({ id: db.nextId(db.store.workItems), project_id: project.id, ...w }));
+  parsed.procurement_items.forEach(x => db.store.procurementItems.push({
+    id: db.nextId(db.store.procurementItems), project_id: project.id,
+    item_name: x.name, spec: x.spec, amount: x.subtotal, supplier: x.supplier, remark: x.remark, ...x
+  }));
+  parsed.travel_items.forEach(t => db.store.travelItems.push({
+    id: db.nextId(db.store.travelItems), project_id: project.id,
+    purpose: t.purpose, person: t.person, days: t.days,
+    amount: (Number(t.hotel) || 0) + (Number(t.per_diem) || 0) + (Number(t.transport) || 0),
+    remark: t.remark, ...t
+  }));
+  project.cost_summary = parsed.cost_summary;
+  db.logWorkflow(project.id, 'extract_cost', `[文件夹]解析成本估算表，抽取工作项${parsed.work_items.length}条、采购${parsed.procurement_items.length}条、差旅${parsed.travel_items.length}条`, userId);
+}
+
+function handleFolderUpload(req, res) {
+  const sessionId = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sessionId);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: '未收到文件' });
+  let relPaths = [];
+  try { relPaths = JSON.parse(req.body.relPaths || '[]') || []; } catch (_) {}
+  let overrides = {};
+  try { overrides = JSON.parse(req.body.overrides || '{}') || {}; } catch (_) {}
+  const projects = db.store.projects.filter(p => p.session_id === sessionId);
+  const report = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const rel = (relPaths[i] || f.originalname || '').toString();
+    const realName = decodeFilename(f.originalname);
+    const override = overrides[String(i)] || {};
+    // 1) 匹配项目：优先人工改派，其次按项目编号，再次按项目名称
+    let match = null, matchedBy = '';
+    if (override.projectId) { match = projects.find(p => p.id === parseInt(override.projectId)); if (match) matchedBy = 'manual'; }
+    if (!match) {
+      const byCode = projects.filter(p => p.project_code && rel.includes(p.project_code));
+      if (byCode.length) { match = byCode[0]; matchedBy = 'code'; }
+      else {
+        const base = rel.split('/').pop().replace(/\.[^.]+$/, '');
+        const byName = projects.filter(p => p.project_name && (rel.includes(p.project_name) || (base && p.project_name.includes(base))));
+        if (byName.length) { match = byName[0]; matchedBy = 'name'; }
+      }
+    }
+    const category = (override.category && override.category !== 'auto') ? override.category : inferFileCategory(realName);
+    const validation = { level: 'ok', messages: [] };
+    const isExcel = /\.(xlsx|xls)$/i.test(realName);
+    let parsed = null;
+    if (match && isExcel) {
+      try { parsed = require('./parse-excel').parseProjectExcel(f.path); }
+      catch (e) { parsed = { __parseError: e && e.message }; }
+      if (parsed && !parsed.__parseError) {
+        const eContract = parsed.project && parsed.project.contract_amount != null ? Number(parsed.project.contract_amount) : null;
+        const pContract = match.contract_amount != null ? Number(match.contract_amount) : null;
+        if (eContract != null && pContract != null && Math.abs(eContract - pContract) > 1) {
+          validation.level = 'warn';
+          validation.messages.push(`成本估算表合同额 ¥${eContract.toLocaleString()} 与项目登记合同额 ¥${pContract.toLocaleString()} 不一致`);
+        }
+        const estCost = parsed.cost_summary && parsed.cost_summary.total_cost != null ? Number(parsed.cost_summary.total_cost) : null;
+        const internalCost = match.internal_estimated_cost != null ? Number(match.internal_estimated_cost) : null;
+        if (internalCost != null && estCost != null && estCost >= internalCost) {
+          validation.messages.push(`估算成本 ¥${estCost.toLocaleString()} 不小于明细表「内部填报预估成本」 ¥${internalCost.toLocaleString()}`);
+        }
+      }
+    }
+    const ext = path.extname(realName);
+    const safe = realName.replace(/[^\w\u4e00-\u9fa5.-]/g, '_');
+    if (match) {
+      const seq = generateFileSeq(match.id);
+      const newFilename = `${match.id}-${seq}-${safe}`;
+      const newPath = path.join(UPLOAD_DIR, newFilename);
+      if (fs.existsSync(f.path)) fs.renameSync(f.path, newPath);
+      let extracted = null;
+      let finalCategory = category;
+      if (finalCategory === 'estimation' && parsed && !parsed.__parseError) {
+        try { extractCostIntoProject(match, parsed, req.user.id); extracted = { work_items: parsed.work_items.length, procurement_items: parsed.procurement_items.length, travel_items: parsed.travel_items.length, total_cost: parsed.cost_summary.total_cost || 0 }; }
+        catch (e) { console.error('文件夹估算表解析失败:', e && e.message); }
+      } else if (parsed && parsed.__parseError) {
+        console.error('文件夹估算表解析失败:', parsed.__parseError);
+      }
+      const file = {
+        id: db.nextId(db.store.files), project_id: match.id, filename: newFilename, originalname: realName,
+        file_seq: seq, file_type: ext.slice(1), file_category: finalCategory,
+        auto_detected: !override.category || override.category === 'auto',
+        uploader_id: req.user.id, uploader_name: req.user.real_name || req.user.username,
+        url: `/uploads/${newFilename}`, description: '文件夹批量上传', upload_time: new Date().toISOString()
+      };
+      db.store.files.push(file);
+      try { runProcurementCheckAndNotify(match.id, req.user.id); } catch (e) { console.error('采购合规检查失败:', e && e.message); }
+      db.logWorkflow(match.id, 'upload_file', `[文件夹]上传${getFileCategoryName(finalCategory)}: ${realName}${validation.messages.length ? '（校验：' + validation.messages.join('；') + '）' : ''}`, req.user.id);
+      report.push({ filename: realName, relPath: rel, matchedProjectId: match.id, matchedProjectName: match.project_name, matchedBy, category: finalCategory, validation, extracted });
+    } else {
+      const newFilename = `inbox-${sessionId}-${Date.now()}-${i}-${safe}`;
+      const newPath = path.join(UPLOAD_DIR, newFilename);
+      if (fs.existsSync(f.path)) fs.renameSync(f.path, newPath);
+      const file = {
+        id: db.nextId(db.store.files), project_id: null, session_id: sessionId, filename: newFilename, originalname: realName,
+        file_seq: 0, file_type: ext.slice(1), file_category: category, auto_detected: true,
+        uploader_id: req.user.id, uploader_name: req.user.real_name || req.user.username,
+        url: `/uploads/${newFilename}`, description: '文件夹批量上传-待分配', upload_time: new Date().toISOString(), inbox: true
+      };
+      db.store.files.push(file);
+      report.push({ filename: realName, relPath: rel, matchedProjectId: null, matchedProjectName: '(未匹配，待分配)', matchedBy: 'none', category, validation, inbox: true });
+    }
+  }
+  db.save();
+  res.json({
+    ok: true, count: files.length,
+    matched: report.filter(r => r.matchedProjectId).length,
+    unmatched: report.filter(r => !r.matchedProjectId).length,
+    report
+  });
+}
+
+app.post('/api/sessions/:id/upload-folder', auth(['admin', 'rd', 'biz']), (req, res) => {
+  folderUpload(req, res, (err) => {
+    if (err) return res.status(400).json({ error: '上传失败：' + (err && err.message || err) });
+    try { handleFolderUpload(req, res); } catch (e) { console.error('文件夹上传处理异常:', e); res.status(500).json({ error: '处理失败：' + (e && e.message) }); }
+  });
+});
+
+// 批次收件箱（文件夹批量上传中未匹配到项目的文件）
+app.get('/api/sessions/:id/inbox', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const sessionId = parseInt(req.params.id);
+  const list = db.store.files.filter(f => f.session_id === sessionId && f.inbox);
+  res.json(list);
+});
+
+// 收件箱文件改派到具体项目
+app.post('/api/files/:id/reassign', auth(['admin', 'rd']), (req, res) => {
+  const fileId = parseInt(req.params.id);
+  const file = db.store.files.find(f => f.id === fileId);
+  if (!file) return res.status(404).json({ error: '文件不存在' });
+  const target = db.store.projects.find(p => p.id === parseInt(req.body.projectId));
+  if (!target) return res.status(404).json({ error: '目标项目不存在' });
+  file.project_id = target.id;
+  file.inbox = false;
+  file.description = (file.description || '') + ' [已分配至 ' + (target.project_name || target.id) + ']';
+  file.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(target.id, 'upload_file', `收件箱文件「${file.originalname}」分配给本项目`, req.user.id);
+  res.json(file);
+});
+
 app.get('/api/projects/:id/files', auth(), (req, res) => {
   const projectId = parseInt(req.params.id);
   const project = db.store.projects.find(p => p.id === projectId);
@@ -1940,6 +2099,162 @@ app.get('/api/sessions/:id/workload-summary/export', auth(['admin', 'rd']), (req
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="batch_${sid}_summary.xlsx"; filename*=UTF-8''${encodeURIComponent(fname)}`);
   res.send(buf);
+});
+
+// 导出某批次「事业部确认表」为 xlsx（支持按事业部名称筛选；含认可/不认可/退回原因/确认人/时间）
+app.get('/api/sessions/:id/biz-confirm-export', auth(['admin', 'rd']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sid);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const deptFilter = (req.query.biz_department || '').toString().trim();
+  let projects = db.store.projects.filter(p => p.session_id === sid);
+  if (deptFilter) projects = projects.filter(p => (p.biz_department || '') === deptFilter);
+  const headers = ['序号', '项目编号', '项目名称', '项目承建部门', '合同额', '项目总成本估算', '估算利润率(%)',
+    '评审结论', '事业部确认', '退回原因', '确认人', '确认时间'];
+  const rows = projects.map((p, idx) => {
+    const cs = p.cost_summary || {};
+    const tc = Number(cs.total_cost) || 0;
+    const contract = Number(p.contract_amount) || 0;
+    const profitRate = (contract > 0 && tc > 0) ? Math.round((1 - tc / contract) * 100 * 100) / 100 : null;
+    const confirmText = p.biz_confirmed ? '认可' : (p.biz_confirmed_at ? '不认可' : '未确认');
+    return [
+      idx + 1, p.project_code || '', p.project_name, p.biz_department || '', contract, tc, profitRate,
+      p.audit_conclusion || '', confirmText, p.biz_confirmed ? '' : (p.biz_confirm_note || ''),
+      p.biz_confirmed_name || '', (p.biz_confirmed_at || '').slice(0, 10)
+    ];
+  });
+  const aoa = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = headers.map((h, i) => ({ wch: i === 2 ? 28 : (i === 7 ? 24 : (i === 9 ? 22 : 12)) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '事业部确认表');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const suffix = deptFilter ? '_' + deptFilter : '';
+  const fname = `批次${sid}_事业部确认表${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="batch_${sid}_biz_confirm.xlsx"; filename*=UTF-8''${encodeURIComponent(fname)}`);
+  res.send(buf);
+});
+
+// ==================== 年度评审结果汇总（协同查看 / 编辑 / 评论）====================
+// 「线上线下双轨」下，年度汇总作为一份可多人协同的"云文档"：admin/rd 可编辑段落并留痕，
+// 所有角色可查看、可评论；前端定时刷新以体现协同。数据落 annual 集合（mysql 经 extra 自动持久化）。
+function annualScaffold(year) {
+  return {
+    year: Number(year),
+    data: {
+      sections: [
+        { key: 'overview', title: '年度总体情况', content: '' },
+        { key: 'problems', title: '存在的主要问题', content: '' },
+        { key: 'plan', title: '下一步工作建议', content: '' }
+      ],
+      edit_history: [], comments: []
+    }
+  };
+}
+function getAnnualDoc(year) {
+  return db.store.annual.find(a => a.year === Number(year)) || null;
+}
+function buildAnnualAggregation(year, user) {
+  const y = String(year);
+  const sessions = (db.store.reviewSessions || []).filter(s => {
+    const t = s.created_at || s.review_time;
+    return t && String(t).slice(0, 4) === y;
+  });
+  const sessionIds = new Set(sessions.map(s => s.id));
+  const sName = {}; sessions.forEach(s => sName[s.id] = s.name);
+  const projects = db.filterByDept('projects', user).filter(p => sessionIds.has(p.session_id));
+  const deptMap = {}, sessMap = {};
+  let contractSum = 0, costSum = 0, completed = 0;
+  projects.forEach(p => {
+    const cs = p.cost_summary || {};
+    const contract = Number(p.contract_amount) || 0;
+    const cost = Number(cs.total_cost) || 0;
+    const margin = (contract > 0 && cost > 0) ? (1 - cost / contract) : null;
+    const d = p.biz_department || '未知';
+    deptMap[d] = deptMap[d] || { biz_department: d, projectCount: 0, contractSum: 0, costSum: 0, margins: [], completedCount: 0 };
+    deptMap[d].projectCount++; deptMap[d].contractSum += contract; deptMap[d].costSum += cost;
+    if (margin != null) deptMap[d].margins.push(margin);
+    if (p.status === 'completed') deptMap[d].completedCount++;
+    const sid = p.session_id;
+    sessMap[sid] = sessMap[sid] || { session_id: sid, name: sName[sid] || '', projectCount: 0, contractSum: 0, costSum: 0, completedCount: 0 };
+    sessMap[sid].projectCount++; sessMap[sid].contractSum += contract; sessMap[sid].costSum += cost;
+    if (p.status === 'completed') sessMap[sid].completedCount++;
+    contractSum += contract; costSum += cost; if (p.status === 'completed') completed++;
+  });
+  const byDepartment = Object.values(deptMap).map(d => ({
+    biz_department: d.biz_department, projectCount: d.projectCount,
+    contractSum: Math.round(d.contractSum), costSum: Math.round(d.costSum),
+    marginAvg: d.margins.length ? Math.round(d.margins.reduce((a, b) => a + b, 0) / d.margins.length * 100 * 100) / 100 : null,
+    completedCount: d.completedCount
+  })).sort((a, b) => b.contractSum - a.contractSum);
+  const bySession = Object.values(sessMap).map(s => ({
+    session_id: s.session_id, name: s.name, projectCount: s.projectCount,
+    contractSum: Math.round(s.contractSum), costSum: Math.round(s.costSum), completedCount: s.completedCount
+  })).sort((a, b) => a.session_id - b.session_id);
+  return {
+    year, batchCount: sessions.length, projectCount: projects.length,
+    contractSum: Math.round(contractSum), costSum: Math.round(costSum), completedCount: completed,
+    byDepartment, bySession
+  };
+}
+
+app.get('/api/annual/:year', auth(), (req, res) => {
+  const year = parseInt(req.params.year);
+  if (!year || isNaN(year)) return res.status(400).json({ error: '无效年份' });
+  const aggregation = buildAnnualAggregation(year, req.user);
+  const doc = getAnnualDoc(year);
+  res.json({ aggregation, doc: doc ? doc : annualScaffold(year) });
+});
+
+app.put('/api/annual/:year', auth(['admin', 'rd']), (req, res) => {
+  const year = parseInt(req.params.year);
+  if (!year || isNaN(year)) return res.status(400).json({ error: '无效年份' });
+  const incoming = Array.isArray(req.body.sections) ? req.body.sections : [];
+  let doc = getAnnualDoc(year);
+  const now = new Date().toISOString();
+  if (!doc) {
+    doc = { id: db.nextId(db.store.annual), year, data: annualScaffold(year).data, updated_at: now };
+    db.store.annual.push(doc);
+  }
+  const existing = (doc.data && doc.data.sections) || [];
+  const hist = (doc.data && doc.data.edit_history) || [];
+  const byKey = {}; existing.forEach(s => byKey[s.key] = s);
+  incoming.forEach(s => {
+    const prev = byKey[s.key];
+    const before = prev ? (prev.content || '') : '';
+    const after = s.content || '';
+    if (before !== after) {
+      hist.push({ user: req.user.real_name || req.user.username, at: now, field: s.key, before, after });
+    }
+    if (prev) { prev.content = after; if (s.title) prev.title = s.title; }
+    else existing.push({ key: s.key, title: s.title || s.key, content: after });
+  });
+  doc.data.sections = existing;
+  doc.data.edit_history = hist;
+  doc.updated_at = now;
+  db.save();
+  res.json({ ok: true, doc });
+});
+
+app.post('/api/annual/:year/comments', auth(), (req, res) => {
+  const year = parseInt(req.params.year);
+  if (!year || isNaN(year)) return res.status(400).json({ error: '无效年份' });
+  const text = (req.body.text || '').toString().trim();
+  if (!text) return res.status(400).json({ error: '评论内容不能为空' });
+  let doc = getAnnualDoc(year);
+  const now = new Date().toISOString();
+  if (!doc) {
+    doc = { id: db.nextId(db.store.annual), year, data: annualScaffold(year).data, updated_at: now };
+    db.store.annual.push(doc);
+  }
+  const comments = (doc.data && doc.data.comments) || [];
+  const c = { id: (comments.length ? Math.max(...comments.map(x => x.id)) : 0) + 1, user: req.user.real_name || req.user.username, at: now, text };
+  comments.push(c);
+  doc.data.comments = comments;
+  doc.updated_at = now;
+  db.save();
+  res.json({ ok: true, comment: c });
 });
 
 // ==================== 统计分析 ====================

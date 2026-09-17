@@ -102,7 +102,9 @@ const COL_TYPE = {
   related_project_id: 'INT DEFAULT NULL',
   related_session_id: 'INT DEFAULT NULL',
   read: 'TINYINT(1) NOT NULL DEFAULT 0',
-  created_by: 'INT DEFAULT NULL'
+  created_by: 'INT DEFAULT NULL',
+  year: 'INT NOT NULL DEFAULT 0',
+  data: 'JSON DEFAULT NULL'
 };
 
 // ---------- 集合 → 表定义 ----------
@@ -199,6 +201,11 @@ const SCHEMA = {
       'related_project_id', 'related_session_id', 'read', 'created_by', 'created_at'],
     bool: ['read'], num: ['id', 'user_id', 'related_project_id', 'related_session_id', 'created_by'],
     indexes: ['KEY `idx_user_id` (`user_id`)', 'KEY `idx_read` (`read`)']
+  },
+  annual: {
+    table: 'annual',
+    cols: ['id', 'year', 'data', 'updated_at'],
+    bool: [], num: ['id', 'year'], json: ['data'], indexes: ['UNIQUE KEY `uk_year` (`year`)']
   }
 };
 

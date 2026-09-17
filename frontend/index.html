@@ -109,6 +109,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <div class="nav-item" data-page="cost-analysis"><i class="bi bi-graph-down-arrow"></i>&nbsp;工作量评估</div>
     <div class="nav-item" data-page="stats"><i class="bi bi-bar-chart"></i>&nbsp;统计分析</div>
     <div class="nav-item" data-page="workload-summary" id="nav-workload-summary"><i class="bi bi-clipboard-data"></i>&nbsp;评估汇总</div>
+    <div class="nav-item" data-page="annual"><i class="bi bi-calendar2-week"></i>&nbsp;年度汇总</div>
     <div class="nav-item" data-page="users" id="nav-users"><i class="bi bi-people"></i>&nbsp;用户管理</div>
     <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>&nbsp;退出登录</div>
   </aside>
@@ -166,9 +167,17 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 
     <!-- PROJECTS -->
     <div id="page-projects" class="page">
-      <div class="d-flex justify-content-between align-items-center mb-3">
+      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <h6>项目资料管理（按评审批次）</h6>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <select class="form-select form-select-sm" id="projBatchSelect" onchange="refreshDeptOptions()" style="width:auto">
+            <option value="">（未选择批次）</option>
+          </select>
+          <button class="btn btn-warning btn-sm" onclick="openFolderUploadModal()"><i class="bi bi-folder2-open"></i> 文件夹批量上传</button>
+          <div class="input-group input-group-sm" style="width:auto">
+            <select class="form-select" id="deptExportSelect" style="width:auto"><option value="">全部事业部</option></select>
+            <button class="btn btn-outline-secondary" onclick="exportBizConfirm()"><i class="bi bi-download"></i> 按部门导出确认表</button>
+          </div>
           <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addProjectModal"><i class="bi bi-plus"></i>新建项目</button>
         </div>
       </div>
@@ -407,6 +416,59 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANNUAL 年度评审汇总（协同查看 / 编辑 / 评论）-->
+    <div id="page-annual" class="page">
+      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h6>年度评审结果汇总（协同）</h6>
+        <div class="d-flex gap-2 align-items-center">
+          <select class="form-select form-select-sm" id="annualYearSelect" onchange="setAnnualYear()" style="width:auto">
+            <option value="2026">2026 年</option>
+            <option value="2025">2025 年</option>
+            <option value="2027">2027 年</option>
+          </select>
+          <span class="small text-muted" id="annualUpdated"></span>
+        </div>
+      </div>
+      <div class="alert alert-info small mb-3">
+        <i class="bi bi-info-circle"></i> 本页为「云文档式」年度汇总：所有人可查看，管理员/研发中心可编辑段落并留痕，任何角色可评论；页面每 30 秒自动刷新以体现多人协同。
+      </div>
+      <div class="card card-custom mb-3"><div class="card-header bg-white"><h6 class="mb-0">年度概览</h6></div><div class="card-body" id="annualOverview"></div></div>
+      <div class="row g-3">
+        <div class="col-lg-7">
+          <div class="card card-custom mb-3"><div class="card-header bg-white"><h6 class="mb-0">按事业部汇总</h6></div>
+            <div class="card-body p-0"><div class="table-responsive">
+              <table class="table table-hover mb-0"><thead class="table-light"><tr><th>事业部</th><th>项目数</th><th>合同总额</th><th>成本总额</th><th>平均利润率</th><th>已完成</th></tr></thead>
+              <tbody id="annualByDept"></tbody></table>
+            </div></div>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="card card-custom mb-3"><div class="card-header bg-white"><h6 class="mb-0">按批次汇总</h6></div>
+            <div class="card-body p-0"><div class="table-responsive">
+              <table class="table table-hover mb-0"><thead class="table-light"><tr><th>批次</th><th>项目数</th><th>合同总额</th><th>成本总额</th><th>已完成</th></tr></thead>
+              <tbody id="annualBySession"></tbody></table>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card card-custom mb-3"><div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">年度总结（可编辑段落）</h6>
+        <button class="btn btn-primary btn-sm" id="annualSaveBtn" onclick="saveAnnualSections()"><i class="bi bi-check2"></i> 保存段落</button>
+      </div><div class="card-body" id="annualSections"></div></div>
+      <div class="row g-3">
+        <div class="col-lg-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">编辑历史</h6></div><div class="card-body" id="annualHistory" style="max-height:260px;overflow:auto"></div></div></div>
+        <div class="col-lg-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">协同评论</h6></div>
+          <div class="card-body">
+            <div id="annualComments" style="max-height:200px;overflow:auto" class="mb-2"></div>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control" id="annualCommentInput" placeholder="输入评论…" onkeydown="if(event.key==='Enter')postAnnualComment()">
+              <button class="btn btn-outline-primary" onclick="postAnnualComment()">发送</button>
+            </div>
+          </div></div>
         </div>
       </div>
     </div>
@@ -691,6 +753,7 @@ function navigateTo(page){
     case'cost-analysis':updateCostSelect();renderCostAnalysis();break;
     case'stats':applyWorkReportGating();loadStatsRich();break;
     case'workload-summary':renderWorkloadSummary();break;
+    case'annual':renderAnnual();startAnnualTimer();break;
     case'users':renderUsers();loadUserGroups();loadPermissionOptions();break;
   }
 }
@@ -949,6 +1012,14 @@ function sessionStatusBadge(status){
 function batchLabel(n){const c=['一','二','三','四','五','六','七','八','九','十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十'];return '第'+(c[n-1]||n)+'批';}
 function renderProjects(){
   const box=document.getElementById('batchDrawerList');if(!box)return;
+  // 填充「文件夹批量上传 / 按部门导出」所用的批次选择器
+  const pbs=document.getElementById('projBatchSelect');
+  if(pbs){
+    const cur=pbs.value;
+    pbs.innerHTML='<option value="">（未选择批次）</option>'+sessions.map(s=>'<option value="'+s.id+'">'+esc(s.name||s.session_name||'批次'+s.id)+'</option>').join('');
+    if(cur)pbs.value=cur; else if(sessions.length)pbs.value=sessions[0].id;
+    refreshDeptOptions();
+  }
   const missingEst=projects.filter(p=>!files.some(f=>f.project_id===p.id&&f.file_category==='estimation')).length;
   const missingNotice=document.getElementById('missingNotice');
   const missingText=document.getElementById('missingText');
@@ -2465,6 +2536,190 @@ async function saveSessionSettings(){
     }else alert('保存失败: '+(d.error||'未知错误'));
   }catch(e){alert('出错: '+e.message);}
 }
+
+// ==================== 文件夹批量上传 ====================
+let folderFiles=[];
+function openFolderUploadModal(){
+  const sb=document.getElementById('projBatchSelect');
+  const sid=sb?sb.value:'';
+  if(!sid){alert('请先在项目资料页上方选择评审批次');return;}
+  const s=sessions.find(x=>x.id===parseInt(sid));
+  document.getElementById('folderBatchLabel').textContent=s?(s.name||s.session_name):'批次'+sid;
+  document.getElementById('folderFileList').innerHTML='<tr><td colspan="3" class="text-muted small">请选择一个文件夹（含各项目资料），系统将按文件名/子文件夹中的项目编号自动归属。</td></tr>';
+  document.getElementById('folderResult').innerHTML='';
+  folderFiles=[];
+  new bootstrap.Modal(document.getElementById('folderUploadModal')).show();
+}
+function inferCatFront(name){
+  if(/估算|概算|预算|成本|测算|评估|工作量|报价|cost.*estimat|estimat/i.test(name))return'estimation';
+  if(/可研|可行性|feasib/i.test(name))return'feasibility';
+  if(/利润|profit/i.test(name))return'profit';
+  if(/招标|投标|bid|tender/i.test(name))return'bid';
+  if(/中标|award/i.test(name))return'award';
+  if(/询价|询比|采购协议|物资采购|报价单/i.test(name))return'inquiry';
+  if(/合同|协议|contract/i.test(name))return'contract';
+  if(/分包|subcontract|外包/i.test(name))return'subcontract';
+  if(/技术.*规范|规范.*书|tech.*spec|specif/i.test(name))return'tech_spec';
+  return'auto';
+}
+function catName(c){const m={auto:'自动识别',estimation:'估算表',feasibility:'可研报告',bid:'招标文件',award:'中标通知书',contract:'合同文件',tech_spec:'技术规范书',subcontract:'分包申请表',profit:'利润率评审表',inquiry:'询价单/采购协议',other:'其他'};return m[c]||c;}
+function onFolderSelected(e){
+  const list=[].slice.call(e.target.files);
+  if(!list.length)return;
+  const sb=document.getElementById('projBatchSelect');const sid=sb?parseInt(sb.value):null;
+  const sessProjects=projects.filter(p=>p.session_id===sid);
+  const rows=list.map(f=>{
+    const rel=f.webkitRelativePath||f.name;
+    let match=null,by='';
+    const byCode=sessProjects.filter(p=>p.project_code&&rel.includes(p.project_code));
+    if(byCode.length){match=byCode[0];by='code';}
+    else{const base=rel.split('/').pop().replace(/\.[^.]+$/,'');
+      const byName=sessProjects.filter(p=>p.project_name&&(rel.includes(p.project_name)||(base&&p.project_name.includes(base))));
+      if(byName.length){match=byName[0];by='name';}}
+    return {rel,matched:match?match.id:null,matchedName:match?match.project_name:'（未匹配，待分配）',by,cat:inferCatFront(f.name)};
+  });
+  folderFiles=list.map((f,i)=>({file:f,rel:rows[i].rel}));
+  document.getElementById('folderFileList').innerHTML=rows.map((r,i)=>{
+    const projOpts='<option value="">'+esc(r.matchedName)+'（'+(r.by==='code'?'按编号':r.by==='name'?'按名称':'未匹配')+'）</option>'+sessProjects.map(p=>'<option value="'+p.id+'">'+esc(p.project_name)+'</option>').join('');
+    const catOpts=['auto','estimation','feasibility','bid','award','contract','tech_spec','subcontract','profit','inquiry','other'].map(c=>'<option value="'+c+'"'+(c===r.cat?' selected':'')+'>'+catName(c)+'</option>').join('');
+    return '<tr><td class="small">'+esc(r.rel)+'</td>'+
+      '<td><select class="form-select form-select-sm" id="fproj'+i+'">'+projOpts+'</select></td>'+
+      '<td><select class="form-select form-select-sm" id="fcat'+i+'">'+catOpts+'</select></td></tr>';
+  }).join('')||'<tr><td colspan="3" class="text-muted">无文件</td></tr>';
+}
+async function doFolderUpload(){
+  const sb=document.getElementById('projBatchSelect');const sid=sb?sb.value:'';
+  if(!sid){alert('请选择批次');return;}
+  if(!folderFiles.length){alert('请先选择文件夹');return;}
+  const fd=new FormData();
+  folderFiles.forEach(f=>fd.append('files',f.file,f.file.name));
+  const relPaths=folderFiles.map(f=>f.rel);
+  const overrides={};
+  folderFiles.forEach((f,i)=>{
+    const pSel=document.getElementById('fproj'+i);const cSel=document.getElementById('fcat'+i);
+    overrides[i]={projectId:pSel?pSel.value:'',category:cSel?cSel.value:'auto'};
+  });
+  fd.append('relPaths',JSON.stringify(relPaths));
+  fd.append('overrides',JSON.stringify(overrides));
+  const btn=document.getElementById('folderUploadBtn');btn.disabled=true;const old=btn.textContent;btn.textContent='上传中…';
+  try{
+    const r=await fetch(API+'/sessions/'+sid+'/upload-folder',{method:'POST',headers:authH(),body:fd});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){alert('上传失败：'+(d.error||r.status));return;}
+    document.getElementById('folderResult').innerHTML=renderFolderResult(d);
+    await Promise.all([loadSessions(),loadProjects(),loadFiles(),loadUserGroups()]);
+    renderProjects();
+  }catch(e){alert('上传异常：'+e.message);}
+  finally{btn.disabled=false;btn.textContent=old;}
+}
+function renderFolderResult(d){
+  if(!d.ok)return '<div class="alert alert-danger">处理失败</div>';
+  let html='<div class="alert alert-success">共 '+d.count+' 个文件：匹配 '+d.matched+'，待分配 '+d.unmatched+'</div>';
+  html+='<table class="table table-sm"><thead><tr><th>文件</th><th>归属项目</th><th>类别</th><th>校验</th></tr></thead><tbody>';
+  html+=d.report.map(r=>'<tr><td class="small">'+esc(r.filename)+'</td><td>'+esc(r.matchedProjectName)+'</td><td>'+catName(r.category)+'</td><td>'+(r.validation&&r.validation.messages.length?'<span class="text-warning">'+esc(r.validation.messages.join('；'))+'</span>':'<span class="text-success">OK</span>')+'</td></tr>').join('');
+  html+='</tbody></table>';
+  if(d.unmatched>0)html+='<div class="alert alert-warning small">有 '+d.unmatched+' 个文件未匹配到项目，已进入批次「收件箱」，可在评审批次页或联系管理员手动分配给项目。</div>';
+  return html;
+}
+
+// ==================== 按部门导出事业部确认表 ====================
+function refreshDeptOptions(){
+  const sb=document.getElementById('projBatchSelect');const sid=sb?parseInt(sb.value):null;
+  const sel=document.getElementById('deptExportSelect');if(!sel)return;
+  const depts=[...new Set(projects.filter(p=>p.session_id===sid).map(p=>p.biz_department).filter(Boolean))];
+  sel.innerHTML='<option value="">全部事业部</option>'+depts.map(d=>'<option value="'+esc(d)+'">'+esc(d)+'</option>').join('');
+}
+async function exportBizConfirm(){
+  const sb=document.getElementById('projBatchSelect');const sid=sb?sb.value:'';
+  if(!sid){alert('请先在上方选择评审批次');return;}
+  const dept=document.getElementById('deptExportSelect').value;
+  const qs=dept?('?biz_department='+encodeURIComponent(dept)):'';
+  try{
+    const r=await fetch(API+'/sessions/'+sid+'/biz-confirm-export'+qs,{headers:authH()});
+    if(!r.ok){const d=await r.json().catch(()=>({}));alert('导出失败：'+(d.error||r.status));return;}
+    const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='事业部确认表.xlsx';a.click();URL.revokeObjectURL(a.href);
+  }catch(e){alert('导出异常：'+e.message);}
+}
+
+// ==================== 年度评审汇总（协同）====================
+let annualYear=new Date().getFullYear();
+let annualTimer=null;
+function startAnnualTimer(){if(annualTimer)clearInterval(annualTimer);annualTimer=setInterval(()=>{const p=document.getElementById('page-annual');if(p&&p.classList.contains('active'))renderAnnual();},30000);}
+function setAnnualYear(){const v=document.getElementById('annualYearSelect').value;if(v)annualYear=parseInt(v);renderAnnual();}
+function fmtMoney(n){return n?'¥'+Number(n).toLocaleString():'¥0';}
+function annualOv(label,val){return '<div class="col-4 col-md-2"><div class="card card-custom text-center py-2"><div class="fw-bold">'+esc(val==null?'-':val)+'</div><div class="small text-muted">'+label+'</div></div></div>';}
+function renderAnnual(){
+  fetch(API+'/annual/'+annualYear,{headers:authH()}).then(r=>r.json()).then(d=>{
+    const agg=d.aggregation||{};
+    document.getElementById('annualOverview').innerHTML=
+      '<div class="row g-2">'+annualOv('批次',agg.batchCount)+annualOv('项目数',agg.projectCount)+
+      annualOv('合同总额',fmtMoney(agg.contractSum))+annualOv('成本总额',fmtMoney(agg.costSum))+annualOv('已完成',agg.completedCount)+'</div>';
+    document.getElementById('annualByDept').innerHTML=(agg.byDepartment||[]).map(r=>'<tr><td>'+esc(r.biz_department)+'</td><td>'+r.projectCount+'</td><td>'+fmtMoney(r.contractSum)+'</td><td>'+fmtMoney(r.costSum)+'</td><td>'+(r.marginAvg!=null?r.marginAvg+'%':'-')+'</td><td>'+r.completedCount+'</td></tr>').join('')||'<tr><td colspan="6" class="text-muted text-center">该年度暂无数据</td></tr>';
+    document.getElementById('annualBySession').innerHTML=(agg.bySession||[]).map(r=>'<tr><td>'+esc(r.name)+'</td><td>'+r.projectCount+'</td><td>'+fmtMoney(r.contractSum)+'</td><td>'+fmtMoney(r.costSum)+'</td><td>'+r.completedCount+'</td></tr>').join('')||'<tr><td colspan="5" class="text-muted text-center">该年度暂无数据</td></tr>';
+    const canEdit=(currentUser.role==='admin'||currentUser.role==='rd');
+    const secs=((d.doc&&d.doc.data&&d.doc.data.sections)||[]);
+    document.getElementById('annualSections').innerHTML=secs.map((s,i)=>
+      '<div class="mb-3"><label class="form-label fw-bold">'+esc(s.title||s.key)+'</label>'+
+      (canEdit?'<textarea class="form-control" id="sec'+i+'" rows="4">'+esc(s.content||'')+'</textarea>':'<div class="border rounded p-2 bg-light" style="white-space:pre-wrap;min-height:48px">'+(esc(s.content)||'<span class="text-muted">（空）</span>')+'</div>')
+    ).join('');
+    document.getElementById('annualSaveBtn').style.display=canEdit?'inline-block':'none';
+    const secTitle=k=>((secs.find(s=>s.key===k)||{}).title||k);
+    const hist=((d.doc&&d.doc.data&&d.doc.data.edit_history)||[]);
+    document.getElementById('annualHistory').innerHTML=hist.slice().reverse().map(h=>'<div class="small border-bottom py-1"><b>'+esc(h.user)+'</b> 于 '+esc((h.at||'').replace('T',' ').slice(0,16))+' 修改了「'+esc(secTitle(h.field))+'」</div>').join('')||'<div class="text-muted small">暂无编辑记录</div>';
+    const cmts=((d.doc&&d.doc.data&&d.doc.data.comments)||[]);
+    document.getElementById('annualComments').innerHTML=cmts.slice().reverse().map(c=>'<div class="small border-bottom py-1"><b>'+esc(c.user)+'</b> <span class="text-muted">'+(c.at||'').replace('T',' ').slice(0,16)+'</span><div>'+esc(c.text)+'</div></div>').join('')||'<div class="text-muted small">暂无评论</div>';
+    document.getElementById('annualUpdated').textContent='更新于 '+((d.doc&&d.doc.updated_at)?(d.doc.updated_at.replace('T',' ').slice(0,16)):'—')+'（每30秒自动刷新）';
+  }).catch(e=>{});
+}
+async function saveAnnualSections(){
+  const docResp=await fetch(API+'/annual/'+annualYear,{headers:authH()}).then(r=>r.json()).catch(()=>({doc:null}));
+  const secs=((docResp.doc&&docResp.doc.data&&docResp.doc.data.sections)||[]);
+  const sections=secs.map((s,i)=>({key:s.key,title:s.title,content:document.getElementById('sec'+i)?document.getElementById('sec'+i).value:''}));
+  try{
+    const r=await fetch(API+'/annual/'+annualYear,{method:'PUT',headers:Object.assign(authH(),{'Content-Type':'application/json'}),body:JSON.stringify({sections})});
+    if(!r.ok){alert('保存失败');return;}
+    alert('已保存');renderAnnual();
+  }catch(e){alert('保存异常：'+e.message);}
+}
+async function postAnnualComment(){
+  const t=document.getElementById('annualCommentInput').value.trim();
+  if(!t)return;
+  try{
+    const r=await fetch(API+'/annual/'+annualYear+'/comments',{method:'POST',headers:Object.assign(authH(),{'Content-Type':'application/json'}),body:JSON.stringify({text:t})});
+    if(!r.ok){alert('评论失败');return;}
+    document.getElementById('annualCommentInput').value='';renderAnnual();
+  }catch(e){alert('评论异常：'+e.message);}
+}
+
 </script>
+<!-- 文件夹批量上传模态框 -->
+<div class="modal fade" id="folderUploadModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5>文件夹批量上传资料</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <div class="alert alert-info small mb-3">
+        <i class="bi bi-info-circle"></i> 选择一个资料文件夹（支持子文件夹）。系统按文件名/子文件夹名中的<b>项目编号</b>（其次项目名称）自动归属到对应项目；估算表解析出的合同额会与项目登记的合同额做二次比对（仅提示不阻断）。未能匹配的项目进入「收件箱」待人工分配。
+      </div>
+      <div class="mb-3">
+        <label class="form-label">当前批次</label>
+        <div id="folderBatchLabel" class="form-control-plaintext text-muted small"></div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">选择文件夹</label>
+        <input type="file" class="form-control" id="folderInput" webkitdirectory directory multiple onchange="onFolderSelected(event)">
+      </div>
+      <div class="table-responsive" style="max-height:320px;overflow:auto">
+        <table class="table table-sm table-hover mb-0"><thead class="table-light"><tr><th>文件（含相对路径）</th><th>归属项目</th><th>文件类别</th></tr></thead>
+          <tbody id="folderFileList"></tbody></table>
+      </div>
+      <div id="folderResult" class="mt-3"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+      <button type="button" class="btn btn-primary" id="folderUploadBtn" onclick="doFolderUpload()"><i class="bi bi-cloud-upload"></i> 开始上传</button>
+    </div>
+  </div></div>
+</div>
+
 </body>
 </html>
