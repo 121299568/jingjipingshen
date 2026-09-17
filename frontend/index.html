@@ -2545,6 +2545,8 @@ function openOfflineEvalModal(){
   sel.innerHTML='<option value="">（请选择批次）</option>'+sessions.map(s=>`<option value="${s.id}">${esc(s.name||('批次'+s.id))}</option>`).join('');
   document.getElementById('offlineEvalResult').innerHTML='';
   document.getElementById('offlineEvalInput').value='';
+  const modalEl=document.getElementById('offlineEvalModal');
+  if(modalEl) new bootstrap.Modal(modalEl).show();
 }
 async function doImportOfflineEval(){
   const sid=document.getElementById('offlineEvalBatch').value;
