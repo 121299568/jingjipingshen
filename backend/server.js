@@ -1240,24 +1240,47 @@ function handleFolderUpload(req, res) {
   let overrides = {};
   try { overrides = JSON.parse(req.body.overrides || '{}') || {}; } catch (_) {}
   const projects = db.store.projects.filter(p => p.session_id === sessionId);
-  const report = [];
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
+  const resolveContent = require('./resolve-project-content').resolveProjectByContent;
+  // 第一遍：逐文件解析归属（人工改派 > 文件内容识别 > 文件名兜底）
+  const pre = files.map((f, i) => {
     const rel = (relPaths[i] || f.originalname || '').toString();
     const realName = decodeFilename(f.originalname);
     const override = overrides[String(i)] || {};
-    // 1) 匹配项目：优先人工改派，其次按项目编号，再次按项目名称
     let match = null, matchedBy = '';
     if (override.projectId) { match = projects.find(p => p.id === parseInt(override.projectId)); if (match) matchedBy = 'manual'; }
     if (!match) {
-      const byCode = projects.filter(p => p.project_code && rel.includes(p.project_code));
-      if (byCode.length) { match = byCode[0]; matchedBy = 'code'; }
+      const c = resolveContent(f.path, projects);
+      if (c) { match = c.project; matchedBy = c.by; }
+    }
+    if (!match) {
+      // 文件名兜底：只看文件自身名称（不再用文件夹名匹配）
+      const base = rel.split('/').pop().replace(/\.[^.]+$/, '');
+      const byCode = projects.filter(p => p.project_code && realName.includes(p.project_code));
+      if (byCode.length) { match = byCode[0]; matchedBy = 'name-code'; }
       else {
-        const base = rel.split('/').pop().replace(/\.[^.]+$/, '');
-        const byName = projects.filter(p => p.project_name && (rel.includes(p.project_name) || (base && p.project_name.includes(base))));
+        const byName = projects.filter(p => p.project_name && (realName.includes(p.project_name) || (base && p.project_name.includes(base))));
         if (byName.length) { match = byName[0]; matchedBy = 'name'; }
       }
     }
+    return { f, i, rel, realName, override, match, matchedBy };
+  });
+  // 第二遍：同文件夹归并——若某文件夹内有文件解析出项目，该文件夹下其余未匹配文件一并挂接到该项目
+  const byFolder = {};
+  for (const it of pre) {
+    const dir = it.rel.split('/').slice(0, -1).join('/') || '(root)';
+    (byFolder[dir] = byFolder[dir] || []).push(it);
+  }
+  for (const dir in byFolder) {
+    const group = byFolder[dir];
+    const cnt = {};
+    for (const it of group) if (it.match) cnt[it.match.id] = (cnt[it.match.id] || 0) + 1;
+    let folderPid = null, max = 0;
+    for (const pid in cnt) if (cnt[pid] > max) { max = cnt[pid]; folderPid = parseInt(pid); }
+    if (folderPid != null) for (const it of group) if (!it.match) { it.match = projects.find(p => p.id === folderPid); it.matchedBy = 'folder'; }
+  }
+  const report = [];
+  for (const it of pre) {
+    const { f, i, rel, realName, override, match, matchedBy } = it;
     const category = (override.category && override.category !== 'auto') ? override.category : inferFileCategory(realName);
     const validation = { level: 'ok', messages: [] };
     const isExcel = /\.(xlsx|xls)$/i.test(realName);

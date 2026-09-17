@@ -2654,13 +2654,16 @@ async function doFolderUpload(){
   }catch(e){alert('上传异常：'+e.message);}
   finally{btn.disabled=false;btn.textContent=old;}
 }
+function matchLabel(by){
+  return ({manual:'人工指定','content-code':'内容·编号','content-name':'内容·名称','content-name-partial':'内容·名称(部分)','name-code':'文件名·编号',name:'文件名',folder:'同文件夹归并',none:'未匹配'})[by]||(by||'未知');
+}
 function renderFolderResult(d){
   if(!d.ok)return '<div class="alert alert-danger">处理失败</div>';
   let html='<div class="alert alert-success">共 '+d.count+' 个文件：匹配 '+d.matched+'，待分配 '+d.unmatched+'</div>';
-  html+='<table class="table table-sm"><thead><tr><th>文件</th><th>归属项目</th><th>类别</th><th>校验</th></tr></thead><tbody>';
-  html+=d.report.map(r=>'<tr><td class="small">'+esc(r.filename)+'</td><td>'+esc(r.matchedProjectName)+'</td><td>'+catName(r.category)+'</td><td>'+(r.validation&&r.validation.messages.length?'<span class="text-warning">'+esc(r.validation.messages.join('；'))+'</span>':'<span class="text-success">OK</span>')+'</td></tr>').join('');
+  html+='<table class="table table-sm"><thead><tr><th>文件</th><th>归属项目</th><th>匹配方式</th><th>类别</th><th>校验</th></tr></thead><tbody>';
+  html+=d.report.map(r=>'<tr><td class="small">'+esc(r.filename)+'</td><td>'+esc(r.matchedProjectName)+'</td><td><span class="badge bg-secondary">'+matchLabel(r.matchedBy)+'</span></td><td>'+catName(r.category)+'</td><td>'+(r.validation&&r.validation.messages.length?'<span class="text-warning">'+esc(r.validation.messages.join('；'))+'</span>':'<span class="text-success">OK</span>')+'</td></tr>').join('');
   html+='</tbody></table>';
-  if(d.unmatched>0)html+='<div class="alert alert-warning small">有 '+d.unmatched+' 个文件未匹配到项目，已进入批次「收件箱」，可在评审批次页或联系管理员手动分配给项目。</div>';
+  if(d.unmatched>0)html+='<div class="alert alert-warning small">有 '+d.unmatched+' 个文件未匹配到项目，已进入批次「收件箱」，可在评审批次页或联系管理员手动分配。提示：把文件与含项目编号/名称的 xlsx 放在同一文件夹内，即可由「同文件夹归并」自动挂接。</div>';
   return html;
 }
 
