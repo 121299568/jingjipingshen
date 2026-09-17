@@ -174,6 +174,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
             <option value="">（未选择批次）</option>
           </select>
           <button class="btn btn-warning btn-sm" onclick="openFolderUploadModal()"><i class="bi bi-folder2-open"></i> 文件夹批量上传</button>
+          <button class="btn btn-info btn-sm" onclick="openOfflineEvalModal()"><i class="bi bi-file-earmark-arrow-up"></i> 导入离线评估表</button>
           <div class="input-group input-group-sm" style="width:auto">
             <select class="form-select" id="deptExportSelect" style="width:auto"><option value="">全部事业部</option></select>
             <button class="btn btn-outline-secondary" onclick="exportBizConfirm()"><i class="bi bi-download"></i> 按部门导出确认表</button>
@@ -2537,6 +2538,45 @@ async function saveSessionSettings(){
   }catch(e){alert('出错: '+e.message);}
 }
 
+// ==================== 离线评估表批量导入 ====================
+function openOfflineEvalModal(){
+  const sel=document.getElementById('offlineEvalBatch');
+  if(!sel)return;
+  sel.innerHTML='<option value="">（请选择批次）</option>'+sessions.map(s=>`<option value="${s.id}">${esc(s.name||('批次'+s.id))}</option>`).join('');
+  document.getElementById('offlineEvalResult').innerHTML='';
+  document.getElementById('offlineEvalInput').value='';
+}
+async function doImportOfflineEval(){
+  const sid=document.getElementById('offlineEvalBatch').value;
+  const input=document.getElementById('offlineEvalInput');
+  if(!sid){alert('请先选择导入到的批次');return;}
+  const files=input.files;
+  if(!files||!files.length){alert('请选择至少一个离线评估表 xlsx');return;}
+  const box=document.getElementById('offlineEvalResult');
+  box.innerHTML='<div class="text-muted small">导入中…</div>';
+  const fd=new FormData();
+  for(const f of files) fd.append('files',f);
+  try{
+    const r=await fetch(API+'/sessions/'+sid+'/import-offline-eval',{method:'POST',headers:authH(),body:fd});
+    const d=await r.json();
+    if(!r.ok){box.innerHTML='<div class="alert alert-danger small">导入失败：'+(d.error||'未知错误')+'</div>';return;}
+    let html=`<div class="alert alert-success small">成功导入 ${d.imported}/${d.total} 份</div>`;
+    html+='<table class="table table-sm table-bordered mb-0"><thead class="table-light"><tr><th>文件</th><th>匹配</th><th>更新字段</th><th>说明</th></tr></thead><tbody>';
+    (d.reports||[]).forEach(rep=>{
+      const matched=rep.matched?'<span class="text-success">已匹配('+esc(rep.project_name||'')+')</span>':'<span class="text-danger">未匹配</span>';
+      const upd=(rep.updated||[]).join('、');
+      const warn=(rep.warnings&&rep.warnings.length)?'<div class="text-warning small">'+esc(rep.warnings.join('；'))+'</div>':'';
+      const err=rep.error?('<div class="text-danger small">'+esc(rep.error)+'</div>'+(rep.parsed?'<div class="small text-muted">解析到：编号='+esc(rep.parsed.project_code||'-')+' 名称='+esc(rep.parsed.project_name||'-')+'</div>':'')):'';
+      html+=`<tr><td>${esc(rep.file||'')}</td><td>${matched}</td><td>${esc(upd||'-')}</td><td>${warn}${err}</td></tr>`;
+    });
+    html+='</tbody></table>';
+    box.innerHTML=html;
+    // 刷新当前页面相关展示
+    if(currentPage==='projects') renderProjects();
+    if(currentPage==='workload-summary') renderWorkloadSummary();
+  }catch(e){box.innerHTML='<div class="alert alert-danger small">出错：'+e.message+'</div>';}
+}
+
 // ==================== 文件夹批量上传 ====================
 let folderFiles=[];
 function openFolderUploadModal(){
@@ -2717,6 +2757,31 @@ async function postAnnualComment(){
     <div class="modal-footer">
       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
       <button type="button" class="btn btn-primary" id="folderUploadBtn" onclick="doFolderUpload()"><i class="bi bi-cloud-upload"></i> 开始上传</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- 离线评估表批量导入模态框 -->
+<div class="modal fade" id="offlineEvalModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5>导入离线评估表（专家评估示例）</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <div class="alert alert-info small mb-3">
+        <i class="bi bi-info-circle"></i> 选择若干份「第X批-专家评估示例.xlsx」。系统按文件内<b>项目编号/项目名称</b>自动匹配本批次对应项目，将线下填好的成本估算（各成本分量、利润率等）写入系统并回灌到评审结果汇总表。支持批量。
+      </div>
+      <div class="mb-3">
+        <label class="form-label">导入到批次</label>
+        <select class="form-select form-select-sm" id="offlineEvalBatch" style="width:auto"></select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">选择离线评估表（可多选）</label>
+        <input type="file" class="form-control" id="offlineEvalInput" accept=".xlsx,.xls" multiple>
+      </div>
+      <div id="offlineEvalResult" class="mt-2"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+      <button type="button" class="btn btn-primary" id="offlineEvalBtn" onclick="doImportOfflineEval()"><i class="bi bi-cloud-upload"></i> 开始导入</button>
     </div>
   </div></div>
 </div>

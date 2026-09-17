@@ -2045,60 +2045,169 @@ app.get('/api/sessions/:id/workload-summary', auth(['admin', 'rd']), (req, res) 
   res.json(data);
 });
 
-// 导出某批次「项目经济评审结果汇总表」为 xlsx（与前端 23 列一致，含合计行）
+// 导出某批次「项目经济评审结果汇总表」为 xlsx —— 严格按用户提供的「附件3：第X批项目经济评审结果汇总表」格式：
+//   3 行标题块（附件3 / 批次名 / 评审时间+单位：元）+ 两行表头（专业分包跨列 L:O 拆 4 子列，P 列分包占比）+ 数据 + 合计 + 专家签字。
 app.get('/api/sessions/:id/workload-summary/export', auth(['admin', 'rd']), (req, res) => {
   const sid = parseInt(req.params.id);
   const data = buildWorkloadSummary(sid, req.user);
   if (!data) return res.status(404).json({ error: '批次不存在' });
-  const headers = ['序号', '项目名称', '项目承建部门', '项目类型', '合同额', '项目总成本估算',
-    '项目估算利润率(%)', '长期职工成本估算', '中实职工成本估算', '华兆职工成本估算', '人员外包估算',
-    '专业分包估算', '分包占比(%)', '是否属于限制分包', '专业分包范围', '采购估算', '差旅费估算', '第三方测试估算', '知识产权估算',
-    '是否属于数字化', '业务方向', '业务子方向', '产品方向'];
   const moneyKeys = ['contract_amount', 'total_cost', 'long_term_cost', 'zhongshi_cost', 'huazhao_cost',
     'outsourcing_cost', 'subcontract_cost', 'procurement_cost', 'travel_cost', 'third_party_test_cost', 'ip_cost'];
   const totals = {}; moneyKeys.forEach(k => totals[k] = 0);
+  const pct = (a, b) => (b > 0 ? Math.round(a / b * 10000) / 100 : null); // 返回如 47.56 表示 47.56%
   const rows = (data.projects || []).map((p, idx) => {
     const cs = p.cost_summary || {};
-    const tc = Number(cs.total_cost) || 0, sub = Number(cs.subcontract_cost) || 0;
+    const contract = Number(p.contract_amount) || 0;
+    const tc = Number(cs.total_cost) || 0;
+    const sub = Number(cs.subcontract_cost) || 0;
     const row = {
       idx: idx + 1, project_name: p.project_name, biz_department: p.biz_department, project_type: p.project_type,
-      contract_amount: Number(p.contract_amount) || 0, total_cost: tc,
-      profit_rate: cs.profit_rate != null ? Math.round(Number(cs.profit_rate) * 100 * 100) / 100 : null,
+      contract_amount: contract, total_cost: tc,
+      profit_rate: cs.profit_rate != null ? Math.round(Number(cs.profit_rate) * 10000) / 100 : null,
       long_term_cost: Number(cs.long_term_cost) || 0, zhongshi_cost: Number(cs.zhongshi_cost) || 0,
       huazhao_cost: Number(cs.huazhao_cost) || 0, outsourcing_cost: Number(cs.outsourcing_cost) || 0,
-      subcontract_cost: sub, subcontract_ratio: tc > 0 ? Math.round(sub / tc * 100 * 100) / 100 : null,
+      subcontract_cost: sub,
+      subcontract_ratio_pp: pct(sub, contract),  // 专业分包占比 = 专业分包/合同额
+      is_restricted_subcontract: p.is_restricted_subcontract || '',
+      subcontract_scope: p.subcontract_scope || '',
+      subcontract_ratio_all: pct(sub, tc),        // 分包占比 = 专业分包/总成本
       procurement_cost: Number(cs.procurement_cost) || 0, travel_cost: Number(cs.travel_cost) || 0,
       third_party_test_cost: Number(cs.third_party_test_cost) || 0, ip_cost: Number(cs.ip_cost) || 0,
       is_digital: p.is_digital ? '是' : '否',
-      is_restricted_subcontract: p.is_restricted_subcontract || '',
-      subcontract_scope: p.subcontract_scope || '',
       business_direction: p.business_direction || '',
       business_sub_direction: p.business_sub_direction || '', product_direction: p.product_direction || ''
     };
     moneyKeys.forEach(k => totals[k] += Number(row[k]) || 0);
+    const s = v => (v == null ? '' : v + '%');
+    // 24 列（A:X），与用户示例表头一一对应
     return [row.idx, row.project_name, row.biz_department, row.project_type, row.contract_amount, row.total_cost,
-      row.profit_rate, row.long_term_cost, row.zhongshi_cost, row.huazhao_cost, row.outsourcing_cost,
-      row.subcontract_cost, row.subcontract_ratio, row.is_restricted_subcontract, row.subcontract_scope,
-      row.procurement_cost, row.travel_cost,
+      s(row.profit_rate), row.long_term_cost, row.zhongshi_cost, row.huazhao_cost, row.outsourcing_cost,
+      row.subcontract_cost, s(row.subcontract_ratio_pp), row.is_restricted_subcontract, row.subcontract_scope,
+      s(row.subcontract_ratio_all), row.procurement_cost, row.travel_cost,
       row.third_party_test_cost, row.ip_cost, row.is_digital, row.business_direction,
       row.business_sub_direction, row.product_direction];
   });
+  const sT = v => (v == null ? '' : v + '%');
   const totalRow = ['', '合计', '', '', totals.contract_amount, totals.total_cost, null,
     totals.long_term_cost, totals.zhongshi_cost, totals.huazhao_cost, totals.outsourcing_cost,
-    totals.subcontract_cost, totals.total_cost > 0 ? Math.round(totals.subcontract_cost / totals.total_cost * 100 * 100) / 100 : null,
-    '', '',
+    totals.subcontract_cost, null, '', '',
+    sT(totals.total_cost > 0 ? Math.round(totals.subcontract_cost / totals.total_cost * 10000) / 100 : null),
     totals.procurement_cost, totals.travel_cost, totals.third_party_test_cost, totals.ip_cost, '', '', '', ''];
-  const aoa = [headers, ...rows, totalRow];
+
+  // ===== 标题块 + 两行表头 =====
+  const title = data.session_name || `第${sid}批项目经济评审`;
+  const now = new Date();
+  const reviewTime = `评审时间：${now.getFullYear()}.${now.getMonth() + 1}`;
+  const header1 = ['序号', '项目名称', '项目承建部门', '项目类型', '合同额', '项目总成本估算', '项目估算利润率',
+    '长期职工成本估算', '中实职工成本估算', '华兆职工成本估算', '人员外包估算',
+    '专业分包', '', '', '', '分包占比', '采购估算', '差旅费估算', '第三方测试估算', '知识产权估算',
+    '是否属于数字化', '业务方向', '业务子方向', '产品方向'];
+  const header2 = ['', '', '', '', '', '', '', '', '', '', '',
+    '专业分包估算', '专业分包占比', '是否属于限制分包', '专业分包范围', '', '', '', '', '', '', '', '', ''];
+  const aoa = [
+    ['附件3'],
+    [title],
+    [reviewTime, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '单位：元'],
+    header1, header2,
+    ...rows,
+    totalRow,
+    ['专家签字：']
+  ];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const wscols = headers.map((h, i) => ({ wch: i === 1 ? 28 : (i === 14 ? 22 : (i >= 20 && i <= 22 ? 16 : 12)) }));
-  ws['!cols'] = wscols;
+  ws['!cols'] = header1.map((h, i) => ({ wch: i === 1 ? 28 : (i === 14 ? 24 : (i >= 21 && i <= 23 ? 16 : 12)) }));
+  // 合并区域（0-indexed 行列）
+  const merges = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 23 } },                 // 附件3
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 21 } },                 // 批次名
+    { s: { r: 1, c: 22 }, e: { r: 1, c: 23 } },                // 单位：元
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 21 } },                 // 评审时间
+    { s: { r: 2, c: 22 }, e: { r: 2, c: 23 } },                // 单位：元(第三行)
+    { s: { r: 3, c: 11 }, e: { r: 3, c: 14 } }                 // 专业分包 跨列头
+  ];
+  // 第一、二行表头中跨两行的列：A..K（0-10）、P..X（15-23）竖向合并
+  for (let c = 0; c <= 10; c++) merges.push({ s: { r: 3, c }, e: { r: 4, c } });
+  for (let c = 15; c <= 23; c++) merges.push({ s: { r: 3, c }, e: { r: 4, c } });
+  // 专家签字行合并
+  const lastRow = aoa.length - 1;
+  merges.push({ s: { r: lastRow, c: 0 }, e: { r: lastRow, c: 23 } });
+  ws['!merges'] = merges;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '项目经济评审结果汇总表');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-  const fname = `批次${sid}_项目经济评审结果汇总表_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const fname = `第${sid}批项目经济评审结果汇总表_${new Date().toISOString().slice(0, 10)}.xlsx`;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="batch_${sid}_summary.xlsx"; filename*=UTF-8''${encodeURIComponent(fname)}`);
   res.send(buf);
+});
+
+// ==================== 离线评估表（专家评估示例）批量导入 ====================
+// 「线上线下双轨」：把线下填好的 per-project 成本估算表（含「项目基本信息」+ 明细 sheet）批量导入，
+// 按 项目编号(主)/项目名称(次) 在批次内匹配系统项目，自动写入 cost_summary，回灌到评审结果汇总表。
+const offlineEvalUpload = upload.array('files', 200);
+app.post('/api/sessions/:id/import-offline-eval', auth(['admin', 'rd']), offlineEvalUpload, (req, res) => {
+  const sid = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sid);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: '未收到文件' });
+  const projects = db.store.projects.filter(p => p.session_id === sid);
+  const reports = [];
+  let imported = 0;
+  for (const f of files) {
+    const realName = decodeFilename(f.originalname);
+    const rep = { file: realName, matched: false };
+    try {
+      const { parseOfflineEval } = require('./parse-offline-eval');
+      const parsed = parseOfflineEval(f.path);
+      const pp = parsed.project;
+      // 匹配：优先 项目编号（精确），其次 项目名称（包含/相等）
+      let target = null;
+      const code = (pp.project_code || '').trim();
+      const pname = (pp.project_name || '').trim();
+      if (code) target = projects.find(p => (p.project_code || '').trim() === code);
+      if (!target && pname) {
+        target = projects.find(p => (p.project_name || '').trim() === pname)
+          || projects.find(p => (p.project_name || '').includes(pname) || pname.includes(p.project_name || ''));
+      }
+      if (!target) {
+        rep.error = '未找到匹配项目（按项目编号/名称）';
+        rep.parsed = { project_code: code, project_name: pname };
+        reports.push(rep);
+        continue;
+      }
+      const cs = pp.cost_summary || {};
+      const updated = [];
+      // 项目级字段
+      if (pp.is_digital !== undefined && target.is_digital !== pp.is_digital) { target.is_digital = pp.is_digital; updated.push('是否数字化'); }
+      ['business_direction', 'business_sub_direction', 'product_direction'].forEach(k => {
+        if (pp[k] && target[k] !== pp[k]) { target[k] = pp[k]; updated.push(k); }
+      });
+      if (code && !target.project_code) { target.project_code = code; updated.push('项目编号'); }
+      if (pp.biz_department && !target.biz_department) { target.biz_department = pp.biz_department; updated.push('承建部门'); }
+      if (pp.project_type && !target.project_type) { target.project_type = pp.project_type; updated.push('项目类型'); }
+      if ((target.contract_amount == null || Number(target.contract_amount) === 0) && pp.contract_amount) {
+        target.contract_amount = pp.contract_amount; updated.push('合同额');
+      }
+      // 成本汇总
+      target.cost_summary = cs;
+      updated.push('cost_summary');
+      target.updated_at = new Date().toISOString();
+      db.logWorkflow(target.id, 'import_offline_eval', `导入离线评估表[${realName}]，更新 ${updated.join('/')}`, req.user.id);
+      rep.matched = true;
+      rep.project_id = target.id;
+      rep.project_name = target.project_name;
+      rep.updated = updated;
+      rep.warnings = parsed.warnings || [];
+      imported++;
+    } catch (e) {
+      rep.error = '解析失败：' + (e && e.message);
+      reports.push(rep);
+      continue;
+    }
+    reports.push(rep);
+  }
+  db.save();
+  res.json({ imported, total: files.length, reports });
 });
 
 // 导出某批次「事业部确认表」为 xlsx（支持按事业部名称筛选；含认可/不认可/退回原因/确认人/时间）
