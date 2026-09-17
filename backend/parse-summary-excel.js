@@ -61,7 +61,9 @@ function locateColumns(headerCells) {
     biz_department: find(['项目承建部门', '承建部门', '事业部']),
     project_type: find(['项目类型']),
     contract_amount: find(['合同额']),
-    internal_cost: find(['内部信息系统填报预估成本', '内部填报预估成本', '内部预估成本', '填报预估成本'])
+    internal_cost: find(['内部信息系统填报预估成本', '内部填报预估成本', '内部预估成本', '填报预估成本']),
+    restricted_subcontract: find(['限制分包']),
+    subcontract_scope: find(['专业分包范围'])
   };
 }
 
@@ -131,6 +133,8 @@ function parseSummaryExcel(filePath) {
     if (/合计|小计|说明/.test(seqCell) && !project_name) continue;
     const contract_amount = cols.contract_amount >= 0 ? num(row[cols.contract_amount]) : null;
     const internal_estimated_cost = cols.internal_cost >= 0 ? num(row[cols.internal_cost]) : null;
+    // 是否属于限制分包：原始值多为「是/否」，保留原文；专业分包范围：文本
+    const restricted = cols.restricted_subcontract >= 0 ? str(row[cols.restricted_subcontract]) : '';
     result.projects.push({
       seq: seqCell ? Number(seqCell) || null : null,
       project_code,
@@ -138,7 +142,9 @@ function parseSummaryExcel(filePath) {
       biz_department: cols.biz_department >= 0 ? str(row[cols.biz_department]) : '',
       project_type: cols.project_type >= 0 ? str(row[cols.project_type]) : '',
       contract_amount: contract_amount != null ? Math.round(contract_amount * 100) / 100 : null,
-      internal_estimated_cost: internal_estimated_cost != null ? Math.round(internal_estimated_cost * 100) / 100 : null
+      internal_estimated_cost: internal_estimated_cost != null ? Math.round(internal_estimated_cost * 100) / 100 : null,
+      is_restricted_subcontract: restricted,
+      subcontract_scope: cols.subcontract_scope >= 0 ? str(row[cols.subcontract_scope]) : ''
     });
   }
   if (!result.projects.length) {

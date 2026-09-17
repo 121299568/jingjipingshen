@@ -1900,6 +1900,7 @@ function renderWorkloadProjectTable(d){
     {k:'long_term_cost',label:'长期职工成本估算',money:true},{k:'zhongshi_cost',label:'中实职工成本估算',money:true},
     {k:'huazhao_cost',label:'华兆职工成本估算',money:true},{k:'outsourcing_cost',label:'人员外包估算',money:true},
     {k:'subcontract_cost',label:'专业分包估算',money:true},{k:'subcontract_ratio',label:'分包占比',pct:true},
+    {k:'is_restricted_subcontract',label:'是否属于限制分包'},{k:'subcontract_scope',label:'专业分包范围'},
     {k:'procurement_cost',label:'采购估算',money:true},{k:'travel_cost',label:'差旅费估算',money:true},
     {k:'third_party_test_cost',label:'第三方测试估算',money:true},{k:'ip_cost',label:'知识产权估算',money:true},
     {k:'is_digital',label:'是否属于数字化'},{k:'business_direction',label:'业务方向'},
@@ -1918,7 +1919,9 @@ function renderWorkloadProjectTable(d){
       long_term_cost:cs.long_term_cost||0, zhongshi_cost:cs.zhongshi_cost||0, huazhao_cost:cs.huazhao_cost||0,
       outsourcing_cost:cs.outsourcing_cost||0, subcontract_cost:sub, subcontract_ratio:tc>0?sub/tc*100:null,
       procurement_cost:cs.procurement_cost||0, travel_cost:cs.travel_cost||0, third_party_test_cost:cs.third_party_test_cost||0,
-      ip_cost:cs.ip_cost||0, is_digital:p.is_digital?'是':'否', business_direction:p.business_direction||'-',
+      ip_cost:cs.ip_cost||0, is_digital:p.is_digital?'是':'否',
+      is_restricted_subcontract:p.is_restricted_subcontract||'-', subcontract_scope:p.subcontract_scope||'-',
+      business_direction:p.business_direction||'-',
       business_sub_direction:p.business_sub_direction||'-', product_direction:p.product_direction||'-'
     };
     tbody+='<tr>'+cols.map(c=>{
@@ -1932,7 +1935,7 @@ function renderWorkloadProjectTable(d){
     }).join('')+'</tr>';
     moneyKeys.forEach(k=>totals[k]+=Number(row[k])||0);
   });
-  const totalRow={idx:'合计',project_name:'',biz_department:'',project_type:'',contract_amount:totals.contract_amount,total_cost:totals.total_cost,profit_rate:null,long_term_cost:totals.long_term_cost,zhongshi_cost:totals.zhongshi_cost,huazhao_cost:totals.huazhao_cost,outsourcing_cost:totals.outsourcing_cost,subcontract_cost:totals.subcontract_cost,subcontract_ratio:totals.total_cost>0?totals.subcontract_cost/totals.total_cost*100:null,procurement_cost:totals.procurement_cost,travel_cost:totals.travel_cost,third_party_test_cost:totals.third_party_test_cost,ip_cost:totals.ip_cost,is_digital:'',business_direction:'',business_sub_direction:'',product_direction:''};
+  const totalRow={idx:'合计',project_name:'',biz_department:'',project_type:'',contract_amount:totals.contract_amount,total_cost:totals.total_cost,profit_rate:null,long_term_cost:totals.long_term_cost,zhongshi_cost:totals.zhongshi_cost,huazhao_cost:totals.huazhao_cost,outsourcing_cost:totals.outsourcing_cost,subcontract_cost:totals.subcontract_cost,subcontract_ratio:totals.total_cost>0?totals.subcontract_cost/totals.total_cost*100:null,procurement_cost:totals.procurement_cost,travel_cost:totals.travel_cost,third_party_test_cost:totals.third_party_test_cost,ip_cost:totals.ip_cost,is_digital:'',is_restricted_subcontract:'',subcontract_scope:'',business_direction:'',business_sub_direction:'',product_direction:''};
   const tfoot='<tr class="fw-bold table-secondary">'+cols.map(c=>{
     const v=totalRow[c.k];
     if(c.money)return '<td class="text-end">'+fmtWlMoney(v)+'</td>';

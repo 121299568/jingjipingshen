@@ -760,6 +760,8 @@ app.post('/api/sessions/import-summary', auth(['admin', 'rd', 'biz']), upload.si
         project_type: row.project_type || '',
         contract_amount: row.contract_amount != null ? row.contract_amount : 0,
         internal_estimated_cost: row.internal_estimated_cost != null ? row.internal_estimated_cost : null,
+        is_restricted_subcontract: row.is_restricted_subcontract || '',
+        subcontract_scope: row.subcontract_scope || '',
         status: 'draft',
         cost_summary: {},
         created_at: new Date().toISOString(),
@@ -1850,6 +1852,8 @@ function buildWorkloadSummary(sid, user) {
       business_direction: p.business_direction || '',
       business_sub_direction: p.business_sub_direction || '',
       product_direction: p.product_direction || '',
+      is_restricted_subcontract: p.is_restricted_subcontract || '',
+      subcontract_scope: p.subcontract_scope || '',
       cost_summary: cs,
       needs_estimate: needsEstimate(p),
       work_item_count: wis.length, evaluated_count: evaluatedWI,
@@ -1882,14 +1886,14 @@ app.get('/api/sessions/:id/workload-summary', auth(['admin', 'rd']), (req, res) 
   res.json(data);
 });
 
-// 导出某批次「项目经济评审结果汇总表」为 xlsx（与前端 21 列一致，含合计行）
+// 导出某批次「项目经济评审结果汇总表」为 xlsx（与前端 23 列一致，含合计行）
 app.get('/api/sessions/:id/workload-summary/export', auth(['admin', 'rd']), (req, res) => {
   const sid = parseInt(req.params.id);
   const data = buildWorkloadSummary(sid, req.user);
   if (!data) return res.status(404).json({ error: '批次不存在' });
   const headers = ['序号', '项目名称', '项目承建部门', '项目类型', '合同额', '项目总成本估算',
     '项目估算利润率(%)', '长期职工成本估算', '中实职工成本估算', '华兆职工成本估算', '人员外包估算',
-    '专业分包估算', '分包占比(%)', '采购估算', '差旅费估算', '第三方测试估算', '知识产权估算',
+    '专业分包估算', '分包占比(%)', '是否属于限制分包', '专业分包范围', '采购估算', '差旅费估算', '第三方测试估算', '知识产权估算',
     '是否属于数字化', '业务方向', '业务子方向', '产品方向'];
   const moneyKeys = ['contract_amount', 'total_cost', 'long_term_cost', 'zhongshi_cost', 'huazhao_cost',
     'outsourcing_cost', 'subcontract_cost', 'procurement_cost', 'travel_cost', 'third_party_test_cost', 'ip_cost'];
@@ -1906,23 +1910,28 @@ app.get('/api/sessions/:id/workload-summary/export', auth(['admin', 'rd']), (req
       subcontract_cost: sub, subcontract_ratio: tc > 0 ? Math.round(sub / tc * 100 * 100) / 100 : null,
       procurement_cost: Number(cs.procurement_cost) || 0, travel_cost: Number(cs.travel_cost) || 0,
       third_party_test_cost: Number(cs.third_party_test_cost) || 0, ip_cost: Number(cs.ip_cost) || 0,
-      is_digital: p.is_digital ? '是' : '否', business_direction: p.business_direction || '',
+      is_digital: p.is_digital ? '是' : '否',
+      is_restricted_subcontract: p.is_restricted_subcontract || '',
+      subcontract_scope: p.subcontract_scope || '',
+      business_direction: p.business_direction || '',
       business_sub_direction: p.business_sub_direction || '', product_direction: p.product_direction || ''
     };
     moneyKeys.forEach(k => totals[k] += Number(row[k]) || 0);
     return [row.idx, row.project_name, row.biz_department, row.project_type, row.contract_amount, row.total_cost,
       row.profit_rate, row.long_term_cost, row.zhongshi_cost, row.huazhao_cost, row.outsourcing_cost,
-      row.subcontract_cost, row.subcontract_ratio, row.procurement_cost, row.travel_cost,
+      row.subcontract_cost, row.subcontract_ratio, row.is_restricted_subcontract, row.subcontract_scope,
+      row.procurement_cost, row.travel_cost,
       row.third_party_test_cost, row.ip_cost, row.is_digital, row.business_direction,
       row.business_sub_direction, row.product_direction];
   });
   const totalRow = ['', '合计', '', '', totals.contract_amount, totals.total_cost, null,
     totals.long_term_cost, totals.zhongshi_cost, totals.huazhao_cost, totals.outsourcing_cost,
     totals.subcontract_cost, totals.total_cost > 0 ? Math.round(totals.subcontract_cost / totals.total_cost * 100 * 100) / 100 : null,
+    '', '',
     totals.procurement_cost, totals.travel_cost, totals.third_party_test_cost, totals.ip_cost, '', '', '', ''];
   const aoa = [headers, ...rows, totalRow];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const wscols = headers.map((h, i) => ({ wch: i === 1 ? 28 : (i === 18 || i === 19 || i === 20 ? 16 : 12) }));
+  const wscols = headers.map((h, i) => ({ wch: i === 1 ? 28 : (i === 14 ? 22 : (i >= 20 && i <= 22 ? 16 : 12)) }));
   ws['!cols'] = wscols;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '项目经济评审结果汇总表');
