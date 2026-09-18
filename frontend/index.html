@@ -1273,7 +1273,9 @@ async function doUploadFile(){
   if(descEl&&descEl.value)fd.append('description',descEl.value);
   try{
     const r=await fetch(API+'/projects/'+currentProjectId+'/files',{method:'POST',headers:{'Authorization':'Bearer '+localStorage.getItem('token')},body:fd});
-    const data=await r.json();
+    let data={};try{data=await r.json();}catch(_){}
+    if(r.status===413){throw new Error('文件过大被网关拒绝（单文件上限 50MB）。请压缩或拆分后再上传');}
+    if(r.status===400&&data.validation){throw new Error('成本估算表校验未通过：'+(data.error||''));}
     if(r.ok){
       let extractTip = '';
       if (data.file_category === 'estimation') {
@@ -2633,9 +2635,15 @@ async function doFolderUpload(){
   fd.append('relPaths',JSON.stringify(relPaths));
   fd.append('overrides',JSON.stringify(overrides));
   const btn=document.getElementById('folderUploadBtn');btn.disabled=true;const old=btn.textContent;btn.textContent='上传中…';
+  // 预检：单文件超 50MB 会被网关/后端拒绝，提前筛掉并提示，避免整批上传白跑
+  const big=folderFiles.filter(f=>f.file.size>50*1024*1024);
+  if(big.length){
+    if(!confirm('有 '+big.length+' 个文件超过 50MB（单个文件上限）：\n'+big.map(f=>f.rel+'（'+(f.file.size/1048576).toFixed(1)+'MB）').join('\n')+'\n\n仍要继续上传吗？超限文件会被服务端拒绝，其余文件正常处理。')){btn.disabled=false;btn.textContent=old;return;}
+  }
   try{
     const r=await fetch(API+'/sessions/'+sid+'/upload-folder',{method:'POST',headers:authH(),body:fd});
     const d=await r.json().catch(()=>({}));
+    if(r.status===413){alert('上传失败：有文件超过服务端单文件上限（50MB），请压缩或拆分后重试');return;}
     if(!r.ok){alert('上传失败：'+(d.error||r.status));return;}
     document.getElementById('folderResult').innerHTML=renderFolderResult(d);
     await Promise.all([loadSessions(),loadProjects(),loadFiles(),loadUserGroups()]);
