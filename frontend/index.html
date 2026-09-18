@@ -1049,9 +1049,13 @@ function renderProjects(){
       const has=c=>pf.some(f=>f.file_category===c);
       const statusBg=statusBadgeClass(p.status);
       const lastOp=p.last_operation_at?new Date(p.last_operation_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+      // 导入校验告警（仅提示不拦截）：估算表与汇总表基线数字对不上时 ⚠ 显示，悬停看详情
+      const warns=p.import_warnings&&p.import_warnings.length?p.import_warnings:[];
+      const warnTip=warns.map(w=>((w.file?'【'+w.file+'】':'')+(w.messages||[]).join('；'))).join('  ');
+      const warnTag=warns.length?' <span class="text-warning" style="cursor:help" title="导入校验告警（已正常导入，请人工核对）：'+esc(warnTip)+'"><i class="bi bi-exclamation-triangle-fill"></i>'+warns.length+'</span>':'';
       return '<tr>'+
         '<td>'+String(pi+1).padStart(2,'0')+'</td>'+
-        '<td title="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+'</td>'+
+        '<td title="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+warnTag+'</td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
         '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
         '<td><span class="badge '+statusBg+'">'+projectStatusLabel(p.status)+'</span></td>'+
@@ -1276,7 +1280,6 @@ async function doUploadFile(){
     const r=await fetch(API+'/projects/'+currentProjectId+'/files',{method:'POST',headers:{'Authorization':'Bearer '+localStorage.getItem('token')},body:fd});
     let data={};try{data=await r.json();}catch(_){}
     if(r.status===413){throw new Error('文件过大被网关拒绝（单文件上限 50MB）。请压缩或拆分后再上传');}
-    if(r.status===400&&data.validation){throw new Error('成本估算表校验未通过：'+(data.error||''));}
     if(r.ok){
       let extractTip = '';
       if (data.file_category === 'estimation') {
@@ -1288,6 +1291,10 @@ async function doUploadFile(){
           const wi = data.extracted ? data.extracted.work_items : 0;
           extractTip = '<br><b>已自动抽取成本明细（工作项'+wi+'条），可在「工作量评估」页查看</b>'
             + (data.extracted && data.extracted.warnings && data.extracted.warnings.length ? '<br><span class="text-warning">提示：'+esc(data.extracted.warnings.join('；'))+'</span>' : '');
+        }
+        // 双数字校验只告警不拦截：告警已持久化到项目，批次项目列表 ⚠ 显示
+        if (data.validation && data.validation.length) {
+          extractTip += '<br><span class="text-warning">⚠ 校验告警（已正常导入）：'+esc(data.validation.join('；'))+'</span>';
         }
       }
       if(statusEl)statusEl.innerHTML='<div class="alert alert-success">上传成功！'+(data.auto_detected?'<br>系统自动识别类型：'+getFileCategoryName(data.file_category):'')+'<br>文件序号：'+(data.file_seq||'-')+extractTip+'</div>';

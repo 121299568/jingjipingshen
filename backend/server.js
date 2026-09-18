@@ -1184,7 +1184,10 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
   db.store.files.push(file);
   // 若上传的是成本估算表（xlsx），自动抽取工作明细与成本项，供工作量评估页使用
   if (finalCategory === 'estimation' && parsed && !parsed.__parseError) {
-    // ===== 双数字校验：与导入评审汇总表的基线字段比对 =====
+    // ===== 双数字校验（仅告警、不拦截导入）=====
+    // 产品决策：以前校验不过会删文件+400 整个拒绝，单个数字对不上就导致整批资料传不上去，
+    // 用户体验极差。现改为：照常导入落库 + 抽取明细，告警持久化到项目 import_warnings，
+    // 在批次项目列表里 ⚠ 黄标提示，由人工判断是否需要修正。
     const vIssues = [];
     const pContract = project.contract_amount != null ? Number(project.contract_amount) : null;
     const eContract = parsed.project.contract_amount != null ? Number(parsed.project.contract_amount) : null;
@@ -1194,13 +1197,16 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     const estCost = parsed.cost_summary && parsed.cost_summary.total_cost != null ? Number(parsed.cost_summary.total_cost) : null;
     const internalCost = project.internal_estimated_cost != null ? Number(project.internal_estimated_cost) : null;
     if (internalCost != null && estCost != null && estCost > internalCost) {
-      vIssues.push(`估算成本 ¥${estCost.toLocaleString()} 大于汇总表「内部信息系统填报预估成本」 ¥${internalCost.toLocaleString()}，不能通过`);
+      vIssues.push(`估算成本 ¥${estCost.toLocaleString()} 大于汇总表「内部信息系统填报预估成本」 ¥${internalCost.toLocaleString()}`);
     }
+    // 最新一次估算表上传的校验结论覆盖旧告警：传了干净的表，旧告警自动消除
+    project.import_warnings = vIssues.length
+      ? [{ file: realOriginalName, messages: vIssues, time: new Date().toISOString() }]
+      : [];
     if (vIssues.length) {
-      try { fs.unlinkSync(newPath); } catch (_) {}
-      db.store.files = db.store.files.filter(f => f.id !== file.id);
-      return res.status(400).json({ error: '成本估算表校验未通过：' + vIssues.join('；'), validation: vIssues });
+      db.logWorkflow(projectId, 'extract_cost', '成本估算表校验告警（已导入）：' + vIssues.join('；'), req.user.id);
     }
+    file.validation = vIssues;
     try {
       // 先清掉该项目已有的明细，避免重复累加
       db.store.workItems = db.store.workItems.filter(w => w.project_id !== projectId);
@@ -1413,6 +1419,12 @@ async function handleFolderUpload(req, res) {
     const ext = path.extname(realName);
     const safe = realName.replace(/[^\w\u4e00-\u9fa5.-]/g, '_');
     if (match) {
+      // 校验告警持久化到项目（批次项目列表 ⚠ 显示）：仅估算表类 Excel 覆盖旧告警，干净的估算表自动消除旧告警
+      if (parsed && !parsed.__parseError && finalCategory === 'estimation') {
+        match.import_warnings = validation.messages.length
+          ? [{ file: realName, messages: validation.messages, time: new Date().toISOString() }]
+          : [];
+      }
       const seq = generateFileSeq(match.id);
       const newFilename = `${match.id}-${seq}-${safe}`;
       const newPath = path.join(UPLOAD_DIR, newFilename);
