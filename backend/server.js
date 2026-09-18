@@ -1224,9 +1224,10 @@ const folderFileFilter = (req, file, cb) => {
   if (allowed.test(realName)) cb(null, true);
   else cb(new Error('不支持的文件类型: ' + realName));
 };
-// 文件夹上传 multer 上限提到 60MB（与 nginx client_max_body_size 对齐），
-// 这样 50-60MB 的文件能到达 handler、由其按大小优雅跳过，而不是被 multer 直接拒掉导致整批失败。
-const folderUpload = multer({ storage, fileFilter: folderFileFilter, limits: { fileSize: 60 * 1024 * 1024 } }).array('files', 500);
+// 文件夹上传 multer 不卡文件大小：大文件（>50MB）交由 handleFolderUpload 统一按大小优雅跳过
+// 并清理磁盘孤儿，绝不让单个大文件导致 multer 在中间件阶段 400 中止、把整批真实文件一起拖垮。
+// nginx client_max_body_size(60m) 仍是硬性天花板，>60MB 会在网关层 413，到不了这里。
+const folderUpload = multer({ storage, fileFilter: folderFileFilter }).array('files', 500);
 
 // 评审前/评审后成本双口径：首次写入成本估算时，把初始值快照为 cost_summary_pre（评审前），
 // 后续更新只改 cost_summary（评审后）。年度汇总据此计算核减。
