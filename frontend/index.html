@@ -2648,27 +2648,62 @@ async function doFolderUpload(){
     if(sizeNotice){sizeNotice.style.display='block';sizeNotice.innerHTML='已自动过滤 <b>'+big.length+'</b> 个超过 50MB 的文件（单文件上限），其余 <b>'+uploadItems.length+'</b> 个文件正常上传：'+big.map(f=>esc(f.rel)+'（'+(f.file.size/1048576).toFixed(1)+'MB）').join('、');}
   } else if(sizeNotice){sizeNotice.style.display='none';sizeNotice.textContent='';}
   if(!uploadItems.length){alert('所选文件夹的文件都超过了 50MB 上限，无法上传。请压缩或拆分后重试。');return;}
-  const fd=new FormData();
-  uploadItems.forEach(x=>fd.append('files',x.f.file,x.f.file.name));
-  const relPaths=uploadItems.map(x=>x.f.rel);
-  const overrides={};
-  uploadItems.forEach((x,k)=>{
-    const pSel=document.getElementById('fproj'+x.idx);const cSel=document.getElementById('fcat'+x.idx);
-    overrides[k]={projectId:pSel?pSel.value:'',category:cSel?cSel.value:'auto'};
+  const btn=document.getElementById('folderUploadBtn');btn.disabled=true;const old=btn.textContent;
+  // 关键：nginx client_max_body_size(60m) 卡的是「整个请求体」而非单文件。
+  // 多文件合并成一个大请求时，即使每个文件都 ≤50MB，加起来超 60MB 也会被网关整批 413。
+  // 所以按体积分批（每批 ≤40MB，留足余量），每批独立请求；某批失败再降级为逐个上传，
+  // 任何文件失败都只影响它自己，绝不拖垮整批。
+  const BATCH_MAX=40*1024*1024;
+  const batches=[];let cur=[],curSize=0;
+  uploadItems.forEach(x=>{
+    if(cur.length&&curSize+x.f.file.size>BATCH_MAX){batches.push(cur);cur=[];curSize=0;}
+    cur.push(x);curSize+=x.f.file.size;
   });
-  fd.append('relPaths',JSON.stringify(relPaths));
-  fd.append('overrides',JSON.stringify(overrides));
-  const btn=document.getElementById('folderUploadBtn');btn.disabled=true;const old=btn.textContent;btn.textContent='上传中…';
-  try{
+  if(cur.length)batches.push(cur);
+  const merged={ok:true,count:0,matched:0,unmatched:0,report:[]};
+  const failed=[];
+  const sendBatch=async(items)=>{
+    const fd=new FormData();
+    items.forEach(x=>fd.append('files',x.f.file,x.f.file.name));
+    fd.append('relPaths',JSON.stringify(items.map(x=>x.f.rel)));
+    const overrides={};
+    items.forEach((x,k)=>{
+      const pSel=document.getElementById('fproj'+x.idx);const cSel=document.getElementById('fcat'+x.idx);
+      overrides[k]={projectId:pSel?pSel.value:'',category:cSel?cSel.value:'auto'};
+    });
+    fd.append('overrides',JSON.stringify(overrides));
     const r=await fetch(API+'/sessions/'+sid+'/upload-folder',{method:'POST',headers:authH(),body:fd});
     const d=await r.json().catch(()=>({}));
-    if(r.status===413){alert('上传失败：有文件超过服务端单文件上限（50MB），请压缩或拆分后重试');return;}
-    if(!r.ok){alert('上传失败：'+(d.error||r.status));return;}
-    document.getElementById('folderResult').innerHTML=renderFolderResult(d);
+    return {r,d};
+  };
+  const sendOne=async(x)=>{
+    try{
+      const {r,d}=await sendBatch([x]);
+      if(!r.ok){failed.push(x.f.rel+'（'+(r.status===413?'超过网关限制':(d.error||('HTTP '+r.status)))+'）');return;}
+      merged.count+=(d.count||0);merged.matched+=(d.matched||0);merged.unmatched+=(d.unmatched||0);
+      (d.report||[]).forEach(rp=>merged.report.push(rp));
+    }catch(e){failed.push(x.f.rel+'（'+e.message+'）');}
+  };
+  try{
+    for(let bi=0;bi<batches.length;bi++){
+      btn.textContent='上传中 '+(bi+1)+'/'+batches.length+' 批（共 '+uploadItems.length+' 个文件）…';
+      try{
+        const {r,d}=await sendBatch(batches[bi]);
+        if(!r.ok){
+          // 整批失败 → 降级为逐个上传，保住其余文件
+          for(const x of batches[bi])await sendOne(x);
+          continue;
+        }
+        merged.count+=(d.count||0);merged.matched+=(d.matched||0);merged.unmatched+=(d.unmatched||0);
+        (d.report||[]).forEach(rp=>merged.report.push(rp));
+      }catch(e){for(const x of batches[bi])await sendOne(x);}
+    }
+    if(merged.count>0)document.getElementById('folderResult').innerHTML=renderFolderResult(merged);
+    if(failed.length&&merged.count>0)document.getElementById('folderResult').innerHTML+='<div class="alert alert-warning small mt-2">有 '+failed.length+' 个文件上传失败（不影响其他文件）：<br>'+failed.map(f=>esc(f)).join('<br>')+'</div>';
+    if(merged.count===0&&failed.length)alert('全部文件上传失败：\n'+failed.join('\n'));
     await Promise.all([loadSessions(),loadProjects(),loadFiles(),loadUserGroups()]);
     renderProjects();
-  }catch(e){alert('上传异常：'+e.message);}
-  finally{btn.disabled=false;btn.textContent=old;}
+  }finally{btn.disabled=false;btn.textContent=old;}
 }
 function matchLabel(by){
   return ({manual:'人工指定','content-code':'内容·编号','content-name':'内容·名称','content-name-partial':'内容·名称(部分)','name-code':'文件名·编号',name:'文件名',folder:'同文件夹归并',none:'未匹配'})[by]||(by||'未知');
