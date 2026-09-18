@@ -1419,6 +1419,7 @@ async function handleFolderUpload(req, res) {
     const ext = path.extname(realName);
     const safe = realName.replace(/[^\w\u4e00-\u9fa5.-]/g, '_');
     if (match) {
+      let finalCategory = category;
       // 校验告警持久化到项目（批次项目列表 ⚠ 显示）：仅估算表类 Excel 覆盖旧告警，干净的估算表自动消除旧告警
       if (parsed && !parsed.__parseError && finalCategory === 'estimation') {
         match.import_warnings = validation.messages.length
@@ -1430,7 +1431,6 @@ async function handleFolderUpload(req, res) {
       const newPath = path.join(UPLOAD_DIR, newFilename);
       if (fs.existsSync(f.path)) fs.renameSync(f.path, newPath);
       let extracted = null;
-      let finalCategory = category;
       if (finalCategory === 'estimation' && parsed && !parsed.__parseError) {
         try { extractCostIntoProject(match, parsed, req.user.id); extracted = { work_items: parsed.work_items.length, procurement_items: parsed.procurement_items.length, travel_items: parsed.travel_items.length, total_cost: parsed.cost_summary.total_cost || 0 }; }
         catch (e) { console.error('文件夹估算表解析失败:', e && e.message); }
