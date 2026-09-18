@@ -424,42 +424,31 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
     <!-- ANNUAL 年度评审汇总（协同查看 / 编辑 / 评论）-->
     <div id="page-annual" class="page">
       <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <h6>年度评审结果汇总（协同）</h6>
+        <h6>年度经济评审结果汇总（<span id="annualYearLabel">2026</span>）</h6>
         <div class="d-flex gap-2 align-items-center">
           <select class="form-select form-select-sm" id="annualYearSelect" onchange="setAnnualYear()" style="width:auto">
             <option value="2026">2026 年</option>
             <option value="2025">2025 年</option>
             <option value="2027">2027 年</option>
           </select>
+          <button class="btn btn-success btn-sm" onclick="exportAnnual()"><i class="bi bi-download"></i> 导出汇总表</button>
           <span class="small text-muted" id="annualUpdated"></span>
         </div>
       </div>
       <div class="alert alert-info small mb-3">
-        <i class="bi bi-info-circle"></i> 本页为「云文档式」年度汇总：所有人可查看，管理员/研发中心可编辑段落并留痕，任何角色可评论；页面每 30 秒自动刷新以体现多人协同。
+        <i class="bi bi-info-circle"></i> 本表按「评审前 / 评审后」双口径自动汇总全年各批次项目的成本、利润率、分包比例与核减，金额与比率均由系统实时计算（公式：利润率=(合同额−估算成本)/合同额；专业分包比例=专业分包/合同额；分包比例=(估算成本−长期职工−第三方测试费)/合同额；核减=评审前−评审后）。管理员/研发中心/事业部可双击编辑业务方向、数字化、限制分包、评审意见、投标毛利率、导入情况等；页面每 30 秒自动刷新以体现协同。
       </div>
-      <div class="card card-custom mb-3"><div class="card-header bg-white"><h6 class="mb-0">年度概览</h6></div><div class="card-body" id="annualOverview"></div></div>
-      <div class="row g-3">
-        <div class="col-lg-7">
-          <div class="card card-custom mb-3"><div class="card-header bg-white"><h6 class="mb-0">按事业部汇总</h6></div>
-            <div class="card-body p-0"><div class="table-responsive">
-              <table class="table table-hover mb-0"><thead class="table-light"><tr><th>事业部</th><th>项目数</th><th>合同总额</th><th>成本总额</th><th>平均利润率</th><th>已完成</th></tr></thead>
-              <tbody id="annualByDept"></tbody></table>
-            </div></div>
-          </div>
-        </div>
-        <div class="col-lg-5">
-          <div class="card card-custom mb-3"><div class="card-header bg-white"><h6 class="mb-0">按批次汇总</h6></div>
-            <div class="card-body p-0"><div class="table-responsive">
-              <table class="table table-hover mb-0"><thead class="table-light"><tr><th>批次</th><th>项目数</th><th>合同总额</th><th>成本总额</th><th>已完成</th></tr></thead>
-              <tbody id="annualBySession"></tbody></table>
-            </div></div>
+      <div class="card card-custom mb-3">
+        <div class="card-body p-0">
+          <div class="table-responsive" style="max-height:62vh;overflow:auto">
+            <table class="table table-sm table-bordered mb-0 align-middle" id="annualTable">
+              <thead id="annualHead" class="sticky-top" style="position:sticky;top:0;z-index:2;background:#fff"></thead>
+              <tbody id="annualBody"></tbody>
+              <tfoot id="annualFoot" class="table-group-divider fw-bold"></tfoot>
+            </table>
           </div>
         </div>
       </div>
-      <div class="card card-custom mb-3"><div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <h6 class="mb-0">年度总结（可编辑段落）</h6>
-        <button class="btn btn-primary btn-sm" id="annualSaveBtn" onclick="saveAnnualSections()"><i class="bi bi-check2"></i> 保存段落</button>
-      </div><div class="card-body" id="annualSections"></div></div>
       <div class="row g-3">
         <div class="col-lg-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">编辑历史</h6></div><div class="card-body" id="annualHistory" style="max-height:260px;overflow:auto"></div></div></div>
         <div class="col-lg-6"><div class="card card-custom"><div class="card-header bg-white"><h6 class="mb-0">协同评论</h6></div>
@@ -2690,42 +2679,76 @@ async function exportBizConfirm(){
 let annualYear=new Date().getFullYear();
 let annualTimer=null;
 function startAnnualTimer(){if(annualTimer)clearInterval(annualTimer);annualTimer=setInterval(()=>{const p=document.getElementById('page-annual');if(p&&p.classList.contains('active'))renderAnnual();},30000);}
-function setAnnualYear(){const v=document.getElementById('annualYearSelect').value;if(v)annualYear=parseInt(v);renderAnnual();}
-function fmtMoney(n){return n?'¥'+Number(n).toLocaleString():'¥0';}
-function annualOv(label,val){return '<div class="col-4 col-md-2"><div class="card card-custom text-center py-2"><div class="fw-bold">'+esc(val==null?'-':val)+'</div><div class="small text-muted">'+label+'</div></div></div>';}
+function setAnnualYear(){const v=document.getElementById('annualYearSelect').value;if(v){annualYear=parseInt(v);const l=document.getElementById('annualYearLabel');if(l)l.textContent=v;}renderAnnual();}
+function fmtMoney(n){return (n==null||n===''||isNaN(Number(n)))?'¥0':'¥'+Number(n).toLocaleString();}
+function annualMoney(v){return (v==null||v===''||isNaN(Number(v)))?'—':Number(v).toLocaleString();}
+function annualPct(v){return (v==null||v===''||isNaN(Number(v)))?'':(Number(v)*100).toFixed(2)+'%';}
+const ANNUAL_PRE_MAP={pre_long_term:'long_term_cost',pre_zhongshi:'zhongshi_cost',pre_huazhao:'huazhao_cost',pre_outsourcing:'outsourcing_cost',pre_subcontract:'subcontract_cost',pre_procurement:'procurement_cost',pre_travel:'travel_cost',pre_third_party:'third_party_test_cost',pre_ip:'ip_cost'};
+const ANNUAL_POST_MAP={post_long_term:'long_term_cost',post_zhongshi:'zhongshi_cost',post_huazhao:'huazhao_cost',post_outsourcing:'outsourcing_cost',post_subcontract:'subcontract_cost',post_procurement:'procurement_cost',post_travel:'travel_cost',post_third_party:'third_party_test_cost',post_ip:'ip_cost'};
 function renderAnnual(){
   fetch(API+'/annual/'+annualYear,{headers:authH()}).then(r=>r.json()).then(d=>{
-    const agg=d.aggregation||{};
-    document.getElementById('annualOverview').innerHTML=
-      '<div class="row g-2">'+annualOv('批次',agg.batchCount)+annualOv('项目数',agg.projectCount)+
-      annualOv('合同总额',fmtMoney(agg.contractSum))+annualOv('成本总额',fmtMoney(agg.costSum))+annualOv('已完成',agg.completedCount)+'</div>';
-    document.getElementById('annualByDept').innerHTML=(agg.byDepartment||[]).map(r=>'<tr><td>'+esc(r.biz_department)+'</td><td>'+r.projectCount+'</td><td>'+fmtMoney(r.contractSum)+'</td><td>'+fmtMoney(r.costSum)+'</td><td>'+(r.marginAvg!=null?r.marginAvg+'%':'-')+'</td><td>'+r.completedCount+'</td></tr>').join('')||'<tr><td colspan="6" class="text-muted text-center">该年度暂无数据</td></tr>';
-    document.getElementById('annualBySession').innerHTML=(agg.bySession||[]).map(r=>'<tr><td>'+esc(r.name)+'</td><td>'+r.projectCount+'</td><td>'+fmtMoney(r.contractSum)+'</td><td>'+fmtMoney(r.costSum)+'</td><td>'+r.completedCount+'</td></tr>').join('')||'<tr><td colspan="5" class="text-muted text-center">该年度暂无数据</td></tr>';
-    const canEdit=(currentUser.role==='admin'||currentUser.role==='rd');
-    const secs=((d.doc&&d.doc.data&&d.doc.data.sections)||[]);
-    document.getElementById('annualSections').innerHTML=secs.map((s,i)=>
-      '<div class="mb-3"><label class="form-label fw-bold">'+esc(s.title||s.key)+'</label>'+
-      (canEdit?'<textarea class="form-control" id="sec'+i+'" rows="4">'+esc(s.content||'')+'</textarea>':'<div class="border rounded p-2 bg-light" style="white-space:pre-wrap;min-height:48px">'+(esc(s.content)||'<span class="text-muted">（空）</span>')+'</div>')
-    ).join('');
-    document.getElementById('annualSaveBtn').style.display=canEdit?'inline-block':'none';
-    const secTitle=k=>((secs.find(s=>s.key===k)||{}).title||k);
+    const s=d.summary;
+    if(!s){document.getElementById('annualBody').innerHTML='<tr><td class="text-muted text-center">该年度暂无数据</td></tr>';return;}
+    const cols=s.columns;
+    const preStart=cols.findIndex(c=>c.group==='pre');const preCount=cols.filter(c=>c.group==='pre').length;
+    const postStart=cols.findIndex(c=>c.group==='post');const postCount=cols.filter(c=>c.group==='post').length;
+    let r1='<tr>';
+    cols.forEach((c,i)=>{ if(c.group==='pre'){ if(i===preStart) r1+='<th class="text-center" colspan="'+preCount+'" style="background:#e8f0fe;color:#1a56b8">评审前</th>'; }
+      else if(c.group==='post'){ if(i===postStart) r1+='<th class="text-center" colspan="'+postCount+'" style="background:#fde8e8;color:#b83a3a">评审后</th>'; }
+      else r1+='<th></th>'; });
+    r1+='<th></th></tr>';
+    let r2='<tr>'+cols.map(c=>'<th class="small" style="white-space:nowrap;vertical-align:bottom">'+esc(c.label)+'</th>').join('')+'<th>操作</th></tr>';
+    document.getElementById('annualHead').innerHTML=r1+r2;
+    const body=document.getElementById('annualBody');
+    if(!s.rows.length){ body.innerHTML='<tr><td class="text-muted text-center" colspan="'+(cols.length+1)+'">该年度暂无数据</td></tr>'; }
+    else body.innerHTML=s.rows.map(r=>{
+      const tds=cols.map(c=>{
+        const v=r.cells[c.key];
+        if(c.editable){
+          let disp='';
+          if(c.type==='pct') disp=(v==null?'':(Number(v)*100).toFixed(2));
+          else disp=(v==null?'':v);
+          const cls=c.type==='money'?'text-end':'';
+          return '<td class="'+cls+'"><span class="ed" contenteditable="true" data-pid="'+r.project_id+'" data-key="'+c.key+'" data-type="'+c.type+'" style="outline:1px dashed #ccc;min-width:54px;display:inline-block;padding:0 4px">'+esc(String(disp))+'</span></td>';
+        }
+        if(c.type==='money') return '<td class="text-end">'+annualMoney(v)+'</td>';
+        if(c.type==='pct') return '<td class="text-end">'+annualPct(v)+'</td>';
+        return '<td>'+(v==null?'':esc(v))+'</td>';
+      }).join('');
+      return '<tr>'+tds+'<td><button class="btn btn-sm btn-outline-primary" onclick="saveAnnualRow('+r.project_id+')">保存</button></td></tr>';
+    }).join('');
+    const t=s.totals;
+    document.getElementById('annualFoot').innerHTML='<tr>'+cols.map(c=>{
+      const v=t[c.key];
+      if(c.type==='money') return '<td class="text-end">'+annualMoney(v)+'</td>';
+      if(c.type==='pct') return '<td class="text-end">'+annualPct(v)+'</td>';
+      return '<td>'+(v==null?'':esc(v))+'</td>';
+    }).join('')+'<td></td></tr>';
     const hist=((d.doc&&d.doc.data&&d.doc.data.edit_history)||[]);
-    document.getElementById('annualHistory').innerHTML=hist.slice().reverse().map(h=>'<div class="small border-bottom py-1"><b>'+esc(h.user)+'</b> 于 '+esc((h.at||'').replace('T',' ').slice(0,16))+' 修改了「'+esc(secTitle(h.field))+'」</div>').join('')||'<div class="text-muted small">暂无编辑记录</div>';
+    document.getElementById('annualHistory').innerHTML=hist.slice().reverse().map(h=>'<div class="small border-bottom py-1"><b>'+esc(h.user)+'</b> 于 '+esc((h.at||'').replace('T',' ').slice(0,16))+' 修改了「'+esc(h.field||'')+'」'+(h.after?('：'+esc(String(h.after).slice(0,30))):'')+'</div>').join('')||'<div class="text-muted small">暂无编辑记录</div>';
     const cmts=((d.doc&&d.doc.data&&d.doc.data.comments)||[]);
     document.getElementById('annualComments').innerHTML=cmts.slice().reverse().map(c=>'<div class="small border-bottom py-1"><b>'+esc(c.user)+'</b> <span class="text-muted">'+(c.at||'').replace('T',' ').slice(0,16)+'</span><div>'+esc(c.text)+'</div></div>').join('')||'<div class="text-muted small">暂无评论</div>';
     document.getElementById('annualUpdated').textContent='更新于 '+((d.doc&&d.doc.updated_at)?(d.doc.updated_at.replace('T',' ').slice(0,16)):'—')+'（每30秒自动刷新）';
   }).catch(e=>{});
 }
-async function saveAnnualSections(){
-  const docResp=await fetch(API+'/annual/'+annualYear,{headers:authH()}).then(r=>r.json()).catch(()=>({doc:null}));
-  const secs=((docResp.doc&&docResp.doc.data&&docResp.doc.data.sections)||[]);
-  const sections=secs.map((s,i)=>({key:s.key,title:s.title,content:document.getElementById('sec'+i)?document.getElementById('sec'+i).value:''}));
+async function saveAnnualRow(pid){
+  const spans=document.querySelectorAll('.ed[data-pid="'+pid+'"]');
+  const body={pre:{},post:{}};
+  spans.forEach(sp=>{
+    const key=sp.getAttribute('data-key');const type=sp.getAttribute('data-type');let val=sp.textContent.trim();
+    if(type==='pct'){ val=val===''?null:Number(val)/100; }
+    else if(type==='money'){ val=val===''?0:Number(val); }
+    if(ANNUAL_PRE_MAP[key]) body.pre[ANNUAL_PRE_MAP[key]]=val;
+    else if(ANNUAL_POST_MAP[key]) body.post[ANNUAL_POST_MAP[key]]=val;
+    else { if(type==='pct'&&val===null) val=''; body[key]=val; }
+  });
   try{
-    const r=await fetch(API+'/annual/'+annualYear,{method:'PUT',headers:Object.assign(authH(),{'Content-Type':'application/json'}),body:JSON.stringify({sections})});
-    if(!r.ok){alert('保存失败');return;}
-    alert('已保存');renderAnnual();
+    const r=await fetch(API+'/projects/'+pid+'/annual',{method:'PATCH',headers:Object.assign(authH(),{'Content-Type':'application/json'}),body:JSON.stringify(body)});
+    if(!r.ok){const e=await r.json().catch(()=>({}));alert('保存失败：'+(e.error||r.status));return;}
+    renderAnnual();
   }catch(e){alert('保存异常：'+e.message);}
 }
+function exportAnnual(){ window.open(API+'/annual/'+annualYear+'/export?token='+encodeURIComponent(localStorage.getItem('token')||''),'_blank'); }
 async function postAnnualComment(){
   const t=document.getElementById('annualCommentInput').value.trim();
   if(!t)return;

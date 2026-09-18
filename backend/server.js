@@ -570,7 +570,9 @@ app.get('/api/projects/:id', auth(), (req, res) => {
 const PROJECT_FIELDS = [
   'project_name', 'project_code', 'project_type', 'business_direction',
   'product_direction', 'is_digital', 'business_sub_direction', 'contract_amount',
-  'biz_department', 'session_id', 'description', 'contract_party', 'remark'
+  'biz_department', 'session_id', 'description', 'contract_party', 'remark',
+  'review_opinion', 'bid_gross_margin', 'import_status', 'import_time', 'import_reason',
+  'labor_subcontract_note', 'review_time', 'rate_reason'
 ];
 app.post('/api/projects', auth(['admin', 'rd', 'biz']), (req, res) => {
   const p = {
@@ -671,6 +673,7 @@ app.post('/api/projects/import-excel', auth(['admin', 'rd', 'biz']), upload.sing
     };
     if (!p.project_name) return res.status(400).json({ error: 'Excel 中未解析到项目名称' });
     db.store.projects.push(p);
+    snapshotPre(p);
     parsed.work_items.forEach(w => db.store.workItems.push({ id: db.nextId(db.store.workItems), project_id: p.id, ...w }));
     // 字段名对齐：解析器输出 name/subtotal，数据库列为 item_name/amount
     parsed.procurement_items.forEach(x => db.store.procurementItems.push({
@@ -1178,6 +1181,7 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
         remark: t.remark, ...t
       }));
       project.cost_summary = parsed.cost_summary;
+      snapshotPre(project);
       db.logWorkflow(projectId, 'extract_cost', `解析成本估算表，抽取工作项${parsed.work_items.length}条、采购${parsed.procurement_items.length}条、差旅${parsed.travel_items.length}条`, req.user.id);
       // 把解析结果暴露给前端，避免"上传成功但空数据"的静默失败
       file.extracted = {
@@ -1210,6 +1214,15 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
 // 未能匹配到项目的文件进入该批次「收件箱」待人工分配。
 const folderUpload = upload.array('files', 500);
 
+// 评审前/评审后成本双口径：首次写入成本估算时，把初始值快照为 cost_summary_pre（评审前），
+// 后续更新只改 cost_summary（评审后）。年度汇总据此计算核减。
+function snapshotPre(p) {
+  if (p && p.cost_summary && !p.cost_summary_pre) {
+    try { p.cost_summary_pre = JSON.parse(JSON.stringify(p.cost_summary)); }
+    catch (_) { p.cost_summary_pre = p.cost_summary; }
+  }
+}
+
 function extractCostIntoProject(project, parsed, userId) {
   db.store.workItems = db.store.workItems.filter(w => w.project_id !== project.id);
   db.store.procurementItems = db.store.procurementItems.filter(x => x.project_id !== project.id);
@@ -1226,6 +1239,7 @@ function extractCostIntoProject(project, parsed, userId) {
     remark: t.remark, ...t
   }));
   project.cost_summary = parsed.cost_summary;
+  snapshotPre(project);
   db.logWorkflow(project.id, 'extract_cost', `[文件夹]解析成本估算表，抽取工作项${parsed.work_items.length}条、采购${parsed.procurement_items.length}条、差旅${parsed.travel_items.length}条`, userId);
 }
 
@@ -2213,6 +2227,7 @@ app.post('/api/sessions/:id/import-offline-eval', auth(['admin', 'rd']), offline
       }
       // 成本汇总
       target.cost_summary = cs;
+      snapshotPre(target);
       updated.push('cost_summary');
       target.updated_at = new Date().toISOString();
       db.logWorkflow(target.id, 'import_offline_eval', `导入离线评估表[${realName}]，更新 ${updated.join('/')}`, req.user.id);
@@ -2287,7 +2302,88 @@ function annualScaffold(year) {
 function getAnnualDoc(year) {
   return db.store.annual.find(a => a.year === Number(year)) || null;
 }
-function buildAnnualAggregation(year, user) {
+// ==================== 年度评审结果汇总（49 列，严格对齐用户模板）====================
+// 列定义：base(基础) / pre(评审前 I..AA) / post(评审后 AB..AP) / audit(导入校核 AQ..AW)
+// type: text | money | pct ；pct 以小数存储（如 0.18），前端按百分比展示。
+// 评审前成本取 cost_summary_pre（首次导入快照），评审后取 cost_summary；缺失时两件相等。
+const ANNUAL_COLUMNS = [
+  // base A..H
+  { key: 'batch', label: '批次', group: 'base', type: 'text' },
+  { key: 'seq', label: '序号', group: 'base', type: 'text' },
+  { key: 'project_code', label: '项目编号', group: 'base', type: 'text' },
+  { key: 'project_name', label: '项目名称', group: 'base', type: 'text' },
+  { key: 'dept', label: '部门', group: 'base', type: 'text' },
+  { key: 'project_type', label: '项目类型', group: 'base', type: 'text' },
+  { key: 'contract_amount', label: '合同额（元）', group: 'base', type: 'money' },
+  { key: 'sys_pre_cost', label: '系统填报预估成本（元）', group: 'base', type: 'money' },
+  // pre 评审前 I..AA (19)
+  { key: 'pre_total', label: '估算成本（元）1', group: 'pre', type: 'money' },
+  { key: 'pre_profit_rate', label: '预估利润率1', group: 'pre', type: 'pct' },
+  { key: 'pre_long_term', label: '长期职工成本（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_zhongshi', label: '中实职工成本（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_huazhao', label: '华兆职工成本（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_outsourcing', label: '人员外包费用（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_subcontract', label: '专业分包费用（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_subcontract_ratio', label: '专业分包比例', group: 'pre', type: 'pct' },
+  { key: 'pre_restricted', label: '是否属于限制分包', group: 'pre', type: 'text', editable: true },
+  { key: 'pre_subcontract_scope', label: '专业分包范围', group: 'pre', type: 'text', editable: true },
+  { key: 'pre_subcontract_all_ratio', label: '分包比例', group: 'pre', type: 'pct' },
+  { key: 'pre_procurement', label: '采购费用（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_travel', label: '差旅费（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_third_party', label: '第三方测试费（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_ip', label: '知识产权费（元）', group: 'pre', type: 'money', editable: true },
+  { key: 'pre_is_digital', label: '否属于数字化', group: 'pre', type: 'text' },
+  { key: 'pre_business_direction', label: '业务方向', group: 'pre', type: 'text', editable: true },
+  { key: 'pre_business_sub_direction', label: '业务子方向', group: 'pre', type: 'text', editable: true },
+  { key: 'pre_product_direction', label: '产品方向', group: 'pre', type: 'text', editable: true },
+  // post 评审后 AB..AP (15)
+  { key: 'post_total', label: '估算成本（元）2', group: 'post', type: 'money' },
+  { key: 'post_review_opinion', label: '评审意见', group: 'post', type: 'text', editable: true },
+  { key: 'post_review_time', label: '评审时间', group: 'post', type: 'text', editable: true },
+  { key: 'post_long_term', label: '长期职工成本（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_zhongshi', label: '中实职工成本（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_huazhao', label: '华兆职工成本（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_outsourcing', label: '人员外包费用（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_subcontract', label: '专业分包费用（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_procurement', label: '采购费用（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_travel', label: '差旅费（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_third_party', label: '第三方测试费（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_ip', label: '知识产权费（元）', group: 'post', type: 'money', editable: true },
+  { key: 'post_profit_rate', label: '预估利润率', group: 'post', type: 'pct' },
+  { key: 'post_subcontract_ratio', label: '专业分包比例', group: 'post', type: 'pct' },
+  { key: 'post_subcontract_all_ratio', label: '分包比例', group: 'post', type: 'pct' },
+  // audit 导入校核 AQ..AW (7)
+  { key: 'import_status', label: '导入情况', group: 'audit', type: 'text', editable: true },
+  { key: 'import_time', label: '导入时间', group: 'audit', type: 'text', editable: true },
+  { key: 'import_reason', label: '未导入原因', group: 'audit', type: 'text', editable: true },
+  { key: 'reduction', label: '评审后核减值', group: 'audit', type: 'money' },
+  { key: 'bid_gross_margin', label: '投标毛利率', group: 'audit', type: 'pct', editable: true },
+  { key: 'rate_reason', label: '利率合理性（投标毛利率和预估利润率校核）', group: 'audit', type: 'text', editable: true },
+  { key: 'labor_subcontract_note', label: '劳务分包备注', group: 'audit', type: 'text', editable: true }
+];
+const COST_KEYS = ['long_term_cost', 'zhongshi_cost', 'huazhao_cost', 'outsourcing_cost', 'subcontract_cost', 'procurement_cost', 'travel_cost', 'third_party_test_cost', 'ip_cost'];
+function costSum(cs) { return COST_KEYS.reduce((s, k) => s + (Number(cs && cs[k]) || 0), 0); }
+// 9 项成本明细提取值
+function costParts(cs) {
+  cs = cs || {};
+  return {
+    long_term: Number(cs.long_term_cost) || 0,
+    zhongshi: Number(cs.zhongshi_cost) || 0,
+    huazhao: Number(cs.huazhao_cost) || 0,
+    outsourcing: Number(cs.outsourcing_cost) || 0,
+    subcontract: Number(cs.subcontract_cost) || 0,
+    procurement: Number(cs.procurement_cost) || 0,
+    travel: Number(cs.travel_cost) || 0,
+    third_party: Number(cs.third_party_test_cost) || 0,
+    ip: Number(cs.ip_cost) || 0
+  };
+}
+const MONEY_KEYS = ANNUAL_COLUMNS.filter(c => c.type === 'money').map(c => c.key);
+const PCT_KEYS = ANNUAL_COLUMNS.filter(c => c.type === 'pct').map(c => c.key);
+const r2 = n => (n == null || isNaN(n)) ? null : Math.round(n * 100) / 100;
+const r4 = n => (n == null || isNaN(n)) ? null : Math.round(n * 10000) / 10000;
+
+function buildAnnualSummary(year, user) {
   const y = String(year);
   const sessions = (db.store.reviewSessions || []).filter(s => {
     const t = s.created_at || s.review_time;
@@ -2296,47 +2392,81 @@ function buildAnnualAggregation(year, user) {
   const sessionIds = new Set(sessions.map(s => s.id));
   const sName = {}; sessions.forEach(s => sName[s.id] = s.name);
   const projects = db.filterByDept('projects', user).filter(p => sessionIds.has(p.session_id));
-  const deptMap = {}, sessMap = {};
-  let contractSum = 0, costSum = 0, completed = 0;
-  projects.forEach(p => {
-    const cs = p.cost_summary || {};
-    const contract = Number(p.contract_amount) || 0;
-    const cost = Number(cs.total_cost) || 0;
-    const margin = (contract > 0 && cost > 0) ? (1 - cost / contract) : null;
-    const d = p.biz_department || '未知';
-    deptMap[d] = deptMap[d] || { biz_department: d, projectCount: 0, contractSum: 0, costSum: 0, margins: [], completedCount: 0 };
-    deptMap[d].projectCount++; deptMap[d].contractSum += contract; deptMap[d].costSum += cost;
-    if (margin != null) deptMap[d].margins.push(margin);
-    if (p.status === 'completed') deptMap[d].completedCount++;
-    const sid = p.session_id;
-    sessMap[sid] = sessMap[sid] || { session_id: sid, name: sName[sid] || '', projectCount: 0, contractSum: 0, costSum: 0, completedCount: 0 };
-    sessMap[sid].projectCount++; sessMap[sid].contractSum += contract; sessMap[sid].costSum += cost;
-    if (p.status === 'completed') sessMap[sid].completedCount++;
-    contractSum += contract; costSum += cost; if (p.status === 'completed') completed++;
+  const rows = [];
+  projects.forEach((p, i) => {
+    const preCs = p.cost_summary_pre || p.cost_summary || {};
+    const postCs = p.cost_summary || {};
+    const pre = costParts(preCs), post = costParts(postCs);
+    const I = costSum(preCs), AB = costSum(postCs);
+    const G = Number(p.contract_amount) || 0;
+    const J = G > 0 ? r4((G - I) / G) : null;
+    const P = G > 0 ? r4(pre.subcontract / G) : null;
+    const S = G > 0 ? r4((I - pre.long_term - pre.third_party) / G) : null;
+    const AN = G > 0 ? r4((G - AB) / G) : null;
+    const AO = G > 0 ? r4(post.subcontract / G) : null;
+    const AP = G > 0 ? r4((AB - post.long_term - post.third_party) / G) : null;
+    const AT = r2(I - AB);
+    // 利率合理性：投标毛利率 vs 预估利润率1（评审前）偏差>3% 视为不合理
+    let rateReason = p.rate_reason || '';
+    if (!rateReason && p.bid_gross_margin != null && J != null) {
+      rateReason = (Math.abs(Number(p.bid_gross_margin) - J) > 0.03) ? '不合理' : '合理';
+    }
+    const cells = {
+      batch: sName[p.session_id] || ('批次' + p.session_id), seq: i + 1,
+      project_code: p.project_code || '', project_name: p.project_name || '',
+      dept: p.biz_department || '', project_type: p.project_type || '',
+      contract_amount: G, sys_pre_cost: r2(Number(p.internal_estimated_cost) || 0),
+      pre_total: r2(I), pre_profit_rate: J,
+      pre_long_term: r2(pre.long_term), pre_zhongshi: r2(pre.zhongshi), pre_huazhao: r2(pre.huazhao),
+      pre_outsourcing: r2(pre.outsourcing), pre_subcontract: r2(pre.subcontract),
+      pre_subcontract_ratio: P, pre_restricted: p.is_restricted_subcontract || '',
+      pre_subcontract_scope: p.subcontract_scope || '', pre_subcontract_all_ratio: S,
+      pre_procurement: r2(pre.procurement), pre_travel: r2(pre.travel),
+      pre_third_party: r2(pre.third_party), pre_ip: r2(pre.ip),
+      pre_is_digital: p.is_digital ? '是' : '否',
+      pre_business_direction: p.business_direction || '', pre_business_sub_direction: p.business_sub_direction || '',
+      pre_product_direction: p.product_direction || '',
+      post_total: r2(AB), post_review_opinion: p.review_opinion || '',
+      post_review_time: (p.review_time || '').slice(0, 10),
+      post_long_term: r2(post.long_term), post_zhongshi: r2(post.zhongshi), post_huazhao: r2(post.huazhao),
+      post_outsourcing: r2(post.outsourcing), post_subcontract: r2(post.subcontract),
+      post_procurement: r2(post.procurement), post_travel: r2(post.travel),
+      post_third_party: r2(post.third_party), post_ip: r2(post.ip),
+      post_profit_rate: AN, post_subcontract_ratio: AO, post_subcontract_all_ratio: AP,
+      import_status: p.import_status || '', import_time: (p.import_time || '').slice(0, 10),
+      import_reason: p.import_reason || '', reduction: AT,
+      bid_gross_margin: p.bid_gross_margin != null ? r4(Number(p.bid_gross_margin)) : null,
+      rate_reason: rateReason, labor_subcontract_note: p.labor_subcontract_note || ''
+    };
+    rows.push({ project_id: p.id, cells });
   });
-  const byDepartment = Object.values(deptMap).map(d => ({
-    biz_department: d.biz_department, projectCount: d.projectCount,
-    contractSum: Math.round(d.contractSum), costSum: Math.round(d.costSum),
-    marginAvg: d.margins.length ? Math.round(d.margins.reduce((a, b) => a + b, 0) / d.margins.length * 100 * 100) / 100 : null,
-    completedCount: d.completedCount
-  })).sort((a, b) => b.contractSum - a.contractSum);
-  const bySession = Object.values(sessMap).map(s => ({
-    session_id: s.session_id, name: s.name, projectCount: s.projectCount,
-    contractSum: Math.round(s.contractSum), costSum: Math.round(s.costSum), completedCount: s.completedCount
-  })).sort((a, b) => a.session_id - b.session_id);
-  return {
-    year, batchCount: sessions.length, projectCount: projects.length,
-    contractSum: Math.round(contractSum), costSum: Math.round(costSum), completedCount: completed,
-    byDepartment, bySession
-  };
+  // 合计
+  const tot = {};
+  MONEY_KEYS.forEach(k => tot[k] = r2(rows.reduce((s, r) => s + (Number(r.cells[k]) || 0), 0)));
+  const Gs = tot.contract_amount || 0;
+  const preI = tot.pre_total, postAB = tot.post_total;
+  tot.pre_profit_rate = Gs > 0 ? r4((Gs - preI) / Gs) : null;
+  tot.pre_subcontract_ratio = Gs > 0 ? r4(tot.pre_subcontract / Gs) : null;
+  tot.pre_subcontract_all_ratio = Gs > 0 ? r4((preI - tot.pre_long_term - tot.pre_third_party) / Gs) : null;
+  tot.post_profit_rate = Gs > 0 ? r4((Gs - postAB) / Gs) : null;
+  tot.post_subcontract_ratio = Gs > 0 ? r4(tot.post_subcontract / Gs) : null;
+  tot.post_subcontract_all_ratio = Gs > 0 ? r4((postAB - tot.post_long_term - tot.post_third_party) / Gs) : null;
+  // 文本/序号列合计留空
+  ['batch', 'seq', 'project_code', 'project_name', 'dept', 'project_type',
+    'pre_restricted', 'pre_subcontract_scope', 'pre_is_digital', 'pre_business_direction',
+    'pre_business_sub_direction', 'pre_product_direction', 'post_review_opinion', 'post_review_time',
+    'import_status', 'import_time', 'import_reason', 'bid_gross_margin', 'rate_reason', 'labor_subcontract_note'
+  ].forEach(k => tot[k] = '');
+  tot.batch = '合计'; tot.seq = ''; tot.project_code = ''; tot.project_name = '';
+  return { year, columns: ANNUAL_COLUMNS, rows, totals: tot, projectCount: rows.length, batchCount: sessions.length };
 }
 
 app.get('/api/annual/:year', auth(), (req, res) => {
   const year = parseInt(req.params.year);
   if (!year || isNaN(year)) return res.status(400).json({ error: '无效年份' });
-  const aggregation = buildAnnualAggregation(year, req.user);
+  const summary = buildAnnualSummary(year, req.user);
   const doc = getAnnualDoc(year);
-  res.json({ aggregation, doc: doc ? doc : annualScaffold(year) });
+  res.json({ summary, doc: doc ? doc : annualScaffold(year) });
 });
 
 app.put('/api/annual/:year', auth(['admin', 'rd']), (req, res) => {
@@ -2387,6 +2517,116 @@ app.post('/api/annual/:year/comments', auth(), (req, res) => {
   doc.updated_at = now;
   db.save();
   res.json({ ok: true, comment: c });
+});
+
+// 年度汇总行内编辑：更新某项目的「评审前/评审后 9 项成本」与可编辑元数据（业务方向/数字化/限制分包/评审意见/投标毛利率/导入情况/利率合理性等）
+app.patch('/api/projects/:id/annual', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  if (req.user.role === 'biz' && req.user.business_dept !== p.biz_department) {
+    return res.status(403).json({ error: '无权修改该项目' });
+  }
+  const body = req.body || {};
+  // 评审前成本
+  if (body.pre && typeof body.pre === 'object') {
+    p.cost_summary_pre = p.cost_summary_pre || (p.cost_summary ? JSON.parse(JSON.stringify(p.cost_summary)) : {});
+    COST_KEYS.forEach(k => { if (body.pre[k] !== undefined) p.cost_summary_pre[k] = Number(body.pre[k]) || 0; });
+    p.cost_summary_pre.total_cost = costSum(p.cost_summary_pre);
+  }
+  // 评审后成本
+  if (body.post && typeof body.post === 'object') {
+    p.cost_summary = p.cost_summary || {};
+    COST_KEYS.forEach(k => { if (body.post[k] !== undefined) p.cost_summary[k] = Number(body.post[k]) || 0; });
+    p.cost_summary.total_cost = costSum(p.cost_summary);
+  }
+  // 元数据
+  const metaMap = {
+    pre_restricted: 'is_restricted_subcontract', pre_subcontract_scope: 'subcontract_scope',
+    pre_business_direction: 'business_direction', pre_business_sub_direction: 'business_sub_direction',
+    pre_product_direction: 'product_direction', post_review_opinion: 'review_opinion',
+    post_review_time: 'review_time', import_status: 'import_status', import_time: 'import_time',
+    import_reason: 'import_reason', bid_gross_margin: 'bid_gross_margin', rate_reason: 'rate_reason',
+    labor_subcontract_note: 'labor_subcontract_note'
+  };
+  Object.keys(metaMap).forEach(k => {
+    if (body[k] !== undefined) {
+      if (k === 'bid_gross_margin') p[metaMap[k]] = body[k] === '' ? null : Number(body[k]);
+      else p[metaMap[k]] = body[k];
+    }
+  });
+  p.updated_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(p.id, 'annual_edit', '年度汇总行内编辑', req.user.id);
+  // 协同编辑历史：找到项目所属年份，写入年度文档 edit_history
+  try {
+    const sess = db.store.reviewSessions.find(s => s.id === p.session_id);
+    const yr = sess ? String((sess.created_at || sess.review_time || '').slice(0, 4)) : null;
+    if (yr) {
+      let ad = getAnnualDoc(yr);
+      const now = new Date().toISOString();
+      if (!ad) { ad = { id: db.nextId(db.store.annual), year: Number(yr), data: annualScaffold(yr).data, updated_at: now }; db.store.annual.push(ad); }
+      ad.data.edit_history = ad.data.edit_history || [];
+      ad.data.edit_history.push({ user: req.user.real_name || req.user.username, at: now, field: '年度汇总行', after: (p.project_name || p.project_code || ('项目' + p.id)) });
+      ad.updated_at = now;
+      db.save();
+    }
+  } catch (_) { /* 历史记录失败不影响主流程 */ }
+  res.json({ ok: true, project: p });
+});
+
+// 导出年度评审结果汇总 xlsx（严格对齐 49 列模板：双层表头 评审前/评审后 + 合计行）
+app.get('/api/annual/:year/export', auth(['admin', 'rd']), (req, res) => {
+  const year = parseInt(req.params.year);
+  if (!year || isNaN(year)) return res.status(400).json({ error: '无效年份' });
+  const summary = buildAnnualSummary(year, req.user);
+  const { columns, rows, totals } = summary;
+  const groupBanner = { base: '', pre: '评审前', post: '评审后', audit: '' };
+  // 第1行：分组旗帜（base/audit 留空，pre 跨 19 列，post 跨 15 列）
+  const row1 = columns.map(c => (c.group === 'pre' ? '评审前' : (c.group === 'post' ? '评审后' : '')));
+  // 第2行：字段名
+  const row2 = columns.map(c => c.label);
+  const dataRows = rows.map(r => columns.map(c => {
+    const v = r.cells[c.key];
+    if (v == null) return '';
+    if (c.type === 'money') return Number(v) || 0;
+    if (c.type === 'pct') return (v == null ? '' : Number(v));
+    return v;
+  }));
+  const totalRow = columns.map(c => {
+    const v = totals[c.key];
+    if (v === '' || v == null) return '';
+    if (c.type === 'money') return Number(v) || 0;
+    if (c.type === 'pct') return Number(v);
+    return v;
+  });
+  // 合计行置于表头之后、项目之前，与源表模板版式一致
+  const aoa = [row1, row2, totalRow, ...dataRows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // 双层表头样式：第1行分组合并、第2行加粗
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const merges = [];
+  // 评审前 合并列
+  const preCols = columns.map((c, i) => c.group === 'pre' ? i : -1).filter(i => i >= 0);
+  const postCols = columns.map((c, i) => c.group === 'post' ? i : -1).filter(i => i >= 0);
+  if (preCols.length) merges.push({ s: { r: 0, c: preCols[0] }, e: { r: 0, c: preCols[preCols.length - 1] } });
+  if (postCols.length) merges.push({ s: { r: 0, c: postCols[0] }, e: { r: 0, c: postCols[postCols.length - 1] } });
+  ws['!merges'] = merges;
+  for (let c = 0; c <= range.e.c; c++) {
+    const h2 = XLSX.utils.encode_cell({ r: 1, c });
+    if (ws[h2]) { ws[h2].s = Object.assign(ws[h2].s || {}, { font: { bold: true }, alignment: { wrapText: true, vertical: 'center' } }); }
+    const h1 = XLSX.utils.encode_cell({ r: 0, c });
+    if (ws[h1] && ws[h1].v) { ws[h1].s = Object.assign(ws[h1].s || {}, { font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center' } }); }
+  }
+  // 列宽
+  ws['!cols'] = columns.map(c => ({ wch: c.key === 'project_name' ? 30 : (c.type === 'text' ? 14 : 12) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, String(year) + '年度汇总');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const fname = `${year}年经济评审汇总表.xlsx`;
+  const asciiName = `${year}_annual_summary.xlsx`;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fname)}`);
+  res.send(buf);
 });
 
 // ==================== 统计分析 ====================
