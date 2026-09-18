@@ -36,6 +36,12 @@ db.load().then(startServer).catch(err => {
 // Helmet 默认 CSP 为 script-src 'self' + script-src-attr 'none'，会拦截本系统的内联脚本、
 // 内联事件处理器(onclick) 以及 jsdelivr CDN 脚本，导致页面能显示但 JS 全不执行。
 // 这里关闭默认策略并显式放行：内联脚本/事件 + jsdelivr CDN（bootstrap/chart.js）。
+// 本服务运行在 nginx 反向代理之后，必须信任一级代理，req.ip 才能取到真实客户端 IP。
+// 否则 express-rate-limit 检测到 X-Forwarded-For 已设置而 trust proxy=false，
+// 每次请求抛 ERR_ERL_UNEXPECTED_X_FORWARDED_FOR，登录限流退化为按代理 IP(127.0.0.1)
+// 计数 —— 全体用户共用一个桶，一人刷爆则全网无法登录。
+app.set('trust proxy', 1);
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: {

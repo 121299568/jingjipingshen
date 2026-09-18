@@ -8,3 +8,7 @@ Thumbs.db
 .workbuddy/
 # 注意：backend/data/ 与 backend/uploads/ 被忽略意味着业务数据不进版本库，
 # 生产环境必须改用真实数据库 + 对象存储，否则重启即丢。
+
+# 环境变量/密钥文件：绝不进版本库
+.env
+*.env

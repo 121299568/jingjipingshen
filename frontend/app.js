@@ -1,6 +1,6 @@
 // 全局状态
 let currentUser = null;
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = '/api';
 
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
