@@ -1156,8 +1156,8 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     }
     const estCost = parsed.cost_summary && parsed.cost_summary.total_cost != null ? Number(parsed.cost_summary.total_cost) : null;
     const internalCost = project.internal_estimated_cost != null ? Number(project.internal_estimated_cost) : null;
-    if (internalCost != null && estCost != null && estCost >= internalCost) {
-      vIssues.push(`估算成本 ¥${estCost.toLocaleString()} 不小于汇总表「内部信息系统填报预估成本」 ¥${internalCost.toLocaleString()}，不能通过`);
+    if (internalCost != null && estCost != null && estCost > internalCost) {
+      vIssues.push(`估算成本 ¥${estCost.toLocaleString()} 大于汇总表「内部信息系统填报预估成本」 ¥${internalCost.toLocaleString()}，不能通过`);
     }
     if (vIssues.length) {
       try { fs.unlinkSync(newPath); } catch (_) {}
@@ -1311,8 +1311,8 @@ async function handleFolderUpload(req, res) {
         }
         const estCost = parsed.cost_summary && parsed.cost_summary.total_cost != null ? Number(parsed.cost_summary.total_cost) : null;
         const internalCost = match.internal_estimated_cost != null ? Number(match.internal_estimated_cost) : null;
-        if (internalCost != null && estCost != null && estCost >= internalCost) {
-          validation.messages.push(`估算成本 ¥${estCost.toLocaleString()} 不小于明细表「内部填报预估成本」 ¥${internalCost.toLocaleString()}`);
+        if (internalCost != null && estCost != null && estCost > internalCost) {
+          validation.messages.push(`估算成本 ¥${estCost.toLocaleString()} 大于明细表「内部填报预估成本」 ¥${internalCost.toLocaleString()}`);
         }
       }
     }
