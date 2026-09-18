@@ -11,6 +11,23 @@ function normStr(s) {
   return (s == null ? '' : String(s)).replace(/\s+/g, '').toLowerCase();
 }
 
+// 通用词表：仅由这些词拼成的名称片段不具备区分度。
+// 例如「有限责任公司」「研究项目」几乎出现在所有项目名/企业文件里，
+// 用它们做部分匹配会把 A 项目的估算表错配到 B 项目。
+const GENERIC_TOKENS = [
+  '有限责任公司', '股份有限公司', '有限公司', '集团公司', '公司',
+  '项目', '工程', '研究', '开发', '建设', '改造', '扩建',
+  '服务', '技术', '管理', '咨询', '评估', '评审',
+  '框架', '系统', '平台', '应用', '示范', '产业化'
+];
+
+// 片段去掉通用词后的剩余长度（即"区分度"字符数）
+function distinctLen(fragment) {
+  let s = fragment;
+  for (const t of GENERIC_TOKENS) s = s.split(t).join('');
+  return s.length;
+}
+
 // 从 xlsx 抽取全部单元格文本，拼成一段用于检索的字符串（同步）
 function extractXlsxText(filePath) {
   try {
@@ -92,12 +109,15 @@ async function resolveProjectByContent(filePath, projects) {
         const score = nn.length * 2; // 全称精确匹配次之
         if (score > bestScore) { best = p; bestScore = score; bestBy = 'content-name'; }
       } else if (nn.length >= 8) {
-        // 部分匹配：在名称中取 6~12 连续字符，看是否出现在文件内容中，取最长命中
+        // 部分匹配：在名称中取 6~12 连续字符，看是否出现在文件内容中，取最长命中。
+        // 命中片段必须有"区分度"：去掉通用词（有限责任公司/项目/研究/框架…）后仍剩 ≥4 个字，
+        // 否则跳过（防止「有限责任公司」这类通用片段把文件错配到别的项目）。
         let foundLen = 0;
         for (let L = Math.min(12, nn.length); L >= 6; L--) {
           let ok = false;
           for (let s = 0; s + L <= nn.length; s++) {
-            if (nt.includes(nn.substr(s, L))) { ok = true; break; }
+            const frag = nn.substr(s, L);
+            if (nt.includes(frag) && distinctLen(frag) >= 4) { ok = true; break; }
           }
           if (ok) { foundLen = L; break; }
         }

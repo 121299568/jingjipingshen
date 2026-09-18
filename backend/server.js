@@ -1310,17 +1310,26 @@ async function handleFolderUpload(req, res) {
     const override = overrides[String(i)] || {};
     let match = null, matchedBy = '';
     if (override.projectId) { match = projects.find(p => p.id === parseInt(override.projectId)); if (match) matchedBy = 'manual'; }
+    // 强文件名信号优先于内容识别：文件名包含项目编号或完整项目名时直接定归属，
+    // 不让较弱的内容部分匹配抢跑（曾导致估算表因含「有限责任公司」通用词被错配到别的项目）
+    const base = rel.split('/').pop().replace(/\.[^.]+$/, '');
+    if (!match) {
+      const byCode = projects.filter(p => p.project_code && realName.includes(p.project_code));
+      if (byCode.length) { match = byCode[0]; matchedBy = 'name-code'; }
+      else {
+        const byName = projects.filter(p => p.project_name && realName.includes(p.project_name));
+        if (byName.length) { match = byName[0]; matchedBy = 'name'; }
+      }
+    }
     if (!match) {
       const c = await resolveContent(f.path, projects);
       if (c) { match = c.project; matchedBy = c.by; }
     }
     if (!match) {
-      // 文件名兜底：只看文件自身名称（不再用文件夹名匹配）
-      const base = rel.split('/').pop().replace(/\.[^.]+$/, '');
-      const byCode = projects.filter(p => p.project_code && realName.includes(p.project_code));
-      if (byCode.length) { match = byCode[0]; matchedBy = 'name-code'; }
-      else {
-        const byName = projects.filter(p => p.project_name && (realName.includes(p.project_name) || (base && p.project_name.includes(base))));
+      // 弱文件名兜底：项目名包含文件名主体。要求主体 ≥6 字，
+      // 避免「估算表」「报告」这类通用短文件名匹配到批次里所有项目
+      if (base && base.length >= 6) {
+        const byName = projects.filter(p => p.project_name && p.project_name.includes(base));
         if (byName.length) { match = byName[0]; matchedBy = 'name'; }
       }
     }
