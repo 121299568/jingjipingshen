@@ -987,6 +987,7 @@ function renderSessions(){
         (s.status==='completed'?'<span class="text-muted small"><i class="bi bi-archive"></i>已归档</span>':'')+
         (canManage?'<button class="btn btn-sm btn-outline-primary me-1" title="评审会信息与材料清单" onclick="openSessionSettings('+s.id+')"><i class="bi bi-gear"></i>设置</button>':'')+
         (canManage?'<button class="btn btn-sm btn-outline-success me-1" title="分配批次评审人员" onclick="openAssignSessionModal('+s.id+')"><i class="bi bi-people"></i>分配人员</button>':'')+
+        (isAdmin?'<button class="btn btn-sm btn-outline-danger" title="删除批次（连同其下所有项目与挂接文件，不可恢复）" onclick="deleteSession('+s.id+')"><i class="bi bi-trash"></i>删除</button>':'')+
         (isAdmin&&sFiles.length>0?'<button class="btn btn-sm btn-outline-primary me-1" title="全量下载" onclick="downloadSessionFiles('+s.id+')"><i class="bi bi-download"></i>全部文件</button><button class="btn btn-sm btn-outline-success me-1" title="下载估算表" onclick="downloadSessionEstimation('+s.id+')"><i class="bi bi-file-earmark-excel"></i>估算表</button>':'')+
       '</td></tr>';
   }).join('')||'<tr><td colspan="5" class="text-muted text-center">暂无批次</td></tr>';
@@ -2226,6 +2227,22 @@ async function doSummaryImport(){
     statusEl.innerHTML='<div class="alert alert-success">导入成功！创建批次「'+esc(data.session_name)+'」，新增项目 '+data.created+' 个（跳过重复 '+data.skipped+' 个，表格共 '+data.total+' 行）。</div>';
     setTimeout(()=>{const m=document.getElementById('summaryImportModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();loadAll();},1800);
   }catch(e){statusEl.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';}
+}
+
+// 管理员删除批次：级联删除批次下所有项目与挂接文件（后端同步清磁盘）
+async function deleteSession(sessionId){
+  const s=(sessions||[]).find(x=>x.id===sessionId);
+  const name=s?(s.name||s.session_name||('批次'+sessionId)):('批次'+sessionId);
+  if(!confirm('确定删除「'+name+'」吗？\n\n将同时删除该批次下：\n· 所有项目\n· 所有挂接文件（含收件箱待分配文件，磁盘同步删除）\n· 工作量评估、确认记录、分配与日志等派生数据\n\n此操作不可恢复！'))return;
+  if(!confirm('再次确认：删除不可恢复，真的继续吗？'))return;
+  try{
+    const r=await fetch(API+'/sessions/'+sessionId,{method:'DELETE',headers:authH()});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){alert('删除失败：'+(d.error||r.status));return;}
+    alert('已删除「'+name+'」'+(d.deleted?('（项目 '+d.deleted.projects+' 个、文件 '+d.deleted.files+' 个）'):''));
+    await Promise.all([loadSessions(),loadProjects(),loadFiles()]);
+    renderSessions();renderProjects();
+  }catch(e){alert('网络错误: '+e.message);}
 }
 
 function updateSessionStatus(sessionId,newStatus){

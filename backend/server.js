@@ -535,6 +535,43 @@ app.patch('/api/sessions/:id', auth(['admin', 'rd']), (req, res) => {
   res.json(s);
 });
 
+// 管理员删除批次：级联删除批次下所有项目与挂接文件（磁盘+记录）、工作量、分配、日志等
+app.delete('/api/sessions/:id', auth(['admin']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const idx = db.store.reviewSessions.findIndex(s => s.id === sid);
+  if (idx < 0) return res.status(404).json({ error: '批次不存在' });
+  const sess = db.store.reviewSessions[idx];
+  const projectIds = new Set(db.store.projects.filter(p => p.session_id === sid).map(p => p.id));
+
+  // 1) 删除挂接文件（含批次收件箱待分配文件）：磁盘 + 记录
+  let fileCount = 0;
+  db.store.files = db.store.files.filter(f => {
+    const hit = f.session_id === sid || projectIds.has(f.project_id);
+    if (hit) {
+      const fp = path.join(UPLOAD_DIR, f.filename);
+      if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch (_) {} }
+      fileCount++;
+    }
+    return !hit;
+  });
+
+  // 2) 删除批次下项目及其派生数据
+  db.store.projects = db.store.projects.filter(p => p.session_id !== sid);
+  ['workItems', 'procurementItems', 'travelItems', 'expertEstimates', 'confirmations', 'workflowLogs'].forEach(c => {
+    if (Array.isArray(db.store[c])) db.store[c] = db.store[c].filter(x => !projectIds.has(x.project_id));
+  });
+
+  // 3) 删除批次分配与相关通知
+  db.store.sessionAssignments = (db.store.sessionAssignments || []).filter(a => a.session_id !== sid);
+  db.store.notifications = (db.store.notifications || []).filter(n => n.related_session_id !== sid);
+
+  // 4) 删除批次本身
+  db.store.reviewSessions.splice(idx, 1);
+  db.save();
+  console.log(`[删除批次] ${sess.name}(#${sid}): 项目 ${projectIds.size} 个, 文件 ${fileCount} 个, 操作人 ${req.user.username}`);
+  res.json({ success: true, message: `批次「${sess.name}」已删除`, deleted: { projects: projectIds.size, files: fileCount } });
+});
+
 // ==================== 项目 ====================
 app.get('/api/projects', auth(), (req, res) => {
   res.json(db.filterByDept('projects', req.user).map(enrichProject));
