@@ -2596,9 +2596,24 @@ function inferCatFront(name){
   return'auto';
 }
 function catName(c){const m={auto:'自动识别',estimation:'估算表',feasibility:'可研报告',bid:'招标文件',award:'中标通知书',contract:'合同文件',tech_spec:'技术规范书',subcontract:'分包申请表',profit:'利润率评审表',inquiry:'询价单/采购协议',other:'其他'};return m[c]||c;}
+// 系统缓存/隐藏文件黑名单：Mac .DS_Store、__MACOSX、Windows Thumbs.db/desktop.ini 等。
+// 文件夹选择时自动过滤，只保留真实业务文件（保守判断，绝不误删真实文件）
+function isJunkFile(rel){
+  const base=((rel||'').split('/').pop()||'').toLowerCase();
+  if(!base)return true;
+  if(base.charAt(0)==='.')return true;              // .DS_Store / .localized / .gitkeep 等隐藏文件
+  if(base==='thumbs.db'||base==='desktop.ini')return true;  // Windows 缓存
+  if(base.endsWith(':encryptable'))return true;     // Thumbs.db:encryptable
+  return (rel||'').split('/').some(p=>['__macosx','.git'].includes(p.toLowerCase()));  // 打包/git 目录
+}
 function onFolderSelected(e){
-  const list=[].slice.call(e.target.files);
-  if(!list.length)return;
+  const allFiles=[].slice.call(e.target.files);
+  // 自动过滤系统缓存/隐藏文件，只保留真实业务文件
+  const list=allFiles.filter(f=>{const rel=f.webkitRelativePath||f.name;return !isJunkFile(rel);});
+  const skipped=allFiles.length-list.length;
+  if(!list.length){if(allFiles.length)alert('所选文件夹里只有系统缓存文件（如 .DS_Store），没有真实业务文件');return;}
+  const junkEl=document.getElementById('folderJunkNotice');
+  if(junkEl){if(skipped>0){junkEl.style.display='block';junkEl.textContent='已自动过滤 '+skipped+' 个系统缓存/隐藏文件（如 .DS_Store、__MACOSX、Thumbs.db），仅保留真实业务文件';}else{junkEl.style.display='none';junkEl.textContent='';}}
   const sb=document.getElementById('projBatchSelect');const sid=sb?parseInt(sb.value):null;
   const sessProjects=projects.filter(p=>p.session_id===sid);
   const rows=list.map(f=>{
@@ -2783,6 +2798,7 @@ async function postAnnualComment(){
       <div class="mb-3">
         <label class="form-label">选择文件夹</label>
         <input type="file" class="form-control" id="folderInput" webkitdirectory directory multiple onchange="onFolderSelected(event)">
+        <div id="folderJunkNotice" class="form-text text-warning small mt-1" style="display:none"></div>
       </div>
       <div class="table-responsive" style="max-height:320px;overflow:auto">
         <table class="table table-sm table-hover mb-0"><thead class="table-light"><tr><th>文件（含相对路径）</th><th>归属项目</th><th>文件类别</th></tr></thead>

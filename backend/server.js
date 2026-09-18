@@ -1212,7 +1212,19 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
 // 项目编号(主)或项目名称(次)自动归属到对应项目；估算表解析出的合同额与项目登记合同额
 // 做二次比对（仅 warn 不阻塞，符合「一般成本估算表能对上、其余也不会错」的判定逻辑）。
 // 未能匹配到项目的文件进入该批次「收件箱」待人工分配。
-const folderUpload = upload.array('files', 500);
+// 文件夹上传专用 fileFilter：缓存/隐藏文件（.DS_Store、Thumbs.db 等）先放行，
+// 交由 handleFolderUpload 统一按 relPaths 过滤丢弃，避免「单个缓存文件导致整批上传 400、真实文件全丢」。
+// 真实但类型不支持的文件仍按原逻辑拒绝。
+const folderFileFilter = (req, file, cb) => {
+  const realName = decodeFilename(file.originalname);
+  const base = realName.toLowerCase();
+  const isJunk = base.charAt(0) === '.' || base === 'thumbs.db' || base === 'desktop.ini' || base.endsWith(':encryptable');
+  if (isJunk) return cb(null, true);
+  const allowed = /\.(xlsx|xls|pdf|docx?|jpg|jpeg|png|txt|csv|zip|rar|7z)$/i;
+  if (allowed.test(realName)) cb(null, true);
+  else cb(new Error('不支持的文件类型: ' + realName));
+};
+const folderUpload = multer({ storage, fileFilter: folderFileFilter, limits: { fileSize: config.maxFileSizeMB * 1024 * 1024 } }).array('files', 500);
 
 // 评审前/评审后成本双口径：首次写入成本估算时，把初始值快照为 cost_summary_pre（评审前），
 // 后续更新只改 cost_summary（评审后）。年度汇总据此计算核减。
@@ -1247,8 +1259,39 @@ async function handleFolderUpload(req, res) {
   const sessionId = parseInt(req.params.id);
   const session = db.store.reviewSessions.find(s => s.id === sessionId);
   if (!session) return res.status(404).json({ error: '批次不存在' });
-  const files = req.files || [];
-  if (!files.length) return res.status(400).json({ error: '未收到文件' });
+  let files = req.files || [];
+  // 后端兜底：过滤系统缓存/隐藏文件（Mac .DS_Store、__MACOSX、Windows Thumbs.db/desktop.ini 等），
+  // 与前端 onFolderSelected 一致；按索引同步裁剪 relPaths/overrides，避免错位。保守判断，绝不误删真实业务文件。
+  const isJunkFile = (rel) => {
+    const segs = (rel || '').split('/');
+    const base = (segs.pop() || '').toLowerCase();
+    if (!base) return true;
+    if (base.charAt(0) === '.') return true;            // .DS_Store / .localized / .gitkeep
+    if (base === 'thumbs.db' || base === 'desktop.ini') return true;
+    if (base.endsWith(':encryptable')) return true;
+    return segs.some(p => ['__macosx', '.git'].includes(p.toLowerCase()));
+  };
+  if (files.length) {
+    let relPaths0 = [];
+    try { relPaths0 = JSON.parse(req.body.relPaths || '[]') || []; } catch (_) {}
+    const keep = [];
+    files.forEach((f, i) => {
+      const rel = (relPaths0[i] || f.originalname || '').toString();
+      if (!isJunkFile(rel)) keep.push(i);
+    });
+    if (keep.length !== files.length) {
+      const dropped = files.filter((_, i) => !keep.includes(i));
+      files = keep.map(i => files[i]);
+      const keptRel = keep.map(i => relPaths0[i] || '');
+      const keptOv = {};
+      keep.forEach((i, k) => { keptOv[k] = (JSON.parse(req.body.overrides || '{}') || {})[i]; });
+      req.body = { ...req.body, relPaths: JSON.stringify(keptRel), overrides: JSON.stringify(keptOv) };
+      // 清理被丢弃的缓存文件在磁盘上的残留（multer 已落盘），避免孤儿文件
+      const fs = require('fs');
+      dropped.forEach(f => { try { if (f.path) fs.unlinkSync(f.path); } catch (_) {} });
+    }
+  }
+  if (!files.length) return res.status(400).json({ error: '未收到有效文件（所选文件夹可能只有系统缓存文件）' });
   let relPaths = [];
   try { relPaths = JSON.parse(req.body.relPaths || '[]') || []; } catch (_) {}
   let overrides = {};
