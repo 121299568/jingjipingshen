@@ -1224,7 +1224,9 @@ const folderFileFilter = (req, file, cb) => {
   if (allowed.test(realName)) cb(null, true);
   else cb(new Error('不支持的文件类型: ' + realName));
 };
-const folderUpload = multer({ storage, fileFilter: folderFileFilter, limits: { fileSize: config.maxFileSizeMB * 1024 * 1024 } }).array('files', 500);
+// 文件夹上传 multer 上限提到 60MB（与 nginx client_max_body_size 对齐），
+// 这样 50-60MB 的文件能到达 handler、由其按大小优雅跳过，而不是被 multer 直接拒掉导致整批失败。
+const folderUpload = multer({ storage, fileFilter: folderFileFilter, limits: { fileSize: 60 * 1024 * 1024 } }).array('files', 500);
 
 // 评审前/评审后成本双口径：首次写入成本估算时，把初始值快照为 cost_summary_pre（评审前），
 // 后续更新只改 cost_summary（评审后）。年度汇总据此计算核减。
@@ -1272,12 +1274,14 @@ async function handleFolderUpload(req, res) {
     return segs.some(p => ['__macosx', '.git'].includes(p.toLowerCase()));
   };
   if (files.length) {
+    const MAX = 50 * 1024 * 1024;
     let relPaths0 = [];
     try { relPaths0 = JSON.parse(req.body.relPaths || '[]') || []; } catch (_) {}
     const keep = [];
     files.forEach((f, i) => {
       const rel = (relPaths0[i] || f.originalname || '').toString();
-      if (!isJunkFile(rel)) keep.push(i);
+      const tooBig = (f.size || 0) > MAX;
+      if (!isJunkFile(rel) && !tooBig) keep.push(i);
     });
     if (keep.length !== files.length) {
       const dropped = files.filter((_, i) => !keep.includes(i));

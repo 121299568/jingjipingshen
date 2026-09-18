@@ -2639,22 +2639,26 @@ async function doFolderUpload(){
   const sb=document.getElementById('projBatchSelect');const sid=sb?sb.value:'';
   if(!sid){alert('请选择批次');return;}
   if(!folderFiles.length){alert('请先选择文件夹');return;}
+  // 超过 50MB 的单文件直接过滤掉：不让单个大文件拖垮整批上传（其余文件正常上传）
+  const MAX=50*1024*1024;
+  const sizeNotice=document.getElementById('folderSizeNotice');
+  const big=folderFiles.filter(f=>f.file.size>MAX);
+  const uploadItems=folderFiles.map((f,idx)=>({f,idx})).filter(x=>x.f.file.size<=MAX);
+  if(big.length){
+    if(sizeNotice){sizeNotice.style.display='block';sizeNotice.innerHTML='已自动过滤 <b>'+big.length+'</b> 个超过 50MB 的文件（单文件上限），其余 <b>'+uploadItems.length+'</b> 个文件正常上传：'+big.map(f=>esc(f.rel)+'（'+(f.file.size/1048576).toFixed(1)+'MB）').join('、');}
+  } else if(sizeNotice){sizeNotice.style.display='none';sizeNotice.textContent='';}
+  if(!uploadItems.length){alert('所选文件夹的文件都超过了 50MB 上限，无法上传。请压缩或拆分后重试。');return;}
   const fd=new FormData();
-  folderFiles.forEach(f=>fd.append('files',f.file,f.file.name));
-  const relPaths=folderFiles.map(f=>f.rel);
+  uploadItems.forEach(x=>fd.append('files',x.f.file,x.f.file.name));
+  const relPaths=uploadItems.map(x=>x.f.rel);
   const overrides={};
-  folderFiles.forEach((f,i)=>{
-    const pSel=document.getElementById('fproj'+i);const cSel=document.getElementById('fcat'+i);
-    overrides[i]={projectId:pSel?pSel.value:'',category:cSel?cSel.value:'auto'};
+  uploadItems.forEach((x,k)=>{
+    const pSel=document.getElementById('fproj'+x.idx);const cSel=document.getElementById('fcat'+x.idx);
+    overrides[k]={projectId:pSel?pSel.value:'',category:cSel?cSel.value:'auto'};
   });
   fd.append('relPaths',JSON.stringify(relPaths));
   fd.append('overrides',JSON.stringify(overrides));
   const btn=document.getElementById('folderUploadBtn');btn.disabled=true;const old=btn.textContent;btn.textContent='上传中…';
-  // 预检：单文件超 50MB 会被网关/后端拒绝，提前筛掉并提示，避免整批上传白跑
-  const big=folderFiles.filter(f=>f.file.size>50*1024*1024);
-  if(big.length){
-    if(!confirm('有 '+big.length+' 个文件超过 50MB（单个文件上限）：\n'+big.map(f=>f.rel+'（'+(f.file.size/1048576).toFixed(1)+'MB）').join('\n')+'\n\n仍要继续上传吗？超限文件会被服务端拒绝，其余文件正常处理。')){btn.disabled=false;btn.textContent=old;return;}
-  }
   try{
     const r=await fetch(API+'/sessions/'+sid+'/upload-folder',{method:'POST',headers:authH(),body:fd});
     const d=await r.json().catch(()=>({}));
@@ -2799,6 +2803,7 @@ async function postAnnualComment(){
         <label class="form-label">选择文件夹</label>
         <input type="file" class="form-control" id="folderInput" webkitdirectory directory multiple onchange="onFolderSelected(event)">
         <div id="folderJunkNotice" class="form-text text-warning small mt-1" style="display:none"></div>
+        <div id="folderSizeNotice" class="form-text text-warning small mt-1" style="display:none"></div>
       </div>
       <div class="table-responsive" style="max-height:320px;overflow:auto">
         <table class="table table-sm table-hover mb-0"><thead class="table-light"><tr><th>文件（含相对路径）</th><th>归属项目</th><th>文件类别</th></tr></thead>
