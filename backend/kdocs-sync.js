@@ -61,18 +61,58 @@ function missingConfig() {
 function apiPrefix() { return CFG.fileType === 'sheet' ? 'sheets' : 'airsheet'; }
 
 // ---------- 错误翻译：把官方返回转成人能看懂的说明 ----------
+// scope 名 → 开发者后台里的位置说明（实测归纳，便于用户照着点）
+const SCOPE_WHERE = {
+  'kso.drive.readwrite': '云文档 → KSO-管理驱动盘',
+  'kso.file.readwrite': '云文档 → KSO-查询和管理文件',
+  'kso.file.read': '云文档 → KSO-查询文件',
+  'kso.file.search': '云文档 → KSO-搜索文件',
+  'kso.file_link.readwrite': '云文档 → KSO-查询和管理文件分享',
+  'kso.sheets.readwrite': '云文档 → KSO-读取和管理表格',
+  'kso.sheets.read': '云文档 → KSO-查询表格',
+  'kso.airsheet.readwrite': '云文档 → KSO-读取和管理智能表格',
+  'kso.doclib.read': '云文档 → KSO-查询文档库',
+  'kso.dbsheet.read': '多维表格 → KSO-查询多维表格',
+  'kso.user_base.read': '通讯录 → KSO-查询用户基础信息'
+};
+// 接口权限（interface privilege）错误码 → 需要开通的「能力」
+const IFACE_WHO = {
+  interface_company_doc: '企业文档（企业文档二次开发接口）',
+  interface_team_manage: '团队管理（团队管理能力）',
+  interface_company_space: '企业空间管理',
+  interface_company_group: '企业团队管理'
+};
+const PUBLISH_TIP = '注意：新申请的接口权限属于「版本敏感项」，必须到 开发者后台 → 应用发布 → 版本管理 → 创建版本并申请发布，再由 企业管理员 在企业管理后台审核通过后才会生效。';
+
 function explain(status, body) {
   const txt = typeof body === 'string' ? body : JSON.stringify(body || {});
   const scope = (txt.match(/The request scopes '([^']+)'/) || [])[1];
   if (/invalid_scope/.test(txt)) {
+    const where = scope && SCOPE_WHERE[scope] ? '（位置：权限管理 → ' + SCOPE_WHERE[scope] + '）' : '';
     return {
       kind: 'scope_missing',
-      hint: '应用尚未开通接口权限' + (scope ? '（缺少 ' + scope + '）' : '') +
-            '。请到 open.wps.cn 开发者后台 → 该应用 → 接口权限，勾选并申请开通后重试。'
+      scope: scope || '',
+      hint: '应用尚未开通该接口的 scope' + (scope ? '：' + scope : '') + where +
+            '。请到 open.wps.cn 开发者后台 → 该应用 → 权限管理 → 接口权限，勾选并申请开通。' + PUBLISH_TIP
+    };
+  }
+  const iface = (txt.match(/ErrPrivileges:\s*(\w+)/) || [])[1];
+  if (iface) {
+    return {
+      kind: 'iface_missing',
+      iface,
+      hint: '应用缺少「' + (IFACE_WHO[iface] || iface) + '」接口权限（scope 已开通，但该能力未开通）。' +
+            '请到 开发者后台 → 权限管理 → 接口权限 里申请开通对应能力。' + PUBLISH_TIP
+    };
+  }
+  if (/unable to read user permission/.test(txt)) {
+    return {
+      kind: 'file_permission',
+      hint: '接口权限已开通，但该应用对目标文档没有权限。请把目标文档共享给该应用（或在文档「协作」里把应用加为可编辑协作者），再确认 KDOCS_FILE_ID 是该文档的真实 file_id。'
     };
   }
   if (status === 401 || /401000001/.test(txt)) return { kind: 'token', hint: 'access_token 无效或已过期（本模块会自动重取，若持续出现请检查应用密钥）。' };
-  if (/403000001|Insufficient permissions/.test(txt)) {
+  if (/403000001|Insufficient permissions|user has no write permission|PermissionDenied/.test(txt)) {
     return { kind: 'file_permission', hint: '接口权限已开通，但该应用对目标文档没有读写权限。请在金山文档里把目标文档共享给该应用（或把应用加入协作者）。' };
   }
   if (status === 403) return { kind: 'forbidden', hint: '被拒绝访问，通常是应用权限或文档协作者授权未完成。' };
@@ -134,9 +174,15 @@ async function resolveFileId(token, explicit) {
 }
 
 // ---------- 云盘（drive）列表：新建文档要指定落在哪个云盘 ----------
+// 官方 /v7/drives 的 allotee_type 是必填参数，漏掉会被拒；doclibs 走的是另一套「团队管理」能力，故放最后兜底
 async function listDrives(token) {
-  const eps = ['/v7/doclibs', '/v7/drives'];
-  let last = null, scopeHit = null;
+  const eps = [
+    '/v7/drives?allotee_type=app&page_size=100',
+    '/v7/drives/authorized?page_size=100',
+    '/v7/drives?allotee_type=user&page_size=100',
+    '/v7/doclibs'
+  ];
+  let last = null, scopeHit = null, ifaceHit = null;
   for (const ep of eps) {
     const r = await httpJson(BASE + ep, { headers: { Authorization: 'Bearer ' + token } });
     const d = r.json || {};
@@ -150,20 +196,23 @@ async function listDrives(token) {
     const diag = explain(r.status, d || r.text);
     // 权限问题是「真问题」，优先于后续候选端点的 404（否则会把权限不足误报成路径不存在）
     if (diag.kind === 'scope_missing' && !scopeHit) scopeHit = { ep, status: r.status, raw: d, text: r.text, diag };
+    if (diag.kind === 'iface_missing' && !ifaceHit) ifaceHit = { ep, status: r.status, raw: d, text: r.text, diag };
     last = { ep, status: r.status, raw: d, text: r.text, diag };
   }
-  const pick = scopeHit || last || {};
+  const pick = ifaceHit || scopeHit || last || {};
   return { ok: false, drives: [], status: pick.status, raw: pick.raw, text: pick.text, diag: pick.diag, via: pick.ep };
 }
 
 // ---------- 新建表格文档（传统表格走 /v7/sheets）----------
+// 实测：只有 POST /v7/drives/{drive_id}/files/{parent_id}/create 是存在的端点（parent_id=0 即根目录）
 async function createFile(token, driveId, name) {
   const candidates = [
-    { url: BASE + '/v7/' + apiPrefix() + '/files', body: { drive_id: driveId, name, on_name_conflict: 'rename' }, label: 'POST /v7/' + apiPrefix() + '/files' },
-    { url: BASE + '/v7/drives/' + encodeURIComponent(driveId) + '/files/0/create', body: { name, on_name_conflict: 'rename' }, label: 'POST /v7/drives/{drive_id}/files/0/create' }
+    { url: BASE + '/v7/drives/' + encodeURIComponent(driveId) + '/files/0/create', body: { name, on_name_conflict: 'rename' }, label: 'POST /v7/drives/{drive_id}/files/0/create' },
+    { url: BASE + '/v7/drives/' + encodeURIComponent(driveId) + '/files/create', body: { name, on_name_conflict: 'rename' }, label: 'POST /v7/drives/{drive_id}/files/create' },
+    { url: BASE + '/v7/' + apiPrefix() + '/files', body: { drive_id: driveId, name, on_name_conflict: 'rename' }, label: 'POST /v7/' + apiPrefix() + '/files' }
   ];
   const tries = [];
-  let scopeHit = null;
+  let scopeHit = null, ifaceHit = null;
   for (const c of candidates) {
     const r = await httpJson(c.url, {
       method: 'POST',
@@ -176,8 +225,9 @@ async function createFile(token, driveId, name) {
     const id = (d.data && (d.data.id || d.data.file_id)) || d.id || d.file_id;
     if (r.status === 200 && id) return { ok: true, fileId: String(id), api: c.label, raw: d, tries };
     if (diag.kind === 'scope_missing' && !scopeHit) scopeHit = { status: r.status, body: d, diag };
+    if (diag.kind === 'iface_missing' && !ifaceHit) ifaceHit = { status: r.status, body: d, diag };
   }
-  const e = scopeHit ? scopeHit.diag : explain(tries.length ? tries[tries.length - 1].status : 0, (tries.length ? tries[tries.length - 1].body : {}) || {});
+  const e = ifaceHit ? ifaceHit.diag : (scopeHit ? scopeHit.diag : explain(tries.length ? tries[tries.length - 1].status : 0, (tries.length ? tries[tries.length - 1].body : {}) || {}));
   return { ok: false, error: '新建表格失败：' + e.hint, diag: e, tries };
 }
 
@@ -289,13 +339,47 @@ async function writeBatches(token, fileId, sheetId, batches, sleepMs) {
   return { ok: true, done: batches.length, total: batches.length, raw: raws[raws.length - 1] };
 }
 
+// ---------- 对外：权限矩阵（逐项探测 scope / 接口权限是否到位）----------
+// 用「必定不存在的资源 id」调用，靠错误类型区分：缺 scope / 缺接口权限 / 仅资源级权限（=权限已到位）
+async function capTest(token) {
+  const P = '__probe__';
+  const caps = [
+    { name: '列出云盘', need: 'kso.drive.readwrite', m: 'GET', url: '/v7/drives?allotee_type=app&page_size=10' },
+    { name: '新建文件', need: 'kso.file.readwrite + 企业文档接口', m: 'POST', url: '/v7/drives/' + P + '/files/0/create', body: { name: 'probe', on_name_conflict: 'rename' } },
+    { name: '文件搜索', need: 'kso.file.search', m: 'GET', url: '/v7/files/search?keyword=' + P + '&type=file_name&page_size=1' },
+    { name: '分享链接解析', need: 'kso.file_link.readwrite', m: 'GET', url: '/v7/links/' + P + '/meta' },
+    { name: '传统表格', need: 'kso.sheets.readwrite', m: 'GET', url: '/v7/sheets/' + P + '/worksheets' },
+    { name: '智能表格', need: 'kso.airsheet.readwrite', m: 'GET', url: '/v7/airsheet/' + P + '/worksheets' },
+    { name: '团队空间', need: 'kso.doclib.read + 团队管理接口', m: 'GET', url: '/v7/doclibs' }
+  ];
+  const out = [];
+  for (const c of caps) {
+    const r = await httpJson(BASE + c.url, {
+      method: c.m,
+      headers: Object.assign({ Authorization: 'Bearer ' + token }, c.body ? { 'Content-Type': 'application/json' } : {}),
+      body: c.body ? JSON.stringify(c.body) : undefined
+    }, 12000);
+    const txt = r.text || '';
+    const diag = explain(r.status, r.json || txt);
+    let state, note;
+    if (r.status === 200) { state = 'ok'; note = '可用'; }
+    else if (/404 Route Not Found/.test(txt)) { state = 'na'; note = '端点不存在，改用备用端点'; }
+    else if (diag.kind === 'scope_missing') { state = 'missing'; note = '缺 scope：' + (diag.scope || '未知') + (diag.scope && SCOPE_WHERE[diag.scope] ? '（' + SCOPE_WHERE[diag.scope] + '）' : ''); }
+    else if (diag.kind === 'iface_missing') { state = 'missing'; note = '缺接口权限：' + (IFACE_WHO[diag.iface] || diag.iface); }
+    else if (diag.kind === 'file_permission' || /unable to read user permission/.test(txt)) { state = 'ok'; note = '权限已到位（报错为资源级，属正常）'; }
+    else { state = 'warn'; note = 'HTTP ' + r.status + ' / ' + (txt.slice(0, 90)); }
+    out.push({ name: c.name, need: c.need, state, note });
+  }
+  return out;
+}
+
 // ---------- 对外：自检（凭据 / 权限 / 文档 / 工作表）----------
 async function probe(opts) {
   const out = {
     client_id: CFG.id || '(未配置)', has_secret: !!CFG.secret,
     file_input: CFG.fileRaw ? (parseFileInput(CFG.fileRaw).kind === 'link' ? '分享链接' : 'file_id') : '(未配置)',
     file_type: CFG.fileType, sheet_name: CFG.sheetName,
-    steps: [], ok: false
+    steps: [], caps: [], ok: false
   };
   const step = (name, ok, detail, pending) => { out.steps.push({ name, ok: !!ok, detail, pending: !!pending }); return ok; };
 
@@ -307,6 +391,13 @@ async function probe(opts) {
   let token;
   try { token = await getToken(true); step('应用凭据取令牌', true, '令牌有效，长度 ' + token.length); }
   catch (e) { step('应用凭据取令牌', false, e.message); out.error = e.message; out.diag = e.diag; return out; }
+
+  // 权限矩阵：先跑一遍，后面失败时能直接看出是哪一项没开通
+  try { out.caps = await capTest(token); } catch (_) { out.caps = []; }
+  const missing = out.caps.filter(c => c.state === 'missing');
+  if (missing.length) {
+    out.missing_caps = missing.map(c => c.name + '（' + c.note + '）');
+  }
 
   const src = (opts && opts.fileId) ? String(opts.fileId) : CFG.fileRaw;
   if (!src) {
@@ -385,4 +476,4 @@ async function pushAoa(aoa, opts) {
   };
 }
 
-module.exports = { CFG, configOk, missingConfig, needCreate, pushAoa, probe, parseFileInput, buildBatches, listWorksheets, pickSheet, apiPrefix, listDrives, createFile, ensureFile, resolveFileId };
+module.exports = { CFG, configOk, missingConfig, needCreate, pushAoa, probe, capTest, parseFileInput, buildBatches, listWorksheets, pickSheet, apiPrefix, listDrives, createFile, ensureFile, resolveFileId, explain, SCOPE_WHERE, IFACE_WHO };
