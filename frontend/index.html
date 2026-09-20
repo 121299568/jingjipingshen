@@ -122,7 +122,9 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
 .wl-zero{color:#c3c7cf}
 .wl-neg{color:#d93025;font-weight:600}
 .wl-warn{color:#b45309;font-weight:600}
-.wl-name{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 项目名称：完整模式多行完整显示；精简模式单行省略号 */
+.wl-name{white-space:normal;word-break:break-all;overflow:visible;line-height:1.4}
+.wl-compact .wl-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 精简模式：隐藏业务方向组与部分明细列 */
 .wl-compact .wl-g-direction,.wl-compact .wl-detail{display:none}
 .wl-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -2114,12 +2116,15 @@ function renderWorkloadProjectTable(d){
     }
   }));
   const tfoot='<tr>'+footCells+'</tr>';
+  // 固定布局需要显式列宽：序号46 + 项目名称220 + 数据列（明细列150/普通110），与冻结偏移严格对齐
+  const colgroup='<colgroup><col style="width:46px"><col style="width:220px">'+
+    groups.map(g=>g.cols.map(c=>'<col style="width:'+(c.detail?'150px':'110px')+'">').join('')).join('')+'</colgroup>';
   const toolbar='<div class="wl-toolbar">'+
     '<input class="form-control form-control-sm" id="wlFilter" placeholder="搜索项目名称 / 部门" oninput="wlFilterTable()">'+
     '<button class="btn btn-sm btn-outline-secondary" id="wlCompactBtn" onclick="toggleWlCompact()"><i class="bi bi-arrows-angle-contract"></i> 精简</button>'+
     '</div>';
   const html='<div class="card card-custom"><div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2"><div><h6 class="mb-0">项目经济评审结果汇总表</h6><div class="text-muted small">共 '+list.length+' 个项目 · 单位：元 · 向左滚动可固定查看项目名称</div></div>'+toolbar+'</div>'+
-    '<div class="card-body p-0"><div class="wl-wrap'+(wlCompactMode?' wl-compact':'')+'" id="wlWrap"><table class="table table-sm mb-0 align-middle"><thead class="table-light">'+groupRow+subRow+'</thead><tbody>'+tbody+'</tbody><tfoot>'+tfoot+'</tfoot></table></div></div></div>';
+    '<div class="card-body p-0"><div class="wl-wrap'+(wlCompactMode?' wl-compact':'')+'" id="wlWrap"><table class="table table-sm mb-0 align-middle">'+colgroup+'<thead class="table-light">'+groupRow+subRow+'</thead><tbody>'+tbody+'</tbody><tfoot>'+tfoot+'</tfoot></table></div></div></div>';
   document.getElementById('wlProjects').innerHTML=html;
 }
 function toggleWlCompact(){
