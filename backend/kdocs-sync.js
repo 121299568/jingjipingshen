@@ -225,8 +225,10 @@ function explain(status, body) {
     return {
       kind: 'iface_missing',
       iface,
-      hint: '应用缺少「' + (IFACE_WHO[iface] || iface) + '」接口权限（scope 已开通，但该能力未开通）。' +
-            '请到 开发者后台 → 权限管理 → 接口权限 里申请开通对应能力。' + PUBLISH_TIP
+      hint: '应用缺少「' + (IFACE_WHO[iface] || iface) + '」接口权限。**这是应用级能力，与令牌模式无关** —— ' +
+            '实测已确认：换成用户授权令牌后，/v7/files/search、/v7/drives、/v7/links/{id}/meta 仍然报同一个 ErrPrivileges。' +
+            '个人开发者（未做企业认证）申请不到该能力；需成为「企业服务商」（用 WPS 365 企业超管账号登录开放平台，免认证）' +
+            '并创建「企业内建应用」后，才能在权限管理里申请。' + PUBLISH_TIP
     };
   }
   if (/unable to read user permission/.test(txt)) {
@@ -541,9 +543,10 @@ async function capTest(token) {
     else if (diag.kind === 'scope_missing') { state = 'missing'; note = '缺 scope：' + (diag.scope || '未知') + (diag.scope && SCOPE_WHERE[diag.scope] ? '（' + SCOPE_WHERE[diag.scope] + '）' : ''); }
     else if (diag.kind === 'iface_missing') {
       state = 'missing';
-      note = '缺接口权限「' + (IFACE_WHO[diag.iface] || diag.iface) + '」：属企业能力，'
-        + '未做企业开发者认证的账号申请不到（勾选也不会批）。企业应用请走「权限管理 → 申请 → 版本发布 → 管理员审批」；'
-        + '个人账号请改用「授权金山文档」的用户授权模式（令牌换成你本人身份）。';
+      note = '缺接口权限「' + (IFACE_WHO[diag.iface] || diag.iface) + '」：**应用级能力，与令牌模式无关**'
+        + '（实测：用户授权令牌下同样报此错）。个人开发者账号申请不到；'
+        + '需成为「企业服务商」（WPS 365 企业超管登录开放平台）后建企业内建应用再申请。'
+        + '临时替代：手动从浏览器地址栏取真实 file_id（表格接口本身已就绪，只需 file_id）。';
     }
     else if (diag.kind === 'file_permission' || /unable to read user permission|unable to read file metadata/.test(txt)) { state = 'ok'; note = '权限已到位（报错为资源级，属正常）'; }
     else if (/无权限/.test(txt)) { state = 'warn'; note = '接口本身可用，但应用当前看不到目标数据（属数据范围问题，非权限未开通）'; }

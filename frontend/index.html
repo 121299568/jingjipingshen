@@ -3586,9 +3586,8 @@ async function openKdocsCheck(){
     const tok=d.token||{};
     let html='<div class="mb-2 small text-muted">应用 ID：<code>'+esc(d.client_id||'-')+'</code> · 令牌模式：<b>'+(tok.mode==='user'?'用户授权':'应用凭证')+'</b> · 目标文档类型：'+esc(d.file_type==='sheet'?'传统表格':'智能表格')+' · 目标工作表：'+esc(d.sheet_name||'')+'</div>';
     if(tok.mode!=='user'){
-      html+='<div class="alert alert-warning small"><i class="bi bi-person-check"></i> 当前用的是<b>应用凭证</b>模式。若你的开发者账号未做<b>企业认证</b>（属「第三方个人应用」），'
-        +'「企业文档」「团队管理」这类企业能力永远申请不到，上面的权限矩阵一定会红——这不是你操作的问题。'
-        +'<br>个人账号的正确做法是改用<b>用户授权</b>：以你本人的金山账号身份调用，能直接读写你个人空间里的文档。'
+      html+='<div class="alert alert-warning small"><i class="bi bi-person-check"></i> 当前用的是<b>应用凭证</b>模式（应用以自己名义调用，没有用户身份，数据范围为空）。'
+        +'建议改用<b>用户授权</b>，以你本人的金山账号身份调用，文件读写才有意义。'
         +'<div class="mt-2"><button class="btn btn-warning btn-sm" onclick="startKdocsAuth()"><i class="bi bi-person-check"></i> 授权金山文档</button>'
         +' <span class="ms-2">回调地址须为 <code>'+esc(tok.redirect_uri||'')+'</code></span></div></div>';
     }else{
@@ -3615,9 +3614,11 @@ async function openKdocsCheck(){
         html+='<tr><td>'+(TAG[c.state]||esc(c.state))+'</td><td class="small">'+esc(c.name)+'</td><td class="small">'+esc(c.need||'')+'<br><span class="text-muted">'+esc(c.note||'')+'</span></td></tr>';
       });
       html+='</tbody></table>';
-      if(bad.length)html+='<div class="alert alert-danger small mb-2"><i class="bi bi-exclamation-triangle"></i> 上面标记「未开通」的多为<b>企业能力</b>（企业文档 / 团队管理）：<br>'
-        +'· <b>企业应用</b>：到 开发者后台 →「权限管理 → 接口权限」申请后，还须走 <b>应用发布 → 版本管理 → 创建版本并申请发布</b>，由 <b>企业管理员审批</b> 才生效（只勾选不发布不生效）。<br>'
-        +'· <b>个人应用（账号未做企业认证）</b>：这类能力申请不到，请改用上方「授权金山文档」的用户授权模式，无需再折腾权限。</div>';
+      if(bad.length)html+='<div class="alert alert-danger small mb-2"><i class="bi bi-exclamation-triangle"></i> 上面「未开通」的都是<b>应用级企业能力</b>（企业文档 / 团队管理）：<br>'
+        +'· 实测已确认<b>换令牌模式也绕不过</b> —— 用户授权令牌下 /v7/files/search、/v7/drives、/v7/links/{id}/meta 仍报同一个 ErrPrivileges。<br>'
+        +'· <b>唯一补法</b>：成为「<b>企业服务商</b>」—— 用 <b>WPS 365 企业超管账号</b>登录 open.wps.cn（可自动获得该身份，无需营业执照），'
+        +'再创建「<b>企业内建应用</b>」，在权限管理里申请企业文档能力，然后走 <b>应用发布 → 版本管理 → 创建版本并申请发布 → 管理员审批</b>（超管即管理员）。<br>'
+        +'· <b>最省事的替代</b>：表格写入链路本身<b>已经就绪</b>，只差一个 file_id —— 在浏览器里打开你的表格、把地址栏完整链接发我，我尝试直接取到 file_id 后写入，不需要任何新权限。</div>';
     }
     if(d.hint)html+='<div class="alert alert-warning small mb-0"><i class="bi bi-lightbulb"></i> '+esc(d.hint)+'</div>';
     else if(d.live_ok)html+='<div class="alert alert-success small mb-0">连接正常，可以点「同步到金山云文档」了（建议先点一次「干跑核对」）。</div>';
