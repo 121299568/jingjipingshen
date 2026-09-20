@@ -3001,19 +3001,33 @@ app.get('/api/annual/:year/export', auth(['admin', 'rd']), (req, res) => {
 // 未配置时只返回明确提示，不影响系统其它功能。
 function kdocsModule() { return require('./kdocs-sync'); }
 
-app.get('/api/kdocs/status', auth(['admin', 'rd']), (req, res) => {
+// GET /api/kdocs/status            → 只看本地配置
+// GET /api/kdocs/status?live=1     → 真连一次金山接口：校验应用凭据、解析目标文档、列工作表，并给出可执行的修复提示
+app.get('/api/kdocs/status', auth(['admin', 'rd']), async (req, res) => {
   let kdocs;
   try { kdocs = kdocsModule(); }
   catch (e) { return res.json({ configured: false, error: '同步模块加载失败：' + e.message }); }
   let last = null;
   try { last = JSON.parse(getSetting('kdocs_last_sync') || 'null'); } catch (_) { last = null; }
-  res.json({
+  const raw = kdocs.CFG.fileRaw || '';
+  const kind = raw ? kdocs.parseFileInput(raw).kind : 'none';
+  const base = {
     configured: !!kdocs.configOk(),
     missing: kdocs.missingConfig(),
+    client_id: kdocs.CFG.id || '',
+    file_type: kdocs.CFG.fileType,
     sheet_name: kdocs.CFG.sheetName,
-    file_id_tail: kdocs.CFG.fileId ? String(kdocs.CFG.fileId).slice(-6) : '',
+    file_input: kind === 'link' ? '分享链接' : (kind === 'file' ? 'file_id' : '(未配置)'),
+    file_tail: raw ? String(raw).slice(-8) : '',
     last_sync: last
-  });
+  };
+  if (req.query.live !== '1') return res.json(base);
+  try {
+    const p = await kdocs.probe({ writeTest: req.query.writeTest === '1' });
+    res.json(Object.assign(base, { live: p, live_ok: !!p.ok, live_error: p.error || null, hint: p.diag ? p.diag.hint : null }));
+  } catch (e) {
+    res.json(Object.assign(base, { live_ok: false, live_error: e.message }));
+  }
 });
 
 app.post('/api/annual/:year/kdocs/push', auth(['admin', 'rd']), async (req, res) => {
@@ -3039,13 +3053,13 @@ app.post('/api/annual/:year/kdocs/push', auth(['admin', 'rd']), async (req, res)
       rows: summary.rows.length, cols: (aoa[0] || []).length,
       by: req.user.real_name || req.user.username,
       sheet_name: r.sheetName || kdocs.CFG.sheetName,
-      message: r.ok ? (dryRun ? '干跑核对通过（未写入）' : '同步成功') : ('同步失败：' + JSON.stringify(r.raw || {}).slice(0, 200))
+      message: r.ok ? (dryRun ? '干跑核对通过（未写入）' : '同步成功') : ('同步失败：' + (r.error || JSON.stringify(r.raw || {}).slice(0, 200)))
     };
     if (!dryRun) setSetting('kdocs_last_sync', JSON.stringify(meta));
     db.logWorkflow(null, 'kdocs_sync', `${dryRun ? '干跑核对' : '同步'}金山云文档（${year} 年度汇总 ${meta.rows} 行）：${meta.message}`, req.user.id);
-    if (!r.ok) return res.status(502).json(Object.assign({ error: meta.message }, r));
+    if (!r.ok) return res.status(502).json(Object.assign({ error: meta.message, hint: r.diag ? r.diag.hint : undefined }, r));
     const out = Object.assign({}, r, { meta });
-    if (dryRun) out.preview = { headers: aoa[1], totals: aoa[2], first_row: aoa[3] || null, total_rows: summary.rows.length };
+    if (dryRun) out.preview = r.preview || { headers: aoa[1], totals: aoa[2], first_row: aoa[3] || null, total_rows: summary.rows.length };
     res.json(out);
   } catch (e) {
     res.status(500).json({ error: '同步异常：' + e.message });

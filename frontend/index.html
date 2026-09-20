@@ -503,6 +503,7 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
           <button class="btn btn-success btn-sm" onclick="exportAnnual()"><i class="bi bi-download"></i> 导出汇总表</button>
           <button class="btn btn-primary btn-sm" id="annualKdocsBtn" onclick="pushAnnualToKdocs()"><i class="bi bi-cloud-arrow-up"></i> 同步到金山云文档</button>
           <button class="btn btn-outline-secondary btn-sm" id="annualKdocsDryBtn" onclick="pushAnnualToKdocs(true)" data-tip="只打印将要写入的矩阵，不实际写入云文档"><i class="bi bi-search"></i> 干跑核对</button>
+          <button class="btn btn-outline-info btn-sm" id="annualKdocsCheckBtn" onclick="openKdocsCheck()" data-tip="真连一次金山接口，逐步检查应用凭据 / 接口权限 / 目标文档 / 工作表"><i class="bi bi-plug"></i> 检查连接</button>
           <span class="small text-muted" id="kdStatus"></span>
           <span class="small text-muted" id="annualUpdated"></span>
         </div>
@@ -664,6 +665,23 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
       <div id="eiLinks" class="mt-3"></div>
     </div>
   </div></div>
+</div>
+
+<div class="modal fade" id="kdocsCheckModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-plug"></i> 金山云文档连接检查</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="kdocsCheckBody"><div class="text-muted">正在连接…</div></div>
+      <div class="modal-footer">
+        <span class="small text-muted me-auto">检查是只读的，不会改动云文档内容</span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="openKdocsCheck(true)"><i class="bi bi-arrow-repeat"></i> 重新检查</button>
+        <button class="btn btn-sm btn-primary" data-bs-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="modal fade" id="uploadFileModal" tabindex="-1">
@@ -3497,11 +3515,15 @@ async function loadKdocsStatus(){
     const r=await fetch(API+'/kdocs/status',{headers:authH()});
     if(!r.ok){ // 无权限（事业部等）：不展示同步入口
       el.textContent='';
-      ['annualKdocsBtn','annualKdocsDryBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.display='none';});
+      ['annualKdocsBtn','annualKdocsDryBtn','annualKdocsCheckBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.display='none';});
       return;
     }
     const d=await r.json();
-    if(!d.configured){el.innerHTML='<span class="text-danger" title="在 backend/.env 填入凭据后即可同步">云文档未配置（缺 '+(d.missing||[]).join('、')+'）</span>';return;}
+    if(!d.configured){
+      el.innerHTML='<span class="text-danger" title="在 backend/.env 填入凭据后即可同步">云文档未配置（缺 '+(d.missing||[]).join('、')+'）</span>';
+      const cb=document.getElementById('annualKdocsCheckBtn');if(cb)cb.style.display='';
+      return;
+    }
     if(d.last_sync){
       const t=String(d.last_sync.at||'').replace('T',' ').slice(0,16);
       el.innerHTML=d.last_sync.ok
@@ -3531,6 +3553,32 @@ async function pushAnnualToKdocs(dryRun){
     loadKdocsStatus();
   }catch(e){alert('同步出错：'+e.message);}
   finally{if(btn)btn.disabled=false;}
+}
+async function openKdocsCheck(){
+  const m=document.getElementById('kdocsCheckModal');
+  if(!m){return;}
+  try{bootstrap.Modal.getOrCreateInstance(m).show();}catch(_){}
+  const body=document.getElementById('kdocsCheckBody');
+  body.innerHTML='<div class="text-muted"><span class="spinner-border spinner-border-sm"></span> 正在连接金山开放平台…</div>';
+  try{
+    const r=await fetch(API+'/kdocs/status?live=1',{headers:authH()});
+    const d=await r.json();
+    if(!r.ok){body.innerHTML='<div class="alert alert-danger mb-0">检查失败：'+esc(d.error||'无权限访问配置')+'</div>';return;}
+    let html='<div class="mb-2 small text-muted">应用 ID：<code>'+esc(d.client_id||'-')+'</code> · 目标文档类型：'+esc(d.file_type==='sheet'?'传统表格':'智能表格')+' · 目标工作表：'+esc(d.sheet_name||'')+'</div>';
+    const steps=(d.live&&d.live.steps)||[];
+    if(!steps.length){html+='<div class="alert alert-secondary small mb-0">暂无检查结果。</div>';}
+    else{
+      html+='<table class="table table-sm align-middle"><thead class="table-light"><tr><th style="width:64px">结果</th><th style="width:180px">检查项</th><th>说明</th></tr></thead><tbody>';
+      steps.forEach(s=>{
+        html+='<tr><td>'+(s.ok?'<span class="badge bg-success">通过</span>':'<span class="badge bg-danger">未通过</span>')+'</td><td>'+esc(s.name)+'</td><td class="small">'+esc(s.detail||'')+'</td></tr>';
+      });
+      html+='</tbody></table>';
+    }
+    if(d.hint)html+='<div class="alert alert-warning small mb-0"><i class="bi bi-lightbulb"></i> '+esc(d.hint)+'</div>';
+    else if(d.live_ok)html+='<div class="alert alert-success small mb-0">连接正常，可以点「同步到金山云文档」了（建议先点一次「干跑核对」）。</div>';
+    else if(d.live_error)html+='<div class="alert alert-warning small mb-0">'+esc(d.live_error)+'</div>';
+    body.innerHTML=html;
+  }catch(e){body.innerHTML='<div class="alert alert-danger mb-0">检查出错：'+esc(e.message)+'</div>';}
 }
 function exportAnnual(){ window.open(API+'/annual/'+annualYear+'/export?token='+encodeURIComponent(localStorage.getItem('token')||''),'_blank'); }
 async function postAnnualComment(){
