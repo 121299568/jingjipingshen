@@ -365,8 +365,13 @@ async function capTest(token) {
     if (r.status === 200) { state = 'ok'; note = '可用'; }
     else if (/404 Route Not Found/.test(txt)) { state = 'na'; note = '端点不存在，改用备用端点'; }
     else if (diag.kind === 'scope_missing') { state = 'missing'; note = '缺 scope：' + (diag.scope || '未知') + (diag.scope && SCOPE_WHERE[diag.scope] ? '（' + SCOPE_WHERE[diag.scope] + '）' : ''); }
-    else if (diag.kind === 'iface_missing') { state = 'missing'; note = '缺接口权限：' + (IFACE_WHO[diag.iface] || diag.iface); }
-    else if (diag.kind === 'file_permission' || /unable to read user permission/.test(txt)) { state = 'ok'; note = '权限已到位（报错为资源级，属正常）'; }
+    else if (diag.kind === 'iface_missing') {
+      state = 'missing';
+      note = '缺接口权限「' + (IFACE_WHO[diag.iface] || diag.iface) + '」：须在开发者后台「开发配置 → 权限管理」申请后，'
+        + '再走「应用发布 → 版本管理」创建版本申请发布，由企业管理员审批通过才生效（只勾选不发布不生效）';
+    }
+    else if (diag.kind === 'file_permission' || /unable to read user permission|unable to read file metadata/.test(txt)) { state = 'ok'; note = '权限已到位（报错为资源级，属正常）'; }
+    else if (/无权限/.test(txt)) { state = 'warn'; note = '接口本身可用，但应用当前看不到目标数据（属数据范围问题，非权限未开通）'; }
     else { state = 'warn'; note = 'HTTP ' + r.status + ' / ' + (txt.slice(0, 90)); }
     out.push({ name: c.name, need: c.need, state, note });
   }
