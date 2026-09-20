@@ -3315,10 +3315,14 @@ app.post('/api/expert-invites/:iid/revoke', auth(['admin', 'rd']), (req, res) =>
 
 // ---------- 以下 3 个接口供专家免登录页面调用，不校验 JWT，只校验链接令牌 ----------
 // ---------- 专家定向链接：短链 ----------
-// 短码用「易读字符集」（去掉 0/O/1/l/i），8 位足够（31^8 ≈ 8.5e11），短且不便猜测。
+// 短码用「易读字符集」（去掉 0/O/1/l/i 等易混字符），默认 6 位（31^6 ≈ 8.9e8）。
+// 之所以敢用 6 位：一人一链 + 默认 30 天有效期 + 随时撤销 + 短码接口只对「失败请求」限流，
+// 四道约束叠加后枚举成本远高于收益；链接却能从 36 字符压到 26 字符左右。
+// 长度可用 EXPERT_CODE_LEN 调整（4~16）；历史 8 位短码继续有效（查表按 4~80 长度匹配，不做版本区分）。
 const SHORT_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
+const SHORT_CODE_LEN = Math.max(4, Math.min(16, parseInt(process.env.EXPERT_CODE_LEN || '6', 10) || 6));
 function newShortCode(len) {
-  const n = len || 8, buf = crypto.randomBytes(n);
+  const n = len || SHORT_CODE_LEN, buf = crypto.randomBytes(n);
   let s = '';
   for (let i = 0; i < n; i++) s += SHORT_ALPHABET[buf[i] % SHORT_ALPHABET.length];
   return s;
@@ -3326,8 +3330,8 @@ function newShortCode(len) {
 function ensureShortCode(inv) {
   if (inv.short_code) return inv.short_code;
   const all = db.store.expertInvites || [];
-  for (let i = 0; i < 6; i++) {
-    const c = newShortCode(8);
+  for (let i = 0; i < 8; i++) {
+    const c = newShortCode(SHORT_CODE_LEN);
     if (!all.some(x => x.short_code === c)) { inv.short_code = c; return c; }
   }
   inv.short_code = newShortCode(12);
@@ -3345,9 +3349,39 @@ function inviteShortBase(req) {
   if (b) return b.replace(/\/+$/, '');
   return inviteBaseUrl(req);
 }
-function inviteShortLink(req, inv) {
-  return inviteShortBase(req) + '/e/' + ensureShortCode(inv);
+function hostOf(u) {
+  return String(u || '').replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split('/')[0].split(':')[0].trim().toLowerCase();
 }
+const SHORT_BASE_HOST = hostOf(process.env.EXPERT_SHORT_BASE || '');
+// 当前请求是否就落在独立短域上（决定根路径短码路由 / 是否接管）
+function isShortHost(req) {
+  if (!SHORT_BASE_HOST) return false;
+  return hostOf(req.headers['x-forwarded-host'] || req.headers.host) === SHORT_BASE_HOST;
+}
+// 短码的路径前缀，由环境变量显式决定，**不用「比较请求 Host」去猜**：
+// 内网直连 / 健康检查时 Host 是 127.0.0.1，猜的话会把同域链接误生成成根路径形态。
+//   EXPERT_SHORT_BASE=https://lnsoft.mjumju.com（默认，与主站同域）
+//     → 必须保留 /e/，否则短码会和主站的 /、/api/ 等路由打架
+//     https://lnsoft.mjumju.com/e/kf7mQ2
+//   EXPERT_SHORT_BASE=https://e.mjumju.com + EXPERT_SHORT_ROOT=1（独立短域）
+//     → 短码直挂根路径，再省 2 个字符
+//     https://e.mjumju.com/kf7mQ2
+function shortPrefix() {
+  return process.env.EXPERT_SHORT_ROOT === '1' ? '' : '/e';
+}
+function inviteShortLink(req, inv) {
+  return inviteShortBase(req) + shortPrefix() + '/' + ensureShortCode(inv);
+}
+// 短码枚举防护：只统计「失败」请求（skipSuccessfulRequests 跳过 2xx/3xx），
+// 所以正常专家怎么刷页面都不会被拦，只有无效短码探测才会被计数。
+const shortCodeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 150,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '请求过于频繁，请稍后再试' }
+});
 
 function inviteAuthOk(res, inv) {
   const state = inviteState(inv);
@@ -3381,7 +3415,7 @@ function inviteInfo(req, res, inv) {
 }
 
 app.get('/api/expert-invite/:token', (req, res) => inviteInfo(req, res, findInviteByToken(req.params.token)));
-app.get('/api/e/:code', (req, res) => inviteInfo(req, res, findInviteByShortCode(req.params.code)));
+app.get('/api/e/:code', shortCodeLimiter, (req, res) => inviteInfo(req, res, findInviteByShortCode(req.params.code)));
 
 function inviteProjectDetail(req, res, inv) {
   if (!inviteAuthOk(res, inv)) return;
@@ -3414,7 +3448,7 @@ function inviteProjectDetail(req, res, inv) {
 }
 
 app.get('/api/expert-invite/:token/projects/:pid', (req, res) => inviteProjectDetail(req, res, findInviteByToken(req.params.token)));
-app.get('/api/e/:code/projects/:pid', (req, res) => inviteProjectDetail(req, res, findInviteByShortCode(req.params.code)));
+app.get('/api/e/:code/projects/:pid', shortCodeLimiter, (req, res) => inviteProjectDetail(req, res, findInviteByShortCode(req.params.code)));
 
 function inviteSubmit(req, res, inv) {
   if (!inviteAuthOk(res, inv)) return;
@@ -3472,16 +3506,33 @@ function inviteSubmit(req, res, inv) {
 }
 
 app.post('/api/expert-invite/:token/estimates', (req, res) => inviteSubmit(req, res, findInviteByToken(req.params.token)));
-app.post('/api/e/:code/estimates', (req, res) => inviteSubmit(req, res, findInviteByShortCode(req.params.code)));
+app.post('/api/e/:code/estimates', shortCodeLimiter, (req, res) => inviteSubmit(req, res, findInviteByShortCode(req.params.code)));
 
-// 短链落地页：直接把专家评估页吐出来（不跳转），地址栏始终显示 /e/<code>，
+// 短链落地页：直接把专家评估页吐出来（**不跳转**），地址栏全程只显示短码，
 // 专家既看不到主站路径，也看不到长令牌。页面自身按路径里的短码调用 /api/e/<code>。
-app.get('/e/:code', (req, res) => {
-  const code = String(req.params.code || '');
-  if (!/^[A-Za-z0-9_-]{4,80}$/.test(code)) return res.status(404).send('短链无效');
+// 两种入口都支持（老链接一律不能失效）：
+//   同域：      https://<主站>/e/kf7mQ2
+//   独立短域：  https://e.mjumju.com/kf7mQ2     ← 根路径直挂，比 /e/ 再省 2 个字符
+const SHORT_CODE_RE = /^[A-Za-z0-9_-]{4,80}$/;
+function serveExpertPage(res) {
   res.set('Cache-Control', 'no-store');
   res.set('X-Robots-Tag', 'noindex, nofollow');
   res.sendFile(path.join(FRONTEND_DIR, 'expert.html'), err => { if (err) res.status(500).send('页面加载失败'); });
+}
+app.get('/e/:code', shortCodeLimiter, (req, res) => {
+  if (!SHORT_CODE_RE.test(String(req.params.code || ''))) return res.status(404).send('短链无效');
+  serveExpertPage(res);
+});
+// 短域根路径：不带短码时也吐评估页，页面自身会提示「链接缺少访问令牌」（比主站首页兜底更合理）
+app.get('/', (req, res, next) => {
+  if (!isShortHost(req)) return next();
+  serveExpertPage(res);
+});
+// 独立短域根路径短码。★ 只在请求命中短域时接管，绝不抢主站的 /、/api/、/uploads/、静态资源路由。
+app.get('/:code', shortCodeLimiter, (req, res, next) => {
+  if (!isShortHost(req)) return next();
+  if (!SHORT_CODE_RE.test(String(req.params.code || ''))) return next();
+  serveExpertPage(res);
 });
 
 // ==================== 统计分析 ====================

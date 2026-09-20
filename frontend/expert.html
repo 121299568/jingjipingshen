@@ -85,7 +85,9 @@
 <div class="toast" id="toast"></div>
 <script>
 // 短链形如 /e/<code>（地址栏与接口里都不出现长令牌）；同时兼容早期已发出的 /expert.html?k=<token>
-const PATHCODE=(location.pathname.match(/^\/e\/([A-Za-z0-9_-]{4,80})/)||[])[1]||'';
+// 短码入口：同域 /e/<code>，或独立短域下的根路径 /<code>（如 e.mjumju.com/kf7mQ2）
+const PATHCODE=(location.pathname.match(/^\/e\/([A-Za-z0-9_-]{4,80})/)||[])[1]
+  ||(location.pathname.match(/^\/([A-Za-z0-9_-]{4,80})\/?$/)||[])[1]||'';
 const TOKEN=new URLSearchParams(location.search).get('k')||'';
 const API=PATHCODE?('/api/e/'+encodeURIComponent(PATHCODE)):('/api/expert-invite/'+encodeURIComponent(TOKEN));
 let STATE=null, CUR=null;

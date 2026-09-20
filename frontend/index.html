@@ -2134,7 +2134,8 @@ function renderExpertInvites(){
     if(inv&&inv.state==='active') acts+=' <button class="btn btn-sm btn-outline-danger" onclick="eiRevoke('+inv.id+')">撤销</button>';
     return '<tr>'
       +'<td>'+esc(r.name)+' <span class="text-muted small">'+(r.role==='accountant'?'会计师':'专家')+'</span>'
-        +(inv&&inv.short_code?'<div class="text-muted small"><code>/e/'+esc(inv.short_code)+'</code></div>':'')+'</td>'
+        // 只显示短码路径（不含域名），换短域后自动跟随，不会显示成写死的 /e/
+        +(inv&&inv.short_code?'<div class="text-muted small"><code>'+esc(String(inv.link||'').replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+/i,'')||('/e/'+inv.short_code))+'</code></div>':'')+'</td>'
       +'<td class="small">'+esc((inv&&inv.contact)||'—')+'</td>'
       +'<td>'+(inv?eiStateBadge(inv.state):eiStateBadge(''))+'</td>'
       +'<td class="small">'+(inv?eiFmt(inv.expires_at):'—')+'</td>'
