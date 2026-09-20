@@ -1932,6 +1932,7 @@ function exportTableToCSV(){
 
 // ==================== 评估汇总（管理员/研发）====================
 let wlSelectedSessionId=null;
+let wlCompactMode=false; // 精简模式开关（5a127b3 重写时漏声明，导致评估汇总页 ReferenceError）
 function renderWorkloadSummary(){
   wlSelectedSessionId=null; wlCurrentData=null;
   const nameEl=document.getElementById('wlSessionName'); if(nameEl) nameEl.textContent='';
