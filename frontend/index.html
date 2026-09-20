@@ -96,12 +96,17 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
   .sidebar .nav-item{justify-content:center;padding-left:0;padding-right:0}
   body.nav-pinned .sidebar .nav-item,.sidebar.hover-expand .nav-item{justify-content:flex-start;padding-left:20px;padding-right:20px}
   .sidebar-brand{white-space:nowrap;overflow:hidden;text-overflow:clip}
-  /* 固定按钮：收缩态不占位，仅展开（固定或悬浮展开）时出现 */
+  /* 固定按钮：收缩态不占位，仅展开（固定或悬浮展开）时出现，紧挨标题 */
   .sidebar .nav-pin{display:none}
-  body.nav-pinned .sidebar .nav-pin,.sidebar.hover-expand .nav-pin{display:flex;justify-content:flex-start;padding-left:20px}
+  body.nav-pinned .sidebar .nav-pin,.sidebar.hover-expand .nav-pin{display:flex;align-items:center}
 }
-.nav-pin{cursor:pointer;opacity:.7;transition:opacity .15s}
-.nav-pin:hover{opacity:1}
+.nav-pin{cursor:pointer;color:#e02424;font-size:15px;line-height:1;padding:2px 3px;border:none;border-radius:5px;opacity:.85;transition:opacity .15s,transform .15s,background .15s;margin-left:2px;flex:none}
+.nav-pin:hover{opacity:1;transform:scale(1.15);background:rgba(224,36,36,.12)}
+.nav-pin i{display:inline-block;transition:transform .18s ease}
+/* 固定态：红色立式形态（图钉竖立 + 红底胶囊） */
+body.nav-pinned .nav-pin{background:#e02424;color:#fff;opacity:1;padding:3px 5px}
+body.nav-pinned .nav-pin i{transform:rotate(-45deg)}
+body.nav-pinned .nav-pin:hover{background:#c01e1e}
 /* ===== 评估汇总表（项目经济评审结果汇总表）===== */
 .wl-wrap{max-height:72vh;overflow:auto;position:relative;background:#fff}
 .wl-wrap table{border-collapse:separate;border-spacing:0;font-size:12.5px}
@@ -147,9 +152,9 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 <!-- MAIN APP -->
 <div id="mainApp" class="app-wrap" style="display:none;min-height:100vh">
   <aside class="sidebar">
-    <div class="d-flex justify-content-between align-items-center">
+    <div class="d-flex align-items-center" style="gap:2px">
       <div class="sidebar-brand"><i class="bi bi-calculator"></i><span class="nav-label">&nbsp;经济评审系统</span></div>
-      <div class="nav-item nav-pin" id="navPinBtn" onclick="toggleNavPin(event)" data-tip="固定 / 取消固定侧边栏"><i class="bi bi-pin-angle"></i></div>
+      <div class="nav-item nav-pin" id="navPinBtn" onclick="toggleNavPin(event)" data-tip="固定 / 取消固定侧边栏" style="padding-left:0;padding-right:0"><i class="bi bi-pin-angle"></i></div>
     </div>
     <div class="nav-item active" data-page="dashboard"><i class="bi bi-speedometer2"></i><span class="nav-label">&nbsp;工作台</span></div>
     <div class="nav-item" data-page="sessions"><i class="bi bi-calendar-check"></i><span class="nav-label">&nbsp;评审批次</span></div>
@@ -2816,7 +2821,7 @@ function toggleNavPin(e){
 function updatePinIcon(){
   const b=document.getElementById('navPinBtn');if(!b)return;
   const p=document.body.classList.contains('nav-pinned');
-  const i=b.querySelector('i');if(i)i.className=p?'bi bi-pin-angle-fill':'bi bi-pin-angle';
+  const i=b.querySelector('i');if(i)i.className=p?'bi bi-pin-fill':'bi bi-pin-angle';
   b.setAttribute('data-tip',p?'取消固定（改为自动收缩）':'固定展开侧边栏');
 }
 // ==================== 即时悬浮提示（鼠标移入即显示，无 1 秒延迟） ====================
