@@ -56,7 +56,8 @@ const CFG = {
   autoCreate: (process.env.KDOCS_AUTO_CREATE || '1') !== '0',
   // 用户授权（个人开发者唯一可用模式）
   redirectUri: process.env.KDOCS_REDIRECT_URI || 'https://lnsoft.mjumju.com/api/kdocs/oauth/callback',
-  userScope: process.env.KDOCS_USER_SCOPE || 'kso.file.search,kso.file.readwrite,kso.file_link.readwrite,kso.sheets.readwrite,kso.airsheet.readwrite,kso.drive.readwrite,kso.user_base.read',
+  // ⚠️ 这里只能列「已在权限管理里开通」的 scope，否则授权接口会直接报错（未开通的 scope 不能出现在请求里）
+  userScope: process.env.KDOCS_USER_SCOPE || 'kso.file.search,kso.file.readwrite,kso.file_link.readwrite,kso.sheets.readwrite,kso.airsheet.readwrite,kso.drive.readwrite',
   tokenFile: process.env.KDOCS_TOKEN_FILE || nodePath.join(__dirname, '.kdocs-user-token.json')
 };
 
