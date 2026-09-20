@@ -1232,8 +1232,11 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     }
     const estCost = parsed.cost_summary && parsed.cost_summary.total_cost != null ? Number(parsed.cost_summary.total_cost) : null;
     const internalCost = project.internal_estimated_cost != null ? Number(project.internal_estimated_cost) : null;
-    if (internalCost != null && estCost != null && estCost > internalCost) {
-      vIssues.push(`估算成本 ¥${estCost.toLocaleString()} 大于汇总表「内部信息系统填报预估成本」 ¥${internalCost.toLocaleString()}`);
+    // 先四舍五入到分再比较，避免浮点误差导致同额误报
+    const estCostR2 = estCost != null ? Math.round(estCost * 100) / 100 : null;
+    const internalCostR2 = internalCost != null ? Math.round(internalCost * 100) / 100 : null;
+    if (internalCostR2 != null && estCostR2 != null && estCostR2 - internalCostR2 > 0.01) {
+      vIssues.push(`估算成本 ¥${estCostR2.toLocaleString()} 大于汇总表「内部信息系统填报预估成本」 ¥${internalCostR2.toLocaleString()}`);
     }
     // 最新一次估算表上传的校验结论覆盖旧告警：传了干净的表，旧告警自动消除
     project.import_warnings = vIssues.length
@@ -1461,8 +1464,11 @@ async function handleFolderUpload(req, res) {
         }
         const estCost = parsed.cost_summary && parsed.cost_summary.total_cost != null ? Number(parsed.cost_summary.total_cost) : null;
         const internalCost = match.internal_estimated_cost != null ? Number(match.internal_estimated_cost) : null;
-        if (internalCost != null && estCost != null && estCost > internalCost) {
-          validation.messages.push(`估算成本 ¥${estCost.toLocaleString()} 大于明细表「内部填报预估成本」 ¥${internalCost.toLocaleString()}`);
+        // 先四舍五入到分再比较，避免浮点误差导致「125046.64000001 > 125046.64」这类同额误报
+        const estCostR = estCost != null ? Math.round(estCost * 100) / 100 : null;
+        const internalCostR = internalCost != null ? Math.round(internalCost * 100) / 100 : null;
+        if (internalCostR != null && estCostR != null && estCostR - internalCostR > 0.01) {
+          validation.messages.push(`估算成本 ¥${estCostR.toLocaleString()} 大于明细表「内部填报预估成本」 ¥${internalCostR.toLocaleString()}`);
         }
       }
     }
