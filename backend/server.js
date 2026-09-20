@@ -3011,19 +3011,23 @@ app.get('/api/kdocs/status', auth(['admin', 'rd']), async (req, res) => {
   try { last = JSON.parse(getSetting('kdocs_last_sync') || 'null'); } catch (_) { last = null; }
   const raw = kdocs.CFG.fileRaw || '';
   const kind = raw ? kdocs.parseFileInput(raw).kind : 'none';
+  const savedId = getSetting('kdocs_file_id') || '';
   const base = {
     configured: !!kdocs.configOk(),
     missing: kdocs.missingConfig(),
     client_id: kdocs.CFG.id || '',
     file_type: kdocs.CFG.fileType,
     sheet_name: kdocs.CFG.sheetName,
-    file_input: kind === 'link' ? '分享链接' : (kind === 'file' ? 'file_id' : '(未配置)'),
+    auto_create: !!kdocs.needCreate(),
+    create_name: kdocs.CFG.createName,
+    saved_file_id_tail: savedId ? String(savedId).slice(-8) : '',
+    file_input: kind === 'link' ? '分享链接' : (kind === 'file' ? 'file_id' : (savedId ? '已自动新建（系统记住的文档）' : (kdocs.needCreate() ? '待自动新建' : '(未配置)'))),
     file_tail: raw ? String(raw).slice(-8) : '',
     last_sync: last
   };
   if (req.query.live !== '1') return res.json(base);
   try {
-    const p = await kdocs.probe({ writeTest: req.query.writeTest === '1' });
+    const p = await kdocs.probe({ writeTest: req.query.writeTest === '1', fileId: savedId || undefined });
     res.json(Object.assign(base, { live: p, live_ok: !!p.ok, live_error: p.error || null, hint: p.diag ? p.diag.hint : null }));
   } catch (e) {
     res.json(Object.assign(base, { live_ok: false, live_error: e.message }));
@@ -3047,13 +3051,20 @@ app.post('/api/annual/:year/kdocs/push', auth(['admin', 'rd']), async (req, res)
       return res.status(400).json({ error: `未找到 ${year} 年度的评审数据，暂无可同步内容` });
     }
     const aoa = buildAnnualAoa(summary.columns, summary.rows, summary.totals);
-    const r = await kdocs.pushAoa(aoa, { dryRun });
+    // 首次同步时若还没有目标文档，模块会自动在云盘里新建一份并把 file_id 记进 settings，之后复用
+    const savedId = getSetting('kdocs_file_id') || '';
+    const r = await kdocs.pushAoa(aoa, { dryRun, fileId: savedId || undefined });
+    if (r.ok && r.file_id && !savedId) setSetting('kdocs_file_id', r.file_id);
     const meta = {
       at: new Date().toISOString(), year, ok: !!r.ok, dry_run: !!dryRun,
       rows: summary.rows.length, cols: (aoa[0] || []).length,
       by: req.user.real_name || req.user.username,
       sheet_name: r.sheetName || kdocs.CFG.sheetName,
-      message: r.ok ? (dryRun ? '干跑核对通过（未写入）' : '同步成功') : ('同步失败：' + (r.error || JSON.stringify(r.raw || {}).slice(0, 200)))
+      file_id: r.file_id || savedId || '',
+      created: !!r.created,
+      message: r.ok
+        ? (dryRun ? '干跑核对通过（未写入）' : (r.created ? '已新建云文档并同步成功（' + (r.created_name || '') + '）' : '同步成功'))
+        : ('同步失败：' + (r.error || JSON.stringify(r.raw || {}).slice(0, 200)))
     };
     if (!dryRun) setSetting('kdocs_last_sync', JSON.stringify(meta));
     db.logWorkflow(null, 'kdocs_sync', `${dryRun ? '干跑核对' : '同步'}金山云文档（${year} 年度汇总 ${meta.rows} 行）：${meta.message}`, req.user.id);

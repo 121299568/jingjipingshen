@@ -3524,12 +3524,14 @@ async function loadKdocsStatus(){
       const cb=document.getElementById('annualKdocsCheckBtn');if(cb)cb.style.display='';
       return;
     }
+    const docInfo=d.saved_file_id_tail?('目标文档 …'+d.saved_file_id_tail):(d.auto_create?('首次同步将自动新建「'+(d.create_name||'汇总表')+'」'):'');
     if(d.last_sync){
       const t=String(d.last_sync.at||'').replace('T',' ').slice(0,16);
       el.innerHTML=d.last_sync.ok
-        ? '<span class="text-success">上次同步 '+t+'（'+d.last_sync.rows+' 行 → '+(d.last_sync.sheet_name||'')+'）</span>'
+        ? '<span class="text-success">上次同步 '+t+'（'+d.last_sync.rows+' 行 → '+esc(d.last_sync.sheet_name||'')+'）</span>'
         : '<span class="text-danger" title="'+esc(d.last_sync.message||'')+'">上次同步失败 '+t+'</span>';
-    } else el.textContent='尚未同步过';
+      if(docInfo)el.innerHTML+='<span class="text-muted"> · '+esc(docInfo)+'</span>';
+    } else el.textContent=(docInfo?docInfo+' · ':'')+'尚未同步过';
   }catch(e){el.textContent='';}
 }
 async function pushAnnualToKdocs(dryRun){
@@ -3548,7 +3550,7 @@ async function pushAnnualToKdocs(dryRun){
         +'第 2 行字段名（前 8 列）：'+((p.headers||[]).slice(0,8).join(' | '))+' …\n'
         +'合计行（前 6 列）：'+((p.totals||[]).slice(0,6).join(' | ')));
     }else{
-      alert('已同步到金山云文档：'+(d.sheetName||(d.meta&&d.meta.sheet_name)||'')+'，共 '+((d.meta||{}).rows||0)+' 行。');
+      alert((d.created?'已新建云文档并同步成功：':'已同步到金山云文档：')+((d.created_name||d.sheetName)||(d.meta&&d.meta.sheet_name)||'')+'，共 '+((d.meta||{}).rows||0)+' 行。');
     }
     loadKdocsStatus();
   }catch(e){alert('同步出错：'+e.message);}
@@ -3570,7 +3572,8 @@ async function openKdocsCheck(){
     else{
       html+='<table class="table table-sm align-middle"><thead class="table-light"><tr><th style="width:64px">结果</th><th style="width:180px">检查项</th><th>说明</th></tr></thead><tbody>';
       steps.forEach(s=>{
-        html+='<tr><td>'+(s.ok?'<span class="badge bg-success">通过</span>':'<span class="badge bg-danger">未通过</span>')+'</td><td>'+esc(s.name)+'</td><td class="small">'+esc(s.detail||'')+'</td></tr>';
+        const tag=s.ok?'<span class="badge bg-success">通过</span>':(s.pending?'<span class="badge bg-warning text-dark">待完成</span>':'<span class="badge bg-danger">未通过</span>');
+        html+='<tr><td>'+tag+'</td><td>'+esc(s.name)+'</td><td class="small">'+esc(s.detail||'')+'</td></tr>';
       });
       html+='</tbody></table>';
     }

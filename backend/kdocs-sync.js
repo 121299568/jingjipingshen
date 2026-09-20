@@ -31,7 +31,9 @@ const CFG = {
   secret: process.env.KDOCS_CLIENT_SECRET || '',
   fileRaw: (process.env.KDOCS_FILE_ID || '').trim(),
   fileType: (process.env.KDOCS_FILE_TYPE || 'airsheet').trim().toLowerCase(),
-  sheetName: process.env.KDOCS_SHEET_NAME || '年度汇总'
+  sheetName: process.env.KDOCS_SHEET_NAME || '年度汇总',
+  createName: process.env.KDOCS_CREATE_NAME || '年度经济评审结果汇总表.ksheet',
+  autoCreate: (process.env.KDOCS_AUTO_CREATE || '1') !== '0'
 };
 
 let tokenCache = { token: '', exp: 0 };
@@ -45,12 +47,15 @@ function parseFileInput(raw) {
   if (m) return { kind: 'link', linkId: m[1] };
   return { kind: 'file', fileId: s };
 }
-function configOk() { return !!(CFG.id && CFG.secret && CFG.fileRaw); }
+function configOk() {
+  return !!(CFG.id && CFG.secret && (CFG.fileRaw || (CFG.autoCreate && CFG.createName)));
+}
+function needCreate() { return !CFG.fileRaw && CFG.autoCreate; }
 function missingConfig() {
   const miss = [];
   if (!CFG.id) miss.push('KDOCS_CLIENT_ID');
   if (!CFG.secret) miss.push('KDOCS_CLIENT_SECRET');
-  if (!CFG.fileRaw) miss.push('KDOCS_FILE_ID');
+  if (!CFG.fileRaw && !needCreate()) miss.push('KDOCS_FILE_ID');
   return miss;
 }
 function apiPrefix() { return CFG.fileType === 'sheet' ? 'sheets' : 'airsheet'; }
@@ -109,11 +114,12 @@ async function getToken(force) {
   return tok;
 }
 
-// ---------- 分享链接 → file_id ----------
-async function resolveFileId(token) {
-  const p = parseFileInput(CFG.fileRaw);
+// ---------- 分享链接 / file_id → 真实 file_id ----------
+async function resolveFileId(token, explicit) {
+  const src = (explicit != null && String(explicit).trim()) ? String(explicit).trim() : CFG.fileRaw;
+  const p = parseFileInput(src);
   if (p.kind === 'file') { resolved = { fileId: p.fileId, driveId: '', name: '', from: 'file_id' }; return resolved; }
-  if (p.kind === 'none') throw new Error('KDOCS_FILE_ID 未配置');
+  if (p.kind === 'none') throw new Error('尚未指定目标文档（KDOCS_FILE_ID 为空）');
   const r = await httpJson(BASE + '/v7/links/' + encodeURIComponent(p.linkId) + '/meta', {
     headers: { Authorization: 'Bearer ' + token }
   });
@@ -125,6 +131,77 @@ async function resolveFileId(token) {
   }
   resolved = { fileId, driveId: d.drive_id || '', name: d.name || d.fname || '', from: 'link' };
   return resolved;
+}
+
+// ---------- 云盘（drive）列表：新建文档要指定落在哪个云盘 ----------
+async function listDrives(token) {
+  const eps = ['/v7/doclibs', '/v7/drives'];
+  let last = null, scopeHit = null;
+  for (const ep of eps) {
+    const r = await httpJson(BASE + ep, { headers: { Authorization: 'Bearer ' + token } });
+    const d = r.json || {};
+    const items = (d.data && d.data.items) || d.items || (d.data && d.data.drives) || [];
+    const arr = Array.isArray(items) ? items : (items ? Object.values(items) : []);
+    const out = arr.map(it => ({
+      id: (it.drive && it.drive.id) || it.drive_id || it.id,
+      name: (it.drive && (it.drive.name || it.drive.title)) || it.name || ''
+    })).filter(x => x.id);
+    if (out.length) return { ok: true, drives: out, via: ep, raw: d };
+    const diag = explain(r.status, d || r.text);
+    // 权限问题是「真问题」，优先于后续候选端点的 404（否则会把权限不足误报成路径不存在）
+    if (diag.kind === 'scope_missing' && !scopeHit) scopeHit = { ep, status: r.status, raw: d, text: r.text, diag };
+    last = { ep, status: r.status, raw: d, text: r.text, diag };
+  }
+  const pick = scopeHit || last || {};
+  return { ok: false, drives: [], status: pick.status, raw: pick.raw, text: pick.text, diag: pick.diag, via: pick.ep };
+}
+
+// ---------- 新建表格文档（传统表格走 /v7/sheets）----------
+async function createFile(token, driveId, name) {
+  const candidates = [
+    { url: BASE + '/v7/' + apiPrefix() + '/files', body: { drive_id: driveId, name, on_name_conflict: 'rename' }, label: 'POST /v7/' + apiPrefix() + '/files' },
+    { url: BASE + '/v7/drives/' + encodeURIComponent(driveId) + '/files/0/create', body: { name, on_name_conflict: 'rename' }, label: 'POST /v7/drives/{drive_id}/files/0/create' }
+  ];
+  const tries = [];
+  let scopeHit = null;
+  for (const c of candidates) {
+    const r = await httpJson(c.url, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(c.body)
+    }, 20000);
+    const d = r.json || {};
+    const diag = explain(r.status, d || r.text);
+    tries.push({ api: c.label, status: r.status, body: d });
+    const id = (d.data && (d.data.id || d.data.file_id)) || d.id || d.file_id;
+    if (r.status === 200 && id) return { ok: true, fileId: String(id), api: c.label, raw: d, tries };
+    if (diag.kind === 'scope_missing' && !scopeHit) scopeHit = { status: r.status, body: d, diag };
+  }
+  const e = scopeHit ? scopeHit.diag : explain(tries.length ? tries[tries.length - 1].status : 0, (tries.length ? tries[tries.length - 1].body : {}) || {});
+  return { ok: false, error: '新建表格失败：' + e.hint, diag: e, tries };
+}
+
+// ---------- 统一入口：拿到本次要写入的 file_id（必要时自动新建一次）----------
+async function ensureFile(token, explicit) {
+  const src = (explicit != null && String(explicit).trim()) ? String(explicit).trim() : CFG.fileRaw;
+  if (src) {
+    const rf = await resolveFileId(token, src);
+    return { ok: true, fileId: rf.fileId, created: false, from: rf.from, name: rf.name };
+  }
+  if (!CFG.autoCreate) return { ok: false, error: '尚未指定目标文档（KDOCS_FILE_ID 为空且已关闭自动新建）' };
+  const dr = await listDrives(token);
+  if (!dr.ok) {
+    return {
+      ok: false,
+      error: '无法获取云盘列表，无法自动新建文档：' + (dr.diag ? dr.diag.hint : '官方未返回云盘数据'),
+      diag: dr.diag, raw: dr.raw
+    };
+  }
+  const drive = dr.drives[0];
+  const c = await createFile(token, drive.id, CFG.createName);
+  if (!c.ok) return c;
+  resolved = { fileId: c.fileId, driveId: drive.id, name: CFG.createName, from: 'created' };
+  return { ok: true, fileId: c.fileId, created: true, drive, api: c.api, name: CFG.createName, tries: c.tries };
 }
 
 // ---------- 工作表 ----------
@@ -220,7 +297,7 @@ async function probe(opts) {
     file_type: CFG.fileType, sheet_name: CFG.sheetName,
     steps: [], ok: false
   };
-  const step = (name, ok, detail) => { out.steps.push({ name, ok, detail }); return ok; };
+  const step = (name, ok, detail, pending) => { out.steps.push({ name, ok: !!ok, detail, pending: !!pending }); return ok; };
 
   if (!CFG.id || !CFG.secret) {
     step('应用凭据', false, '缺少 KDOCS_CLIENT_ID / KDOCS_CLIENT_SECRET');
@@ -231,8 +308,19 @@ async function probe(opts) {
   try { token = await getToken(true); step('应用凭据取令牌', true, '令牌有效，长度 ' + token.length); }
   catch (e) { step('应用凭据取令牌', false, e.message); out.error = e.message; out.diag = e.diag; return out; }
 
+  const src = (opts && opts.fileId) ? String(opts.fileId) : CFG.fileRaw;
+  if (!src) {
+    if (needCreate()) {
+      step('目标文档', false, '尚未指定；首次同步时会自动在你的云盘里新建「' + CFG.createName + '」', true);
+      out.pending_create = true;
+    } else {
+      step('目标文档', false, '未配置 KDOCS_FILE_ID');
+      out.error = '未配置目标文档';
+    }
+    return out;
+  }
   try {
-    const rf = await resolveFileId(token);
+    const rf = await resolveFileId(token, src);
     step('目标文档 file_id', true, rf.from === 'link' ? ('由分享链接解析 → ' + rf.fileId.slice(0, 10) + '…' + (rf.name ? '（' + rf.name + '）' : '')) : ('直接使用 ' + rf.fileId.slice(0, 10) + '…'));
     const sheets = await listWorksheets(token, rf.fileId);
     const picked = pickSheet(sheets);
@@ -268,22 +356,33 @@ async function pushAoa(aoa, opts) {
     };
   }
   const token = await getToken();
-  const rf = await resolveFileId(token);
-  const sheets = await listWorksheets(token, rf.fileId);
-  const picked = pickSheet(sheets);
+  let ens;
+  try { ens = await ensureFile(token, opts && opts.fileId); }
+  catch (e) { return { ok: false, error: e.message, diag: e.diag, raw: e.raw }; }
+  if (!ens.ok) return { ok: false, error: ens.error, diag: ens.diag, raw: ens.raw, tries: ens.tries };
+  const fileId = ens.fileId;
+  let sheets, picked;
+  try {
+    sheets = await listWorksheets(token, fileId);
+    picked = pickSheet(sheets);
+  } catch (e) {
+    return { ok: false, error: e.message, diag: e.diag, raw: e.raw, file_id: fileId, created: !!ens.created };
+  }
   const batches = buildBatches(aoa, 0);
-  const w = await writeBatches(token, rf.fileId, picked.sheet.sheetId, batches, 120);
+  const w = await writeBatches(token, fileId, picked.sheet.sheetId, batches, 120);
   if (!w.ok) {
     return {
       ok: false, error: (w.diag ? w.diag.hint : '写入失败'), diag: w.diag, raw: w.raw,
+      file_id: fileId, created: !!ens.created,
       sheetId: picked.sheet.sheetId, sheetName: picked.sheet.name, sheets: picked.all,
       progress: w.done + '/' + w.total
     };
   }
   return {
     ok: true, sheetId: picked.sheet.sheetId, sheetName: picked.sheet.name, sheets: picked.all,
-    cells: rows * cols, batches: batches.length, raw: w.raw
+    cells: rows * cols, batches: batches.length, raw: w.raw,
+    file_id: fileId, created: !!ens.created, created_name: ens.created ? ens.name : '', drive: ens.drive || null
   };
 }
 
-module.exports = { CFG, configOk, missingConfig, pushAoa, probe, parseFileInput, buildBatches, listWorksheets, pickSheet, apiPrefix };
+module.exports = { CFG, configOk, missingConfig, needCreate, pushAoa, probe, parseFileInput, buildBatches, listWorksheets, pickSheet, apiPrefix, listDrives, createFile, ensureFile, resolveFileId };
