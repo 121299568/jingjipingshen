@@ -3001,6 +3001,59 @@ app.get('/api/annual/:year/export', auth(['admin', 'rd']), (req, res) => {
 // 未配置时只返回明确提示，不影响系统其它功能。
 function kdocsModule() { return require('./kdocs-sync'); }
 
+// ---------- 用户授权（个人开发者唯一可用路径）----------
+// 背景：WPS 开放平台按开发者身份划分能力。「企业文档」「团队管理」只对企业开发者开放，
+// 个人应用用应用凭证（client_credentials）调 /v7/drives、/v7/links 必报 ErrPrivileges。
+// 个人应用允许的是「用户授权」类能力 → 换成 OAuth 授权码模式，令牌代表用户本人。
+// GET /api/kdocs/oauth/url   → 取授权链接（需登录）
+app.get('/api/kdocs/oauth/url', auth(['admin', 'rd']), (req, res) => {
+  let kdocs;
+  try { kdocs = kdocsModule(); } catch (e) { return res.status(500).json({ error: '同步模块加载失败：' + e.message }); }
+  if (!kdocs.CFG.id) return res.status(400).json({ error: '未配置 KDOCS_CLIENT_ID' });
+  const a = kdocs.authUrl();
+  res.json({
+    ok: true, url: a.url, state: a.state,
+    redirect_uri: a.redirect_uri, scope: a.scope,
+    tips: '请先在开发者后台「安全配置 → 用户授权回调配置」里把回调地址设为 ' + a.redirect_uri +
+          '（必须逐字符一致），再打开授权链接。授权成功后回到本系统，「检查连接」会显示用户授权已生效。'
+  });
+});
+
+// GET /api/kdocs/oauth/callback → 金山授权后回跳（对外公开，无 JWT）
+app.get('/api/kdocs/oauth/callback', async (req, res) => {
+  const { code, state, error, error_description: errDesc } = req.query || {};
+  const page = (title, body, ok) => res.status(ok ? 200 : 400).type('html').send(
+    '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><title>' + title + '</title>' +
+    '<style>body{margin:0;font:15px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6f8;color:#1f2329}' +
+    '.box{max-width:560px;margin:12vh auto;background:#fff;border-radius:12px;padding:32px 34px;box-shadow:0 4px 24px rgba(0,0,0,.07)}' +
+    'h1{font-size:19px;margin:0 0 14px}.ok{color:#c0392b}.bad{color:#d93026}code{background:#f2f3f5;padding:2px 6px;border-radius:4px;font-size:13px}' +
+    'p{margin:8px 0}.tip{color:#646a73;font-size:13px;margin-top:18px}</style></head><body><div class="box">' +
+    '<h1 class="' + (ok ? 'ok' : 'bad') + '">' + title + '</h1>' + body +
+    '<p class="tip">可以关闭本页，回到系统「年度汇总」页点「检查连接」查看结果。</p></div></body></html>');
+  if (error) return page('授权未完成', '<p>金山返回：<code>' + String(error) + '</code> ' + String(errDesc || '') + '</p><p>请重新获取授权链接后再试。</p>', false);
+  if (!code) return page('授权未完成', '<p>回调里没有收到 <code>code</code> 参数。</p>', false);
+  let kdocs;
+  try { kdocs = kdocsModule(); } catch (e) { return page('授权失败', '<p>' + e.message + '</p>', false); }
+  try {
+    const r = await kdocs.exchangeCode(String(code));
+    db.logWorkflow(null, 'kdocs_sync', '完成金山云文档用户授权（令牌模式切换为「用户授权」）', null);
+    return page('授权成功', '<p>已拿到用户令牌，有效期 ' + Math.round(r.expires_in / 60) + ' 分钟' +
+      (r.has_refresh ? '，并已获得 refresh_token（365 天内可自动续期）' : '，<b>未返回 refresh_token</b>，过期后需重新授权') + '。</p>', true);
+  } catch (e) {
+    return page('授权失败', '<p>' + String(e.message) + '</p>', false);
+  }
+});
+
+// POST /api/kdocs/oauth/clear → 撤销本地保存的用户令牌（回到应用凭证模式）
+app.post('/api/kdocs/oauth/clear', auth(['admin', 'rd']), (req, res) => {
+  let kdocs;
+  try { kdocs = kdocsModule(); } catch (e) { return res.status(500).json({ error: '同步模块加载失败：' + e.message }); }
+  kdocs.clearUserToken();
+  db.logWorkflow(null, 'kdocs_sync', '清除金山云文档用户授权令牌', req.user.id);
+  res.json({ ok: true, token: kdocs.tokenMode() });
+});
+
 // GET /api/kdocs/status            → 只看本地配置
 // GET /api/kdocs/status?live=1     → 真连一次金山接口：校验应用凭据、解析目标文档、列工作表，并给出可执行的修复提示
 app.get('/api/kdocs/status', auth(['admin', 'rd']), async (req, res) => {
@@ -3015,6 +3068,7 @@ app.get('/api/kdocs/status', auth(['admin', 'rd']), async (req, res) => {
   const base = {
     configured: !!kdocs.configOk(),
     missing: kdocs.missingConfig(),
+    token: kdocs.tokenMode(),
     client_id: kdocs.CFG.id || '',
     file_type: kdocs.CFG.fileType,
     sheet_name: kdocs.CFG.sheetName,

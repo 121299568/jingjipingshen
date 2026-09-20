@@ -503,7 +503,8 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
           <button class="btn btn-success btn-sm" onclick="exportAnnual()"><i class="bi bi-download"></i> 导出汇总表</button>
           <button class="btn btn-primary btn-sm" id="annualKdocsBtn" onclick="pushAnnualToKdocs()"><i class="bi bi-cloud-arrow-up"></i> 同步到金山云文档</button>
           <button class="btn btn-outline-secondary btn-sm" id="annualKdocsDryBtn" onclick="pushAnnualToKdocs(true)" data-tip="只打印将要写入的矩阵，不实际写入云文档"><i class="bi bi-search"></i> 干跑核对</button>
-          <button class="btn btn-outline-info btn-sm" id="annualKdocsCheckBtn" onclick="openKdocsCheck()" data-tip="真连一次金山接口，逐步检查应用凭据 / 接口权限 / 目标文档 / 工作表"><i class="bi bi-plug"></i> 检查连接</button>
+          <button class="btn btn-outline-info btn-sm" id="annualKdocsCheckBtn" onclick="openKdocsCheck()" data-tip="真连一次金山接口，逐步检查令牌模式 / 接口权限 / 目标文档 / 工作表"><i class="bi bi-plug"></i> 检查连接</button>
+          <button class="btn btn-outline-warning btn-sm" id="annualKdocsAuthBtn" onclick="startKdocsAuth()" style="display:none" data-tip="个人开发者账号必须用「用户授权」模式：以你本人的金山账号身份调用，才能读写你个人空间里的文档"><i class="bi bi-person-check"></i> 授权金山文档</button>
           <span class="small text-muted" id="kdStatus"></span>
           <span class="small text-muted" id="annualUpdated"></span>
         </div>
@@ -3515,16 +3516,21 @@ async function loadKdocsStatus(){
     const r=await fetch(API+'/kdocs/status',{headers:authH()});
     if(!r.ok){ // 无权限（事业部等）：不展示同步入口
       el.textContent='';
-      ['annualKdocsBtn','annualKdocsDryBtn','annualKdocsCheckBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.display='none';});
+      ['annualKdocsBtn','annualKdocsDryBtn','annualKdocsCheckBtn','annualKdocsAuthBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.display='none';});
       return;
     }
     const d=await r.json();
+    const authBtn=document.getElementById('annualKdocsAuthBtn');
+    if(authBtn)authBtn.style.display=((d.token&&d.token.mode==='user')?'none':'');
     if(!d.configured){
       el.innerHTML='<span class="text-danger" title="在 backend/.env 填入凭据后即可同步">云文档未配置（缺 '+(d.missing||[]).join('、')+'）</span>';
       const cb=document.getElementById('annualKdocsCheckBtn');if(cb)cb.style.display='';
       return;
     }
     const docInfo=d.saved_file_id_tail?('目标文档 …'+d.saved_file_id_tail):(d.auto_create?('首次同步将自动新建「'+(d.create_name||'汇总表')+'」'):'');
+    const tokInfo=(d.token&&d.token.mode==='user')
+      ? '<span class="badge bg-success" title="'+esc(d.token.mode_text||'')+'">用户授权</span>'
+      : '<span class="badge bg-warning text-dark" title="'+esc((d.token&&d.token.mode_text)||'')+'">待授权</span>';
     if(d.last_sync){
       const t=String(d.last_sync.at||'').replace('T',' ').slice(0,16);
       el.innerHTML=d.last_sync.ok
@@ -3532,6 +3538,7 @@ async function loadKdocsStatus(){
         : '<span class="text-danger" title="'+esc(d.last_sync.message||'')+'">上次同步失败 '+t+'</span>';
       if(docInfo)el.innerHTML+='<span class="text-muted"> · '+esc(docInfo)+'</span>';
     } else el.textContent=(docInfo?docInfo+' · ':'')+'尚未同步过';
+    el.innerHTML=tokInfo+(el.innerHTML?' · ':'')+el.innerHTML;
   }catch(e){el.textContent='';}
 }
 async function pushAnnualToKdocs(dryRun){
@@ -3556,6 +3563,16 @@ async function pushAnnualToKdocs(dryRun){
   }catch(e){alert('同步出错：'+e.message);}
   finally{if(btn)btn.disabled=false;}
 }
+/* 用户授权（个人开发者唯一可用模式）：取授权链接 → 新窗口打开金山授权页 */
+async function startKdocsAuth(){
+  try{
+    const r=await fetch(API+'/kdocs/oauth/url',{headers:authH()});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.url){alert('获取授权链接失败：'+(d.error||r.status));return;}
+    alert('即将打开金山授权页。\n\n请先确认：开发者后台 →「安全配置 → 用户授权回调配置」里的回调地址\n已设置为：\n'+d.redirect_uri+'\n（必须逐字符一致，否则金山会报 redirect_uri 不匹配）\n\n授权完成后浏览器会跳回本系统的回调地址，页面提示「授权成功」即可关闭。');
+    window.open(d.url,'_blank');
+  }catch(e){alert('获取授权链接异常：'+e.message);}
+}
 async function openKdocsCheck(){
   const m=document.getElementById('kdocsCheckModal');
   if(!m){return;}
@@ -3566,7 +3583,17 @@ async function openKdocsCheck(){
     const r=await fetch(API+'/kdocs/status?live=1',{headers:authH()});
     const d=await r.json();
     if(!r.ok){body.innerHTML='<div class="alert alert-danger mb-0">检查失败：'+esc(d.error||'无权限访问配置')+'</div>';return;}
-    let html='<div class="mb-2 small text-muted">应用 ID：<code>'+esc(d.client_id||'-')+'</code> · 目标文档类型：'+esc(d.file_type==='sheet'?'传统表格':'智能表格')+' · 目标工作表：'+esc(d.sheet_name||'')+'</div>';
+    const tok=d.token||{};
+    let html='<div class="mb-2 small text-muted">应用 ID：<code>'+esc(d.client_id||'-')+'</code> · 令牌模式：<b>'+(tok.mode==='user'?'用户授权':'应用凭证')+'</b> · 目标文档类型：'+esc(d.file_type==='sheet'?'传统表格':'智能表格')+' · 目标工作表：'+esc(d.sheet_name||'')+'</div>';
+    if(tok.mode!=='user'){
+      html+='<div class="alert alert-warning small"><i class="bi bi-person-check"></i> 当前用的是<b>应用凭证</b>模式。若你的开发者账号未做<b>企业认证</b>（属「第三方个人应用」），'
+        +'「企业文档」「团队管理」这类企业能力永远申请不到，上面的权限矩阵一定会红——这不是你操作的问题。'
+        +'<br>个人账号的正确做法是改用<b>用户授权</b>：以你本人的金山账号身份调用，能直接读写你个人空间里的文档。'
+        +'<div class="mt-2"><button class="btn btn-warning btn-sm" onclick="startKdocsAuth()"><i class="bi bi-person-check"></i> 授权金山文档</button>'
+        +' <span class="ms-2">回调地址须为 <code>'+esc(tok.redirect_uri||'')+'</code></span></div></div>';
+    }else{
+      html+='<div class="alert alert-success small mb-2"><i class="bi bi-check-circle"></i> 用户授权已生效（有效期至 '+esc(tok.user_expires_at||'-')+(tok.user_refreshable?'，可自动续期':'，<b>需重新授权</b>')+'）。</div>';
+    }
     const steps=(d.live&&d.live.steps)||[];
     if(!steps.length){html+='<div class="alert alert-secondary small mb-0">暂无检查结果。</div>';}
     else{
@@ -3588,7 +3615,9 @@ async function openKdocsCheck(){
         html+='<tr><td>'+(TAG[c.state]||esc(c.state))+'</td><td class="small">'+esc(c.name)+'</td><td class="small">'+esc(c.need||'')+'<br><span class="text-muted">'+esc(c.note||'')+'</span></td></tr>';
       });
       html+='</tbody></table>';
-      if(bad.length)html+='<div class="alert alert-danger small mb-2"><i class="bi bi-exclamation-triangle"></i> 请到 open.wps.cn 开发者后台 → 该应用 → <b>权限管理 → 接口权限</b> 申请开通上面标记「未开通」的能力。<br><b>关键：</b>新申请的接口权限属于「版本敏感项」，开通后还需到 <b>应用发布 → 版本管理 → 创建版本并申请发布</b>，再由 <b>企业管理员在企业管理后台审核通过</b> 才会真正生效。</div>';
+      if(bad.length)html+='<div class="alert alert-danger small mb-2"><i class="bi bi-exclamation-triangle"></i> 上面标记「未开通」的多为<b>企业能力</b>（企业文档 / 团队管理）：<br>'
+        +'· <b>企业应用</b>：到 开发者后台 →「权限管理 → 接口权限」申请后，还须走 <b>应用发布 → 版本管理 → 创建版本并申请发布</b>，由 <b>企业管理员审批</b> 才生效（只勾选不发布不生效）。<br>'
+        +'· <b>个人应用（账号未做企业认证）</b>：这类能力申请不到，请改用上方「授权金山文档」的用户授权模式，无需再折腾权限。</div>';
     }
     if(d.hint)html+='<div class="alert alert-warning small mb-0"><i class="bi bi-lightbulb"></i> '+esc(d.hint)+'</div>';
     else if(d.live_ok)html+='<div class="alert alert-success small mb-0">连接正常，可以点「同步到金山云文档」了（建议先点一次「干跑核对」）。</div>';
