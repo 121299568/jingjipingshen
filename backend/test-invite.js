@@ -4,6 +4,12 @@ const fs = require('fs'), http = require('http'), crypto = require('crypto'), { 
 
 const env = fs.readFileSync('/opt/jingjipingshen/backend/.env', 'utf8');
 const SEC = (env.match(/JWT_SECRET=(\S+)/) || [])[1] || '';
+// 短链形态随配置变化：同域必须带 /e/；切到独立短域（EXPERT_SHORT_ROOT=<短域名>）则短码挂根路径。
+// 断言按实际配置自适应，这样同一份测试在切换前后都能跑。
+// 注意 EXPERT_SHORT_ROOT 支持两种写法：短域名（推荐，如 e.mjumju.com）或兼容写法 1。
+const _rootRaw = ((env.match(/^EXPERT_SHORT_ROOT=(.*)$/m) || [])[1] || '').trim().toLowerCase();
+const ROOT_MODE = !!_rootRaw && _rootRaw !== '0' && _rootRaw !== 'false' && _rootRaw !== 'off';
+const SHORT_BASE = (env.match(/^EXPERT_SHORT_BASE=(\S+)/m) || [])[1] || '';
 const body = Buffer.from(JSON.stringify({ id: 1, username: 'admin', role: 'admin', exp: Date.now() + 3600e3 })).toString('base64url');
 const TOKEN = body + '.' + crypto.createHmac('sha256', SEC).update(body).digest('base64url');
 
@@ -98,10 +104,23 @@ function cleanupTest() {
   r = await req('POST', `/api/sessions/${sid}/expert-invites`, { days: 30, experts: [{ real_name: '外部测试专家', contact: '13800000000' }] });
   const inv = (r.body.invites || [])[0] || {};
   const shortLink = inv.link || '', longLink = inv.long_link || '';
-  const code = (shortLink.match(/\/e\/([A-Za-z0-9_-]+)/) || [])[1] || '';
+  // 短码有两种形态：同域 /e/<code>，独立短域根路径 /<code>
+  const code = (shortLink.match(/\/e\/([A-Za-z0-9_-]+)/) || shortLink.match(/\/([A-Za-z0-9_-]{4,80})$/) || [])[1] || '';
   const tk = longLink.split('k=')[1] || '';
   check('生成短链（形如 /e/<code>，地址里不含令牌）',
     r.code === 200 && !!code && !/\?k=/.test(shortLink), shortLink);
+  check('短码长度 6 位（更短）', code.length === 6, 'len=' + code.length + ' code=' + code);
+  check('短码只含易读字符集（无 0/O/1/l/i）', /^[23456789abcdefghjkmnpqrstuvwxyz]+$/.test(code), code);
+  check('短链整体够短（域名 + 6 位码，不含令牌）', shortLink.length <= 40 && !/\?k=/.test(shortLink), shortLink);
+  check('短码出现在路径末尾（同域 /e/<code> 或独立短域根路径 /<code>）',
+    new RegExp('/' + code + '$').test(shortLink), shortLink);
+  if (ROOT_MODE) {
+    check('独立短域模式：短链挂根路径、不含 /e/ 前缀', !/\/e\//.test(shortLink), shortLink);
+    check('独立短域模式：短链确实在配置的短域上', !!SHORT_BASE && shortLink.indexOf(SHORT_BASE) === 0,
+      shortLink + ' vs ' + SHORT_BASE);
+  } else {
+    check('同域模式：短链保留 /e/ 前缀（避免与主站路由冲突）', /\/e\//.test(shortLink), shortLink);
+  }
   check('同时返回长链兜底（含令牌，兼容旧链接）', tk.length > 30, longLink.slice(0, 48));
   check('默认有效期 30 天', r.body.days === 30 && !!inv.expires_at, JSON.stringify(inv));
 
@@ -133,6 +152,39 @@ function cleanupTest() {
   r = await Public('/e/ok');
   check('非法短码不吐页面（404）', r.code === 404, 'code=' + r.code);
 
+  // 5c) ★ 抢首页防护（2026-09-21「系统进不去」事故的回归断言）
+  //     事故：EXPERT_SHORT_BASE 曾等于主站域名，旧实现据此把**主站 Host 判成短域**，
+  //     于是 app.get('/') 把系统首页整个换成了 expert.html（实测 / 返回 15860 字节的评估页，
+  //     浏览器 gzip 后 6666 字节）→ 用户打开系统看到「专家工作量评估」，以为系统挂了。
+  //     ⚠️ 必须带**真实 Host 头**发请求才能复现：此前用例 Host 是 127.0.0.1，
+  //        恰好绕过了域名判定，所以 35 项全绿却挡不住线上故障。这一条就是为了补上这个盲区。
+  const MAIN_HOST = (env.match(/^PUBLIC_BASE_URL=https?:\/\/([^\/\s]+)/m) || [])[1] || 'lnsoft.mjumju.com';
+  const SHORT_HOST = (SHORT_BASE.match(/^https?:\/\/([^\/\s]+)/) || [])[1] || '';
+  const withHost = (host, p) => req('GET', p, null, { auth: false, headers: { Host: host } });
+
+  r = await withHost(MAIN_HOST, '/');
+  const homeHtml = typeof r.body === 'string' ? r.body : '';
+  // ⚠️ 判据必须用 <title>，不能用正文里出现「专家工作量评估」——
+  //    index.html 自身有 3 处该文案（发起专家评估的功能），用正文判断会 100% 误报（实测踩到）。
+  check(`主站 ${MAIN_HOST} 的 / 返回系统首页`, r.code === 200 && /<title>经济评审管理系统<\/title>/.test(homeHtml),
+    `code=${r.code} chars=${homeHtml.length}`);
+  check('主站 / 没有被专家评估页抢走', !/<title>专家工作量评估<\/title>/.test(homeHtml), `chars=${homeHtml.length}`);
+
+  r = await withHost(MAIN_HOST, '/notarealcode');
+  const bogusHtml = typeof r.body === 'string' ? r.body : '';
+  check('主站未知单段路径仍走主站路由（不被短码路由吞掉）',
+    /<title>经济评审管理系统<\/title>/.test(bogusHtml), `code=${r.code} chars=${bogusHtml.length}`);
+
+  if (ROOT_MODE && SHORT_HOST && SHORT_HOST !== MAIN_HOST) {
+    r = await withHost(SHORT_HOST, '/');
+    const shortHtml = typeof r.body === 'string' ? r.body : '';
+    check(`独立短域 ${SHORT_HOST} 的 / 由专家评估页接管`,
+      r.code === 200 && /<title>专家工作量评估<\/title>/.test(shortHtml), 'code=' + r.code);
+    r = await withHost(SHORT_HOST, '/zzzznotexist');
+    check('短域下不存在的短码不吐评估页（退回 404/主站兜底）',
+      !/<title>专家工作量评估<\/title>/.test(typeof r.body === 'string' ? r.body : ''), 'code=' + r.code);
+  }
+
   // 6) 提交评估
   r = await Public('POST /api/expert-invite/' + tk + '/estimates', { project_id: pid, items: [{ work_item_id: wiIds[0], days: 3.5 }, { work_item_id: wiIds[1], days: 1.5 }] });
   check('提交 2 项评估成功', r.code === 200 && r.body.saved === 2, JSON.stringify(r.body));
@@ -146,11 +198,17 @@ function cleanupTest() {
   check('回读可见自己的填报值', (r.body.items || []).every(i => i.my_days != null), JSON.stringify((r.body.items || []).map(i => i.my_days)));
   check('项目状态标记为已提交', r.body.project && r.body.project.submitted === true, JSON.stringify(r.body.project));
 
-  // 8) 落库校验：expertEstimates 与 workItems 汇总（save() 异步刷库，稍等再查）
-  await sleep(2000);
-  const estRows = sql(`SELECT COUNT(*) FROM expertEstimates WHERE project_id=${pid};`).trim();
+  // 8) 落库校验：expertEstimates 与 workItems 汇总
+  //    save() 是异步串行刷库，且服务刚重启时连接池/首轮 load 会拖慢写入，
+  //    这里用轮询替代固定 sleep —— 否则会偶发「内存已写、磁盘还没落」的误判（踩过）。
+  let estRows = '0', rollup = [];
+  for (let i = 0; i < 16; i++) {
+    await sleep(500);
+    estRows = sql(`SELECT COUNT(*) FROM expertEstimates WHERE project_id=${pid};`).trim();
+    rollup = sql(`SELECT expert_days_avg, adjusted_cost FROM workItems WHERE project_id=${pid} AND category='outsourcing';`).trim().split(/\s+/);
+    if (estRows === '2' && rollup[0] === '3.5') break;
+  }
   check('评估已写入 expertEstimates（2 行）', estRows === '2', 'rows=' + estRows);
-  const rollup = sql(`SELECT expert_days_avg, adjusted_cost FROM workItems WHERE project_id=${pid} AND category='outsourcing';`).trim().split(/\s+/);
   check('工作项 5 人汇总已刷新（均值 3.5 × 单价 2000）', rollup[0] === '3.5' && rollup[1] === '7000', rollup.join('/'));
 
   // 9) 汇总页联动

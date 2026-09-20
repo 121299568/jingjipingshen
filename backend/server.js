@@ -3353,10 +3353,36 @@ function hostOf(u) {
   return String(u || '').replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split('/')[0].split(':')[0].trim().toLowerCase();
 }
 const SHORT_BASE_HOST = hostOf(process.env.EXPERT_SHORT_BASE || '');
-// 当前请求是否就落在独立短域上（决定根路径短码路由 / 是否接管）
+const MAIN_HOST = hostOf(process.env.PUBLIC_BASE_URL || '');
+// ★★ 允许「短码直挂根路径」的域名；空字符串 = 关闭根路径接管，所有短码一律走 /e/<code>。
+//    ⚠️ 2026-09-21 真实事故（系统进不去）：旧实现直接拿 EXPERT_SHORT_BASE 的 host 当短域，
+//       而当时 EXPERT_SHORT_BASE=https://lnsoft.mjumju.com（就是主站域名），于是主站 Host
+//       被判成「短域」，下面 app.get('/') 把主站首页整个替换成了 expert.html
+//       → 用户打开系统看到的是「专家工作量评估」页，以为系统坏了（实测 / 返回 15860 字节）。
+//    教训：判断「是不是短域」绝不能从 base url 反推，必须是**显式开关**。
+//   EXPERT_SHORT_ROOT=e.mjumju.com  ← 推荐：直接写死允许接管的域名
+//   EXPERT_SHORT_ROOT=1             ← 兼容写法：取 EXPERT_SHORT_BASE 的 host
+function shortRootHost() {
+  const v = String(process.env.EXPERT_SHORT_ROOT || '').trim().toLowerCase();
+  if (!v || v === '0' || v === 'false' || v === 'off') return '';
+  const h = (v === '1' || v === 'true' || v === 'on') ? SHORT_BASE_HOST : hostOf(v);
+  if (!h) return '';
+  // 硬防护：短域等于主站域名时，宁可关掉根路径接管也不能抢主站首页
+  if (MAIN_HOST && h === MAIN_HOST) {
+    if (!shortRootHost.warned) {
+      shortRootHost.warned = true;
+      console.error(`[短链] ⚠️ 危险配置已拦截：EXPERT_SHORT_ROOT 指向主站域名 ${h}，根路径接管已强制关闭（短码仍走 /e/<code>）`);
+    }
+    return '';
+  }
+  return h;
+}
+// 当前请求是否落在「已开启根路径接管」的独立短域上
 function isShortHost(req) {
-  if (!SHORT_BASE_HOST) return false;
-  return hostOf(req.headers['x-forwarded-host'] || req.headers.host) === SHORT_BASE_HOST;
+  const h = shortRootHost();
+  if (!h) return false;
+  const reqHost = hostOf(String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0]);
+  return !!reqHost && reqHost === h;
 }
 // 短码的路径前缀，由环境变量显式决定，**不用「比较请求 Host」去猜**：
 // 内网直连 / 健康检查时 Host 是 127.0.0.1，猜的话会把同域链接误生成成根路径形态。
@@ -3367,7 +3393,7 @@ function isShortHost(req) {
 //     → 短码直挂根路径，再省 2 个字符
 //     https://e.mjumju.com/kf7mQ2
 function shortPrefix() {
-  return process.env.EXPERT_SHORT_ROOT === '1' ? '' : '/e';
+  return shortRootHost() ? '' : '/e';
 }
 function inviteShortLink(req, inv) {
   return inviteShortBase(req) + shortPrefix() + '/' + ensureShortCode(inv);
@@ -3529,9 +3555,13 @@ app.get('/', (req, res, next) => {
   serveExpertPage(res);
 });
 // 独立短域根路径短码。★ 只在请求命中短域时接管，绝不抢主站的 /、/api/、/uploads/、静态资源路由。
+//    再加一层兜底：短码必须**真实存在**于邀请表，否则一律退回主站路由。
+//    这样即便域名判定再次出错，最多是「某个不存在的路径」落到主站，而不会吞掉任何真实路由。
 app.get('/:code', shortCodeLimiter, (req, res, next) => {
   if (!isShortHost(req)) return next();
-  if (!SHORT_CODE_RE.test(String(req.params.code || ''))) return next();
+  const code = String(req.params.code || '');
+  if (!SHORT_CODE_RE.test(code)) return next();
+  if (!findInviteByShortCode(code)) return next();
   serveExpertPage(res);
 });
 
@@ -4032,5 +4062,10 @@ function startServer() {
     });
     if (patched) { db.save(); console.log(`[启动] 已归一化 ${patched} 个存量文件为当前版 v1`); }
   } catch (e) { console.error('[启动] 存量文件归一化失败:', e && e.message); }
-  app.listen(PORT, () => console.log(`✅ 经济评审后端 v4 已启动 (端口 ${PORT}, 驱动 ${config.dbDriver})`));
+  app.listen(PORT, () => {
+    console.log(`✅ 经济评审后端 v4 已启动 (端口 ${PORT}, 驱动 ${config.dbDriver})`);
+    // 短链工作模式自检：这两个值配错会直接决定专家链接形态，甚至抢掉主站首页，必须一眼可见
+    const rh = shortRootHost();
+    console.log(`[短链] 短码 ${SHORT_CODE_LEN} 位 | base=${process.env.EXPERT_SHORT_BASE || '(跟随请求)'} | 根路径接管=${rh || '关闭（一律 /e/<code>）'}`);
+  });
 }
