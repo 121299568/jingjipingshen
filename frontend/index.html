@@ -2136,13 +2136,16 @@ function renderWorkloadProjectTable(d){
   const totals={};moneyKeys.forEach(k=>totals[k]=0);
   // 冻结列宽（与 CSS 变量 --wl-c1/--wl-c2 同源）
   const WL_C1=44, WL_C2=252;
+  // 精简模式：去掉业务方向组与明细列——直接不渲染（而非 CSS 隐藏），列宽才能真正收掉
+  const visGroups = wlCompactMode
+    ? groups.filter(g=>!g.cls).map(g=>({name:g.name,cls:g.cls,cols:g.cols.filter(c=>!c.detail)}))
+    : groups;
   // 列宽总和 → 表格 min-width，避免 table-layout:fixed 在容器不足时把列按比例压扁
-  const fullW=WL_C1+WL_C2+groups.reduce((s,g)=>s+g.cols.reduce((a,c)=>a+(c.w||96),0),0);
-  const compactW=WL_C1+WL_C2+groups.filter(g=>!g.cls).reduce((s,g)=>s+g.cols.filter(c=>!c.detail).reduce((a,c)=>a+(c.w||96),0),0);
+  const tableW=WL_C1+WL_C2+visGroups.reduce((s,g)=>s+g.cols.reduce((a,c)=>a+(c.w||96),0),0);
   // 表头：第一行分组（跨列，固定高度供第二行吸顶定位），第二行明细；前两列冻结跨两行
   const groupRow='<tr class="wl-h1">'+'<th rowspan="2" class="wl-freeze">序号</th>'+'<th rowspan="2" class="wl-freeze2">项目名称</th>'+
-    groups.map(g=>'<th colspan="'+g.cols.length+'" class="wl-group '+(g.cls||'')+'">'+g.name+'</th>').join('')+'</tr>';
-  const subRow='<tr class="wl-h2">'+groups.map(g=>g.cols.map(c=>'<th class="'+(c.detail?'wl-detail ':'')+(g.cls||'')+'">'+c.label+'</th>').join('')).join('')+'</tr>';
+    visGroups.map(g=>'<th colspan="'+g.cols.length+'" class="wl-group '+(g.cls||'')+'">'+g.name+'</th>').join('')+'</tr>';
+  const subRow='<tr class="wl-h2">'+visGroups.map(g=>g.cols.map(c=>'<th class="'+(c.detail?'wl-detail ':'')+(g.cls||'')+'">'+c.label+'</th>').join('')).join('')+'</tr>';
   let tbody='', anomalyCount=0;
   const tipAttr=(s,min)=>{const t=String(s==null?'':s);return t.length>min?' data-tip="'+esc(t)+'"':'';};
   list.forEach((p,idx)=>{
@@ -2177,7 +2180,7 @@ function renderWorkloadProjectTable(d){
     if(p.needs_estimate===false) nameCell+='<span class="badge bg-light text-dark border" data-tip="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span> ';
     nameCell+=esc(row.project_name)+'</td>';
     cells+=nameCell;
-    groups.forEach(g=>g.cols.forEach(c=>{
+    visGroups.forEach(g=>g.cols.forEach(c=>{
       const v=row[c.k];
       const cls=(c.detail?'wl-detail ':'')+(g.cls||'')+' ';
       if(c.money){
@@ -2201,7 +2204,7 @@ function renderWorkloadProjectTable(d){
   });
   // 合计行（冻结列 + 仅金额/占比列有值）
   let footCells='<td class="wl-freeze wl-num">合计</td>'+'<td class="wl-freeze2 wl-name"></td>';
-  groups.forEach(g=>g.cols.forEach(c=>{
+  visGroups.forEach(g=>g.cols.forEach(c=>{
     const cls=(c.detail?'wl-detail ':'')+(g.cls||'')+' ';
     if(c.money){
       const n=Number(totals[c.k])||0;
@@ -2216,28 +2219,30 @@ function renderWorkloadProjectTable(d){
   const tfoot='<tr id="wlFootRow">'+footCells+'</tr>';
   // 固定布局显式列宽：与冻结列偏移（CSS 变量 --wl-c1/--wl-c2）严格同源
   const colgroup='<colgroup><col style="width:'+WL_C1+'px"><col style="width:'+WL_C2+'px">'+
-    groups.map(g=>g.cols.map(c=>'<col style="width:'+(c.w||96)+'px">').join('')).join('')+'</colgroup>';
+    visGroups.map(g=>g.cols.map(c=>'<col style="width:'+(c.w||96)+'px">').join('')).join('')+'</colgroup>';
   const toolbar='<div class="wl-toolbar">'+
     '<input class="form-control form-control-sm" id="wlFilter" placeholder="搜索项目名称 / 部门" oninput="wlFilterTable()">'+
-    '<button class="btn btn-sm btn-outline-danger" id="wlAnomalyBtn" onclick="toggleWlAnomaly()" data-tip="只看合同额缺失、总成本超合同额、估算利润率为负的项目"><i class="bi bi-exclamation-triangle"></i> 只看异常'+(anomalyCount?' ('+anomalyCount+')':'')+'</button>'+
-    '<button class="btn btn-sm btn-outline-secondary" id="wlCompactBtn" onclick="toggleWlCompact()"><i class="bi bi-arrows-angle-contract"></i> 精简</button>'+
+    '<button class="btn btn-sm btn-outline-danger" id="wlAnomalyBtn" onclick="toggleWlAnomaly()" data-tip="只看合同额缺失、成本超合同额或超内部填报预估、估算利润率为负的项目"><i class="bi bi-exclamation-triangle"></i> 只看异常'+(anomalyCount?' ('+anomalyCount+')':'')+'</button>'+
+    '<button class="btn btn-sm btn-outline-secondary" id="wlCompactBtn" onclick="toggleWlCompact()"><i class="bi '+(wlCompactMode?'bi-arrows-angle-expand':'bi-arrows-angle-contract')+'"></i> '+(wlCompactMode?'完整':'精简')+'</button>'+
     '</div>';
   const caption='共 '+list.length+' 个项目 · 单位：元 · 左右滚动时前两列固定'+(anomalyCount?(' · <span class="text-danger">'+anomalyCount+' 项需关注</span>'):'');
   const html='<div class="card card-custom"><div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2"><div><h6 class="mb-0">项目经济评审结果汇总表</h6><div class="text-muted small" id="wlCaption">'+caption+'</div></div>'+toolbar+'</div>'+
-    '<div class="card-body p-0"><div class="wl-wrap'+(wlCompactMode?' wl-compact':'')+'" id="wlWrap" data-fw="'+fullW+'" data-cw="'+compactW+'" style="--wl-c1:'+WL_C1+'px;--wl-c2:'+WL_C2+'px"><table class="table table-sm mb-0 align-middle" id="wlTable" style="min-width:'+(wlCompactMode?compactW:fullW)+'px">'+colgroup+'<thead class="table-light">'+groupRow+subRow+'</thead><tbody>'+tbody+'</tbody><tfoot>'+tfoot+'</tfoot></table></div></div></div>';
+    '<div class="card-body p-0"><div class="wl-wrap'+(wlCompactMode?' wl-compact':'')+'" id="wlWrap" style="--wl-c1:'+WL_C1+'px;--wl-c2:'+WL_C2+'px"><table class="table table-sm mb-0 align-middle" id="wlTable" style="min-width:'+tableW+'px">'+colgroup+'<thead class="table-light">'+groupRow+subRow+'</thead><tbody>'+tbody+'</tbody><tfoot>'+tfoot+'</tfoot></table></div></div></div>';
   document.getElementById('wlProjects').innerHTML=html;
   wlFilterTable();
 }
 function toggleWlCompact(){
   wlCompactMode=!wlCompactMode;
-  const btn=document.getElementById('wlCompactBtn');
-  if(btn)btn.innerHTML=wlCompactMode?'<i class="bi bi-arrows-angle-expand"></i> 完整':'<i class="bi bi-arrows-angle-contract"></i> 精简';
-  const wrap=document.getElementById('wlWrap');
-  if(wrap){
-    wrap.classList.toggle('wl-compact',wlCompactMode);
-    const t=document.getElementById('wlTable');
-    if(t)t.style.minWidth=(wlCompactMode?(wrap.dataset.cw||'0'):(wrap.dataset.fw||'0'))+'px';
+  // 精简/完整会增减列，必须重渲染（纯 CSS 隐藏收不掉列宽）；保留搜索词
+  const q=(document.getElementById('wlFilter')||{}).value||'';
+  if(wlCurrentData&&wlCurrentData.projects){
+    renderWorkloadProjectTable(wlCurrentData);
+    const f=document.getElementById('wlFilter');if(f)f.value=q;
+    wlFilterTable();
+    return;
   }
+  const wrap=document.getElementById('wlWrap');
+  if(wrap)wrap.classList.toggle('wl-compact',wlCompactMode);
   wlFilterTable();
 }
 function toggleWlAnomaly(){
