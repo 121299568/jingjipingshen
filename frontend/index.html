@@ -126,11 +126,13 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
 .wl-zero{color:#c3c7cf}
 .wl-neg{color:#d93025;font-weight:600}
 .wl-warn{color:#b45309;font-weight:600}
-/* 长文本列：默认最多 2 行截断，悬浮即时看全文；精简模式收成 1 行 */
-.wl-txt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.45;word-break:break-word}
-.wl-wrap.wl-compact .wl-txt{-webkit-line-clamp:1}
+/* 长文本列：默认最多 2 行截断，悬浮即时看全文；精简模式收成 1 行
+   ⚠ 截断必须作用在单元格内部的 span 上。绝不能把 display:-webkit-box/flex/block
+   设在 <td> 上——那会让 td 不再是 table-cell，单元格脱离表格列布局，导致整行与表头错行。 */
+.wl-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.45;word-break:break-word;max-height:2.9em}
+.wl-wrap.wl-compact .wl-txt .wl-clamp{-webkit-line-clamp:1;max-height:1.45em}
 .wl-name{font-weight:500}
-.wl-wrap.wl-compact .wl-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl-wrap.wl-compact .wl-name .wl-clamp{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-height:none}
 /* 异常行：首列红色标记条 + 问题单元格警示底 */
 .wl-wrap tbody tr.wl-flag .wl-freeze{box-shadow:inset 3px 0 0 #e5484d,inset -1px 0 0 #e5e7eb}
 .wl-wrap thead tr.wl-h1 th.wl-freeze{box-shadow:inset -1px 0 0 #e5e7eb}
@@ -2176,9 +2178,9 @@ function renderWorkloadProjectTable(d){
     const costBad=(ca>0&&tc>ca)||(iec!=null&&tc>iec);
     const rowTip=anom.length?' data-tip="⚠ 需关注：'+esc(anom.join('；'))+'"':'';
     let cells='<td class="wl-freeze wl-num"'+rowTip+'>'+row.idx+'</td>';
-    let nameCell='<td class="wl-freeze2 wl-name wl-txt"'+tipAttr(row.project_name,17)+'>';
+    let nameCell='<td class="wl-freeze2 wl-name wl-txt"'+tipAttr(row.project_name,17)+'><span class="wl-clamp">';
     if(p.needs_estimate===false) nameCell+='<span class="badge bg-light text-dark border" data-tip="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span> ';
-    nameCell+=esc(row.project_name)+'</td>';
+    nameCell+=esc(row.project_name)+'</span></td>';
     cells+=nameCell;
     visGroups.forEach(g=>g.cols.forEach(c=>{
       const v=row[c.k];
@@ -2194,7 +2196,7 @@ function renderWorkloadProjectTable(d){
         cells+='<td class="'+c2+'">'+(v==null?'-':Math.round(v*100)/100+'%')+'</td>';
       } else if(c.txt){
         const s=String(v==null?'':v);
-        cells+='<td class="'+cls+'wl-txt"'+tipAttr(s,18)+'>'+esc(s||'-')+'</td>';
+        cells+='<td class="'+cls+'wl-txt"'+tipAttr(s,18)+'><span class="wl-clamp">'+esc(s||'-')+'</span></td>';
       } else {
         cells+='<td class="'+cls+'"'+tipAttr(v,14)+'>'+esc(v==null?'':v)+'</td>';
       }
