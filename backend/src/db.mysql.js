@@ -399,29 +399,48 @@ async function doSave(p, store) {
     const snap = JSON.stringify(rows);
     if (savedSnap[name] === snap) continue; // 无变化则跳过，减少 DB 压力
     try {
-      const def = SCHEMA[name];
-      const table = def.table;
-      const cols = [...def.cols, 'extra'];
-      const colList = cols.map(c => `\`${c}\``).join(',');
-      const placeholders = cols.map(() => '?').join(',');
-      const sql = `REPLACE INTO \`${table}\` (${colList}) VALUES (${placeholders})`;
-      for (const row of rows) {
-        const vals = def.cols.map(c => toVal(c, def, row));
-        vals.push(extraOf(def, row));
-        await p.query(sql, vals);
-      }
-      // 删除内存中已不存在的孤儿行（支持删项目/删用户等真正落库）
-      const ids = rows.map(r => r.id).filter(id => id != null);
-      if (ids.length === 0) {
-        await p.query(`DELETE FROM \`${table}\``);
-      } else {
-        await p.query(`DELETE FROM \`${table}\` WHERE id NOT IN (?)`, [ids]);
-      }
+      await writeCollection(p, name, rows);
       savedSnap[name] = snap;
     } catch (e) {
+      // 缺列会让该集合整批 REPLACE 失败，数据只留在内存、进程重启即永久丢失
+      // （历史上 workItems 就这样丢过 1358 条明细）。沿用启动时的补列逻辑自动修复并重试。
+      if (/Unknown column/i.test(e.message || '')) {
+        try {
+          const added = await ensureColumns(p, name);
+          await writeCollection(p, name, rows);
+          savedSnap[name] = snap;
+          console.warn(`[db.mysql] 集合 ${name} 缺列已自动补齐(${added.join(', ') || '无新增'})，重新保存成功`);
+          continue;
+        } catch (e2) {
+          console.error(`[db.mysql] 集合 ${name} 补列后仍保存失败:`, e2.message);
+          continue;
+        }
+      }
       // 单个集合保存失败不应连累其他集合；记录后继续，下一轮 save 会重试
       console.error(`[db.mysql] 集合 ${name} 保存失败（已跳过，下一轮重试）:`, e.message);
     }
+  }
+}
+
+// 单个集合的整表回写：REPLACE 全量行 + 清掉内存中已不存在的孤儿行
+async function writeCollection(p, name, rows) {
+  const def = SCHEMA[name];
+  const table = def.table;
+  const cols = [...def.cols, 'extra'];
+  const colList = cols.map(c => `\`${c}\``).join(',');
+  const placeholders = cols.map(() => '?').join(',');
+  const sql = `REPLACE INTO \`${table}\` (${colList}) VALUES (${placeholders})`;
+  for (const row of rows) {
+    const vals = def.cols.map(c => toVal(c, def, row));
+    vals.push(extraOf(def, row));
+    await p.query(sql, vals);
+  }
+  // 删除内存中已不存在的孤儿行（支持删项目/删用户等真正落库）
+  const ids = rows.map(r => r.id).filter(id => id != null);
+  if (ids.length === 0) {
+    await p.query(`DELETE FROM \`${table}\``);
+  } else {
+    await p.query(`DELETE FROM \`${table}\` WHERE id NOT IN (?)`, [ids]);
   }
 }
 
