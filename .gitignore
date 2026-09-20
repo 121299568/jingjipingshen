@@ -12,3 +12,4 @@ Thumbs.db
 # 环境变量/密钥文件：绝不进版本库
 .env
 *.env
+backups/

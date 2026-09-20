@@ -56,6 +56,18 @@
   .err h2{margin:0 0 8px;font-size:16px;color:var(--danger)}
   .hint{color:var(--muted);font-size:12.5px;margin-top:6px}
   .tbl-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff;max-height:60vh}
+  /* 评估人天：默认预填原人天，用上下箭头按所选步长增减 */
+  input[type=number]{width:96px}
+  input[type=number].adj{border-color:var(--warn);background:#fffbeb;color:var(--warn);font-weight:600}
+  .stepbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .stepbar .lbl{color:var(--muted);font-size:12.5px}
+  .stepbtn{background:#fff;border:1px solid #d1d5db;border-radius:6px;padding:5px 13px;font-size:13px;
+    cursor:pointer;color:#374151;font-variant-numeric:tabular-nums}
+  .stepbtn:hover{border-color:var(--brand);color:var(--brand)}
+  .stepbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .statuscell{font-size:12px;white-space:nowrap}
+  .pending{color:#9ca3af}
+  .adjnote{color:var(--warn)}
 </style>
 </head>
 <body>
@@ -76,6 +88,31 @@ async function api(path,opts){
   return d;
 }
 const CAT={outsourcing:'人员外包',subcontract:'专业分包'};
+
+// ---------- 评估人天步长（与登录版口径一致：0.5 / 1 / 3 / 5）----------
+let estimateStep=0.5;
+function setEstimateStep(val,btn){
+  estimateStep=val;
+  document.querySelectorAll('input[data-wid]').forEach(inp=>inp.step=val);
+  document.querySelectorAll('.stepbtn').forEach(b=>b.classList.remove('on'));
+  if(btn)btn.classList.add('on');
+}
+// 与「原人天」不同的行做高亮，方便专家一眼看出自己改过哪些
+function paintAdjust(inp){
+  const cur=inp.value===''?null:parseFloat(inp.value);
+  const pd=inp.dataset.pd===''?null:parseFloat(inp.dataset.pd);
+  const changed=cur!=null&&pd!=null&&Math.abs(cur-pd)>1e-9;
+  inp.classList.toggle('adj',changed);
+}
+function bindAdjustMarks(){
+  document.querySelectorAll('input[data-wid]').forEach(inp=>{
+    if(inp.dataset.bound)return;
+    inp.dataset.bound='1';
+    inp.addEventListener('input',()=>paintAdjust(inp));
+    inp.addEventListener('change',()=>paintAdjust(inp));
+    paintAdjust(inp);
+  });
+}
 
 function renderError(msg){
   $('app').innerHTML='<div class="err"><h2>无法打开评估页</h2><div>'+esc(msg)+'</div>'
@@ -124,7 +161,7 @@ function renderProject(){
   const d=CUR, p=d.project;
   let h='<div class="wrap"><button class="back" onclick="backToList()">← 返回项目列表</button>'
     +'<div class="top"><h1 style="font-size:15px">'+esc(p.project_name)+'</h1>'
-    +'<div class="meta">'+esc(p.project_code||'—')+' · '+esc(p.biz_department||'—')+' · 参保人天请按实际工作量填写</div>'
+    +'<div class="meta">'+esc(p.project_code||'—')+' · '+esc(p.biz_department||'—')+' · 「我的评估人天」已默认取成本估算表原人天，按您认可的实际工作量用箭头微调即可</div>'
     +'<div class="chips"><span class="badge '+(p.submitted?'b-done':(p.locked?'b-lock':'b-todo'))+'">'
       +(p.submitted?'已全部提交':(p.locked?'已归档，不可修改':('待评估 '+p.done_count+'/'+p.item_count)))
       +'</span></div></div>';
@@ -141,37 +178,56 @@ function renderProject(){
       +'<th class="num" style="width:120px">我的评估人天</th><th style="width:96px">状态</th>'
       +'</tr></thead><tbody>';
     items.forEach(w=>{
+      const pd=w.person_days!=null?w.person_days:null;
+      const cur=w.my_days!=null?w.my_days:(pd!=null?pd:'');
+      const adjusted=(w.my_days!=null&&pd!=null&&w.my_days!==pd);
       h+='<tr>'
         +'<td>'+esc(w.work_task||'—')+'</td>'
         +'<td>'+esc(w.work_item||'—')+'</td>'
         +'<td>'+esc(w.description||'—')+'</td>'
         +'<td>'+esc(w.person||'—')+'</td>'
-        +'<td class="num">'+(w.person_days!=null?w.person_days:'—')+'</td>'
+        +'<td class="num">'+(pd!=null?pd:'—')+'</td>'
         +'<td class="num" style="color:#6b7280">'+money(w.cost)+'</td>'
-        +'<td class="num"><input type="number" min="0" step="0.5" data-wid="'+w.id+'" '
-          +(p.locked?'disabled ':'')+'value="'+(w.my_days!=null?w.my_days:'')+'" '
-          +'placeholder="'+(w.person_days!=null?w.person_days:'?')+'"></td>'
-        +'<td>'+(w.my_days!=null?'<span class="saved">已提交 '+w.my_days+'</span>':'')+'</td>'
+        +'<td class="num"><input type="number" min="0" step="'+estimateStep+'" data-wid="'+w.id+'" '
+          +'data-pd="'+(pd!=null?pd:'')+'" '
+          +(p.locked?'disabled ':'')+'value="'+cur+'" '
+          +'placeholder="'+(pd!=null?pd:'?')+'"></td>'
+        +'<td class="statuscell">'+(w.my_days!=null
+            ?('<span class="saved">已提交 '+w.my_days+'</span>'+(adjusted?(' <span class="adjnote">原'+pd+'</span>'):''))
+            :'<span class="pending">未提交</span>')+'</td>'
         +'</tr>';
     });
     h+='</tbody></table></div>';
   });
-  h+='<div class="bar"><div class="hint">填写后点右侧按钮提交；同一工作项可再次提交覆盖原值。</div>'
-    +'<button class="primary" id="submitBtn"'+(p.locked?' disabled':'')+' onclick="submitAll('+p.id+')">'
-    +(p.locked?'已归档，不可提交':'提交我的评估')+'</button></div></div>';
+  const anySubmitted=d.items.some(x=>x.my_days!=null);
+  h+='<div class="bar"><div class="stepbar">'
+    +'<span class="lbl">调整步长</span>'
+    +[0.5,1,3,5].map(v=>'<button type="button" class="stepbtn'+(estimateStep===v?' on':'')
+        +'" onclick="setEstimateStep('+v+',this)">'+v+'</button>').join('')
+    +'<span class="lbl">点数字框上下箭头即按此步长增减；「我的评估人天」已默认填入原人天，改动过的行会标黄。</span>'
+    +'</div>'
+    +'<button class="primary" id="submitBtn" data-label="'+(anySubmitted?'更新我的评估':'提交我的评估')+'"'
+    +(p.locked?' disabled':'')+' onclick="submitAll('+p.id+')">'
+    +(p.locked?'已归档，不可提交':(anySubmitted?'更新我的评估':'提交我的评估'))+'</button></div></div>';
   $('app').innerHTML=h;
+  bindAdjustMarks();
 }
 
 function backToList(){ CUR=null; history.replaceState(null,'','?k='+encodeURIComponent(TOKEN)); load(); }
 
 async function submitAll(pid){
   const inputs=[...document.querySelectorAll('input[data-wid]')];
-  const items=[];
+  const items=[],bad=[];
   inputs.forEach(i=>{
-    if(i.value!=='') items.push({work_item_id:parseInt(i.dataset.wid),days:parseFloat(i.value)});
+    if(i.value==='') return;
+    const days=parseFloat(i.value);
+    if(!isFinite(days)||days<=0){ bad.push(i); return; }
+    items.push({work_item_id:parseInt(i.dataset.wid),days});
   });
-  if(!items.length){toast('请先填写要评估的人天数');return;}
-  const btn=$('submitBtn'); btn.disabled=true; btn.textContent='提交中…';
+  if(bad.length){ toast('有 '+bad.length+' 项人天不是大于 0 的数字，请修正后再提交'); bad[0].focus(); return; }
+  if(!items.length){ toast('请先填写要评估的人天数'); return; }
+  const btn=$('submitBtn'), label=btn.dataset.label||'提交我的评估';
+  btn.disabled=true; btn.textContent='提交中…';
   try{
     const r=await api(API+'/estimates',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({project_id:pid,items})});
@@ -183,7 +239,7 @@ async function submitAll(pid){
     }
   }catch(e){
     toast(e.message);
-    btn.disabled=false; btn.textContent='提交我的评估';
+    btn.disabled=false; btn.textContent=label;
   }
 }
 
