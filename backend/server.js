@@ -795,16 +795,12 @@ app.get('/api/template/import-xlsx', auth(['admin', 'rd', 'biz']), (req, res) =>
 // ==================== 评审汇总表导入（批次级，支持挂接 / 新建批次）====================
 app.post('/api/sessions/import-summary', auth(['admin', 'rd', 'biz']), upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: '请选择文件' });
-  const mode = req.body.mode === 'attach' ? 'attach' : 'create';
+  const mode = req.body.mode === 'attach' ? 'attach' : (req.body.mode === 'update' ? 'update' : 'create');
   try {
     const { parseSummaryExcel } = require('./parse-summary-excel');
     const parsed = parseSummaryExcel(req.file.path);
     let session, session_id;
-    if (mode === 'attach') {
-      session_id = parseInt(req.body.session_id);
-      session = db.store.reviewSessions.find(s => s.id === session_id);
-      if (!session) return res.status(404).json({ error: '所选批次不存在' });
-    } else {
+    if (mode === 'create') {
       const name = (req.body.session_name && String(req.body.session_name).trim()) || parsed.batch_name || '未命名评审批次';
       session = {
         id: db.nextId(db.store.reviewSessions),
@@ -820,41 +816,84 @@ app.post('/api/sessions/import-summary', auth(['admin', 'rd', 'biz']), upload.si
       };
       db.store.reviewSessions.push(session);
       session_id = session.id;
+    } else {
+      session_id = parseInt(req.body.session_id);
+      session = db.store.reviewSessions.find(s => s.id === session_id);
+      if (!session) return res.status(404).json({ error: '所选批次不存在' });
     }
-    const created = [];
-    let skipped = 0;
+    const dryRun = req.query.dryRun === '1' || req.body.dryRun === true;
+    // 行主键：项目编号优先，否则项目名称（与历史去重逻辑一致）
+    const keyOf = (row) => row.project_code ? 'C:' + row.project_code : 'N:' + (row.project_name || '');
+    const existing = db.store.projects.filter(p => p.session_id === session_id);
+    const existMap = {};
+    existing.forEach(p => { existMap[p.project_code ? 'C:' + p.project_code : 'N:' + (p.project_name || '')] = p; });
+    const newKeys = new Set(parsed.projects.filter(r => r.project_name).map(keyOf));
+    const created = [], updated = [], unchanged = [], deleted = [], changedFieldsByProject = {};
+    const fields = ['project_name', 'project_code', 'biz_department', 'project_type', 'contract_amount', 'internal_estimated_cost', 'is_restricted_subcontract', 'subcontract_scope'];
+    // 计算 diff（dryRun 时仅预览，不改动任何数据）
+    existing.forEach(p => {
+      const k = p.project_code ? 'C:' + p.project_code : 'N:' + (p.project_name || '');
+      if (!newKeys.has(k)) deleted.push(p.project_name);
+    });
     parsed.projects.forEach(row => {
       if (!row.project_name) return;
-      const dup = db.store.projects.some(p =>
-        p.session_id === session_id &&
-        ((row.project_code && p.project_code === row.project_code) ||
-         (!row.project_code && p.project_name === row.project_name))
-      );
-      if (dup) { skipped++; return; }
-      const p = {
-        id: db.nextId(db.store.projects),
-        session_id,
-        project_name: row.project_name,
-        project_code: row.project_code || '',
-        biz_department: row.biz_department || '',
-        project_type: row.project_type || '',
-        contract_amount: row.contract_amount != null ? row.contract_amount : 0,
-        internal_estimated_cost: row.internal_estimated_cost != null ? row.internal_estimated_cost : null,
-        is_restricted_subcontract: row.is_restricted_subcontract || '',
-        subcontract_scope: row.subcontract_scope || '',
-        status: 'draft',
-        cost_summary: {},
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        creator_id: req.user.id
-      };
-      db.store.projects.push(p);
-      created.push(p.id);
+      const k = keyOf(row);
+      const p = existMap[k];
+      if (!p) { created.push(row.project_name); return; }
+      const changes = {};
+      fields.forEach(f => {
+        let nv = row[f] != null ? row[f] : (f === 'contract_amount' ? 0 : '');
+        if (f === 'internal_estimated_cost' && (nv === '' || nv == null)) nv = null;
+        if (p[f] !== nv) changes[f] = nv;
+      });
+      if (Object.keys(changes).length) { updated.push(p.id); changedFieldsByProject[p.id] = { project_name: p.project_name, changes }; }
+      else unchanged.push(p.id);
     });
-    db.save();
-    if (mode === 'create') db.logWorkflow(null, 'session_import', `汇总表导入创建批次「${session.name}」，导入项目 ${created.length} 个（跳过重复 ${skipped} 个）`, req.user.id);
-    else db.logWorkflow(null, 'session_import', `汇总表导入挂接批次「${session.name}」，新增项目 ${created.length} 个（跳过重复 ${skipped} 个）`, req.user.id);
-    res.json({ session_id, session_name: session.name, total: parsed.projects.length, created: created.length, skipped, project_ids: created });
+    if (!dryRun) {
+      // 删除：现有有、新表无 → 级联删除项目及其关联数据
+      deleted.forEach(name => { const p = existing.find(x => x.project_name === name); if (p) cascadeDeleteProject(p.id); });
+      // 新增 / 更新（逐字段写回）
+      parsed.projects.forEach(row => {
+        if (!row.project_name) return;
+        const k = keyOf(row);
+        const p = existMap[k];
+        if (!p) {
+          const np = {
+            id: db.nextId(db.store.projects), session_id,
+            project_name: row.project_name, project_code: row.project_code || '',
+            biz_department: row.biz_department || '', project_type: row.project_type || '',
+            contract_amount: row.contract_amount != null ? row.contract_amount : 0,
+            internal_estimated_cost: row.internal_estimated_cost != null ? row.internal_estimated_cost : null,
+            is_restricted_subcontract: row.is_restricted_subcontract || '', subcontract_scope: row.subcontract_scope || '',
+            status: 'draft', cost_summary: {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), creator_id: req.user.id
+          };
+          db.store.projects.push(np); return;
+        }
+        const changes = {};
+        fields.forEach(f => {
+          let nv = row[f] != null ? row[f] : (f === 'contract_amount' ? 0 : '');
+          if (f === 'internal_estimated_cost' && (nv === '' || nv == null)) nv = null;
+          if (p[f] !== nv) { p[f] = nv; changes[f] = nv; }
+        });
+        if (Object.keys(changes).length) p.updated_at = new Date().toISOString();
+      });
+      db.save();
+      // 汇总表文件版本化（来者为准，旧版留盘标记）
+      const fext = path.extname(req.file.originalname);
+      const vfile = {
+        id: db.nextId(db.store.files), project_id: null, session_id,
+        filename: req.file.filename, originalname: decodeFilename(req.file.originalname),
+        file_seq: 0, file_type: fext.slice(1), file_category: 'summary', auto_detected: false,
+        uploader_id: req.user.id, uploader_name: req.user.real_name || req.user.username,
+        url: `/uploads/${req.file.filename}`, description: '评审汇总表导入', upload_time: new Date().toISOString()
+      };
+      stampFileVersion(vfile, `summary:${session_id}`, 'summary', session_id);
+      db.store.files.push(vfile);
+      db.save();
+    }
+    const verb = mode === 'create' ? '创建批次' : (mode === 'update' ? '增量同步' : '挂接批次');
+    if (!dryRun) db.logWorkflow(null, 'session_import', `汇总表导入${verb}「${session.name}」：新增${created.length}/更新${updated.length}/未变${unchanged.length}/删除${deleted.length}`, req.user.id);
+    res.json({ session_id, session_name: session.name, mode, dryRun: !!dryRun, total: parsed.projects.length, created: created.length, updated: updated.length, unchanged: unchanged.length, deleted: deleted.length, deleted_names: deleted, changedFieldsByProject });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1217,6 +1256,7 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     description: req.body.description || '',
     upload_time: new Date().toISOString()
   };
+  stampFileVersion(file, finalCategory === 'estimation' ? `est:${projectId}` : null, finalCategory === 'estimation' ? 'cost_estimate' : 'project_doc', null);
   db.store.files.push(file);
   // 若上传的是成本估算表（xlsx），自动抽取工作明细与成本项，供工作量评估页使用
   if (finalCategory === 'estimation' && parsed && !parsed.__parseError) {
@@ -1318,6 +1358,35 @@ function snapshotPre(p) {
     try { p.cost_summary_pre = JSON.parse(JSON.stringify(p.cost_summary)); }
     catch (_) { p.cost_summary_pre = p.cost_summary; }
   }
+}
+
+// ==================== 文件版本化（来者为准 + 历史版本留盘）====================
+// 同一 logical_key 下的"当前版"标记为历史版，返回新文件应使用的版本号
+function supersedePreviousVersion(logicalKey) {
+  const prev = (db.store.files || []).filter(f => f.logical_key === logicalKey && f.is_current);
+  let maxVer = 0;
+  prev.forEach(f => { f.is_current = false; f.superseded_at = new Date().toISOString(); maxVer = Math.max(maxVer, (f.version || 1)); });
+  return maxVer + 1;
+}
+// 给新建文件补齐版本字段；传入 logicalKey 则做"以新版本为准"的旧版归档（磁盘文件保留）
+function stampFileVersion(file, logicalKey, importType, sessionId) {
+  file.is_current = true;
+  file.replaced_by = null;
+  file.import_type = importType || null;
+  if (sessionId != null) file.import_session_id = sessionId;
+  if (logicalKey) { file.logical_key = logicalKey; file.version = supersedePreviousVersion(logicalKey); }
+  else { file.logical_key = null; file.version = 1; }
+  return file;
+}
+// 级联删除项目及其关联数据（用于汇总表增量同步中的"行删除"）；物理文件保留以防误删，仅删库记录
+function cascadeDeleteProject(projectId) {
+  db.store.workItems = db.store.workItems.filter(w => w.project_id !== projectId);
+  db.store.procurementItems = db.store.procurementItems.filter(x => x.project_id !== projectId);
+  db.store.travelItems = db.store.travelItems.filter(t => t.project_id !== projectId);
+  db.store.expertEstimates = db.store.expertEstimates.filter(e => e.project_id !== projectId);
+  db.store.confirmations = db.store.confirmations.filter(c => c.project_id !== projectId);
+  db.store.files = db.store.files.filter(f => f.project_id !== projectId);
+  db.store.projects = db.store.projects.filter(p => p.id !== projectId);
 }
 
 function extractCostIntoProject(project, parsed, userId) {
@@ -1500,6 +1569,7 @@ async function handleFolderUpload(req, res) {
         uploader_id: req.user.id, uploader_name: req.user.real_name || req.user.username,
         url: `/uploads/${newFilename}`, description: '文件夹批量上传', upload_time: new Date().toISOString()
       };
+      stampFileVersion(file, finalCategory === 'estimation' ? `est:${match.id}` : null, finalCategory === 'estimation' ? 'cost_estimate' : 'project_doc', null);
       db.store.files.push(file);
       try { runProcurementCheckAndNotify(match.id, req.user.id); } catch (e) { console.error('采购合规检查失败:', e && e.message); }
       db.logWorkflow(match.id, 'upload_file', `[文件夹]上传${getFileCategoryName(finalCategory)}: ${realName}${validation.messages.length ? '（校验：' + validation.messages.join('；') + '）' : ''}`, req.user.id);
@@ -2434,6 +2504,58 @@ app.get('/api/sessions/:id/workload-summary/export-by-dept', auth(['admin', 'rd'
   res.send(buf);
 });
 
+// ==================== 文件版本历史：查询 + 一并导出（含历史版本）====================
+// 收集某批次相关的全部文件（当前版 + 历史版），按 logical_key 分组供前端展示
+function collectSessionFiles(sid) {
+  const projIds = new Set(db.store.projects.filter(p => p.session_id === sid).map(p => p.id));
+  return (db.store.files || []).filter(f =>
+    (f.project_id != null && projIds.has(f.project_id)) ||
+    f.import_session_id === sid ||
+    f.session_id === sid
+  );
+}
+app.get('/api/sessions/:id/version-history', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sid);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const files = collectSessionFiles(sid);
+  const groups = {};
+  files.forEach(f => { const k = f.logical_key || ('misc:' + f.id); (groups[k] = groups[k] || []).push(f); });
+  const out = Object.keys(groups).map(k => ({
+    logical_key: k,
+    import_type: groups[k][0].import_type,
+    versions: groups[k].slice().sort((a, b) => (b.version || 0) - (a.version || 0))
+      .map(f => ({ id: f.id, version: f.version, is_current: !!f.is_current, originalname: f.originalname, upload_time: f.upload_time, uploader_name: f.uploader_name, url: f.url }))
+  }));
+  res.json({ groups: out });
+});
+
+// 一键导出：当前版 + 所有历史版本，打包为 ZIP（附 manifest 清单）
+app.get('/api/sessions/:id/export-versions-zip', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sid);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const files = collectSessionFiles(sid);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="session_${sid}_all_versions.zip"`);
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  archive.on('error', e => { console.error('ZIP 导出失败:', e); if (!res.headersSent) res.status(500).end(); });
+  archive.on('warning', e => { if (e.code !== 'ENOENT') console.warn('ZIP warning:', e); });
+  archive.pipe(res);
+  const rows = [['version', 'is_current', 'import_type', 'logical_key', 'originalname', 'filename', 'upload_time', 'uploader']];
+  files.forEach(f => {
+    rows.push([f.version || 1, f.is_current ? 'current' : 'history', f.import_type || '', f.logical_key || '', f.originalname || '', f.filename || '', f.upload_time || '', f.uploader_name || '']);
+    const fp = path.join(UPLOAD_DIR, f.filename);
+    if (f.filename && fs.existsSync(fp)) {
+      const safeName = `${f.version || 1}_${f.is_current ? 'cur' : 'hist'}_${f.filename}`.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_');
+      archive.file(fp, { name: safeName });
+    }
+  });
+  const csv = '﻿' + rows.map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  archive.append(csv, { name: 'manifest.csv' });
+  archive.finalize();
+});
+
 // ==================== 离线评估表（专家评估示例）批量导入 ====================
 // 「线上线下双轨」：把线下填好的 per-project 成本估算表（含「项目基本信息」+ 明细 sheet）批量导入，
 // 按 项目编号(主)/项目名称(次) 在批次内匹配系统项目，自动写入 cost_summary，回灌到评审结果汇总表。
@@ -2446,7 +2568,7 @@ app.post('/api/sessions/:id/import-offline-eval', auth(['admin', 'rd']), offline
   if (!files.length) return res.status(400).json({ error: '未收到文件' });
   const projects = db.store.projects.filter(p => p.session_id === sid);
   const reports = [];
-  let imported = 0;
+  let imported = 0, updatedFieldsTotal = 0;
   for (const f of files) {
     const realName = decodeFilename(f.originalname);
     const rep = { file: realName, matched: false };
@@ -2470,30 +2592,43 @@ app.post('/api/sessions/:id/import-offline-eval', auth(['admin', 'rd']), offline
         continue;
       }
       const cs = pp.cost_summary || {};
-      const updated = [];
-      // 项目级字段
-      if (pp.is_digital !== undefined && target.is_digital !== pp.is_digital) { target.is_digital = pp.is_digital; updated.push('是否数字化'); }
-      ['business_direction', 'business_sub_direction', 'product_direction'].forEach(k => {
-        if (pp[k] && target[k] !== pp[k]) { target[k] = pp[k]; updated.push(k); }
+      const changes = [];
+      // 项目级字段：仅当新表明确提供该字段、且与现有值不同才更新（不整体覆盖、不删项目）
+      const scalarFields = ['is_digital', 'business_direction', 'business_sub_direction', 'product_direction', 'biz_department', 'project_type', 'contract_amount'];
+      scalarFields.forEach(k => {
+        if (pp[k] === undefined || pp[k] === null || pp[k] === '') return;
+        const nv = (k === 'contract_amount') ? Number(pp[k]) : pp[k];
+        if (target[k] !== nv) { target[k] = nv; changes.push(k); }
       });
-      if (code && !target.project_code) { target.project_code = code; updated.push('项目编号'); }
-      if (pp.biz_department && !target.biz_department) { target.biz_department = pp.biz_department; updated.push('承建部门'); }
-      if (pp.project_type && !target.project_type) { target.project_type = pp.project_type; updated.push('项目类型'); }
-      if ((target.contract_amount == null || Number(target.contract_amount) === 0) && pp.contract_amount) {
-        target.contract_amount = pp.contract_amount; updated.push('合同额');
+      // 成本汇总：key 级 diff，仅更新变化子项，保留旧表未提供项
+      if (Object.keys(cs).length) {
+        target.cost_summary = target.cost_summary || {};
+        Object.keys(cs).forEach(kk => {
+          const nv = cs[kk];
+          if (target.cost_summary[kk] !== nv) { target.cost_summary[kk] = nv; changes.push('cost_summary.' + kk); }
+        });
+        snapshotPre(target);
       }
-      // 成本汇总
-      target.cost_summary = cs;
-      snapshotPre(target);
-      updated.push('cost_summary');
+      // 离线评估表文件版本化（来者为准，旧版留盘；不删除项目）
+      const fext = path.extname(realName);
+      const vfile = {
+        id: db.nextId(db.store.files), project_id: target.id, session_id: sid,
+        filename: f.filename, originalname: realName,
+        file_seq: 0, file_type: fext.slice(1), file_category: 'offline_eval', auto_detected: false,
+        uploader_id: req.user.id, uploader_name: req.user.real_name || req.user.username,
+        url: `/uploads/${f.filename}`, description: '离线评估表导入', upload_time: new Date().toISOString()
+      };
+      stampFileVersion(vfile, `offline_eval:${sid}:${target.id}`, 'offline_eval', sid);
+      db.store.files.push(vfile);
       target.updated_at = new Date().toISOString();
-      db.logWorkflow(target.id, 'import_offline_eval', `导入离线评估表[${realName}]，更新 ${updated.join('/')}`, req.user.id);
+      db.logWorkflow(target.id, 'import_offline_eval', `导入离线评估表[${realName}]，更新字段 ${changes.join('/') || '无'}`, req.user.id);
       rep.matched = true;
       rep.project_id = target.id;
       rep.project_name = target.project_name;
-      rep.updated = updated;
+      rep.updated = changes;
       rep.warnings = parsed.warnings || [];
       imported++;
+      updatedFieldsTotal += changes.length;
     } catch (e) {
       rep.error = '解析失败：' + (e && e.message);
       reports.push(rep);
@@ -2502,7 +2637,7 @@ app.post('/api/sessions/:id/import-offline-eval', auth(['admin', 'rd']), offline
     reports.push(rep);
   }
   db.save();
-  res.json({ imported, total: files.length, reports });
+  res.json({ imported, total: files.length, updated_fields: updatedFieldsTotal, reports });
 });
 
 // ==================== 年度评审结果汇总（协同查看 / 编辑 / 评论）====================
@@ -3335,5 +3470,18 @@ app.use((err, req, res, next) => {
 });
 
 function startServer() {
+  // 存量文件归一化：本功能上线前的文件没有版本字段，默认视为"当前版 v1"，避免全部被误判为历史版
+  try {
+    let patched = 0;
+    (db.store.files || []).forEach(f => {
+      if (f.is_current === undefined) f.is_current = true;
+      if (f.version === undefined) f.version = 1;
+      if (f.logical_key === undefined) f.logical_key = null;
+      if (f.replaced_by === undefined) f.replaced_by = null;
+      if (f.import_type === undefined) f.import_type = null;
+      patched++;
+    });
+    if (patched) { db.save(); console.log(`[启动] 已归一化 ${patched} 个存量文件为当前版 v1`); }
+  } catch (e) { console.error('[启动] 存量文件归一化失败:', e && e.message); }
   app.listen(PORT, () => console.log(`✅ 经济评审后端 v4 已启动 (端口 ${PORT}, 驱动 ${config.dbDriver})`));
 }
