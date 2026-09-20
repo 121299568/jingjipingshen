@@ -27,7 +27,37 @@ const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // 数据载入（json/memory 同步完成，mysql 异步从库载入）。载入成功后再启动 HTTP 监听。
-db.load().then(startServer).catch(err => {
+// 数据载入（json/memory 同步完成，mysql 异步从库载入）。载入成功后再启动 HTTP 监听。
+//
+// 2026-09-20 改造：原实现为 db.load() 失败即 process.exit(1)。
+// 机器重启时 PM2 往往先于 MySQL 完成初始化而拉起本进程，此时加载必然失败并自杀，
+// 快速连败会耗尽 PM2 的重启配额，服务随后彻底躺平 —— 表现为「重启后 lnsoft 打不开」。
+// 改为指数退避重试：最多 12 次、累计约 84 秒，足以覆盖 MySQL 冷启动时间。
+const LOAD_MAX_ATTEMPTS = 12;
+const LOAD_BASE_DELAY_MS = 2000;
+
+async function loadDataWithRetry() {
+  let lastErr;
+  for (let attempt = 1; attempt <= LOAD_MAX_ATTEMPTS; attempt++) {
+    try {
+      await db.load();
+      return;
+    } catch (err) {
+      lastErr = err;
+      const delay = Math.min(LOAD_BASE_DELAY_MS * attempt, 8000);
+      console.error(
+        `[启动] 数据加载失败（第 ${attempt}/${LOAD_MAX_ATTEMPTS} 次）：${err && err.message}；${delay}ms 后重试`
+      );
+      if (attempt < LOAD_MAX_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  console.error('[启动失败] 数据加载重试次数耗尽，服务未启动:', lastErr && lastErr.message);
+  process.exit(1);
+}
+
+loadDataWithRetry().then(startServer).catch(err => {
   console.error('[启动失败] 数据加载出错，服务未启动:', err && err.message);
   process.exit(1);
 });
