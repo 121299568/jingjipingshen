@@ -2162,12 +2162,15 @@ function renderWorkloadProjectTable(d){
     };
     // 异常判定：用于行首红色标记、问题单元格高亮与「只看异常」筛选
     const ca=Number(p.contract_amount)||0;
+    const iec=(p.internal_estimated_cost!=null&&p.internal_estimated_cost!=='')?Number(p.internal_estimated_cost):null;
     const prRaw=cs.profit_rate!=null?Number(cs.profit_rate):null;
     const anom=[];
     if(!(ca>0)) anom.push('合同额为 0 或缺失');
     if(ca>0&&tc>ca) anom.push('总成本估算 ¥'+tc.toLocaleString()+' 超过合同额 ¥'+ca.toLocaleString());
     if(prRaw!=null&&prRaw<0) anom.push('估算利润率为负（'+(Math.round(prRaw*10000)/100)+'%）');
+    if(iec!=null&&tc>iec) anom.push('成本估算 ¥'+tc.toLocaleString()+' 超过内部填报预估 ¥'+iec.toLocaleString());
     if(anom.length)anomalyCount++;
+    const costBad=(ca>0&&tc>ca)||(iec!=null&&tc>iec);
     const rowTip=anom.length?' data-tip="⚠ 需关注：'+esc(anom.join('；'))+'"':'';
     let cells='<td class="wl-freeze wl-num"'+rowTip+'>'+row.idx+'</td>';
     let nameCell='<td class="wl-freeze2 wl-name wl-txt"'+tipAttr(row.project_name,17)+'>';
@@ -2179,7 +2182,7 @@ function renderWorkloadProjectTable(d){
       const cls=(c.detail?'wl-detail ':'')+(g.cls||'')+' ';
       if(c.money){
         const n=Number(v)||0;
-        const bad=(c.k==='contract_amount'&&ca<=0)||(c.k==='total_cost'&&ca>0&&tc>ca);
+        const bad=(c.k==='contract_amount'&&ca<=0)||(c.k==='total_cost'&&costBad);
         const c2=cls+'wl-num'+(n===0?' wl-zero':'')+(bad?' wl-cell-bad':'');
         cells+='<td class="'+c2+'">¥'+n.toLocaleString()+'</td>';
       } else if(c.pct){
