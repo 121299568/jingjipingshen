@@ -3267,7 +3267,9 @@ app.post('/api/sessions/:id/expert-invites', auth(['admin', 'rd']), (req, res) =
     db.store.expertInvites.push(inv);
     results.push({
       invite_id: inv.id, user_id: user.id, real_name: user.real_name, created_user: createdUser,
-      link: base ? (base + '/expert.html?k=' + token) : ('/expert.html?k=' + token),
+      link: inviteShortLink(req, inv),
+      long_link: base ? (base + '/expert.html?k=' + token) : ('/expert.html?k=' + token),
+      short_code: inv.short_code,
       expires_at: inv.expires_at, session_name: session.name
     });
   }
@@ -3293,7 +3295,9 @@ app.get('/api/sessions/:id/expert-invites', auth(['admin', 'rd']), (req, res) =>
       expires_at: i.expires_at, created_at: i.created_at,
       last_access_at: i.last_access_at || null, access_count: i.access_count || 0,
       submit_count: i.submit_count || 0, last_submit_at: i.last_submit_at || null,
-      project_ids: i.project_ids || null
+      project_ids: i.project_ids || null,
+      short_code: i.short_code || null,
+      link: i.short_code ? inviteShortLink(req, i) : null
     }));
   res.json({ session_id: sid, invites: list });
 });
@@ -3310,10 +3314,50 @@ app.post('/api/expert-invites/:iid/revoke', auth(['admin', 'rd']), (req, res) =>
 });
 
 // ---------- 以下 3 个接口供专家免登录页面调用，不校验 JWT，只校验链接令牌 ----------
-app.get('/api/expert-invite/:token', (req, res) => {
-  const inv = findInviteByToken(req.params.token);
+// ---------- 专家定向链接：短链 ----------
+// 短码用「易读字符集」（去掉 0/O/1/l/i），8 位足够（31^8 ≈ 8.5e11），短且不便猜测。
+const SHORT_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
+function newShortCode(len) {
+  const n = len || 8, buf = crypto.randomBytes(n);
+  let s = '';
+  for (let i = 0; i < n; i++) s += SHORT_ALPHABET[buf[i] % SHORT_ALPHABET.length];
+  return s;
+}
+function ensureShortCode(inv) {
+  if (inv.short_code) return inv.short_code;
+  const all = db.store.expertInvites || [];
+  for (let i = 0; i < 6; i++) {
+    const c = newShortCode(8);
+    if (!all.some(x => x.short_code === c)) { inv.short_code = c; return c; }
+  }
+  inv.short_code = newShortCode(12);
+  return inv.short_code;
+}
+function findInviteByShortCode(code) {
+  const c = String(code || '');
+  if (c.length < 4 || c.length > 80) return null;
+  return (db.store.expertInvites || []).find(i => i.short_code && i.short_code === c) || null;
+}
+// 短链基地址：默认与系统同域（链接短、且不出现令牌）；配置 EXPERT_SHORT_BASE 换成独立短域后，
+// 专家侧完全看不到主站域名（需先为该域名加 DNS 解析并签发证书）。
+function inviteShortBase(req) {
+  const b = process.env.EXPERT_SHORT_BASE || '';
+  if (b) return b.replace(/\/+$/, '');
+  return inviteBaseUrl(req);
+}
+function inviteShortLink(req, inv) {
+  return inviteShortBase(req) + '/e/' + ensureShortCode(inv);
+}
+
+function inviteAuthOk(res, inv) {
   const state = inviteState(inv);
-  if (state !== 'active') return res.status(410).json({ error: INVITE_STATE_MSG[state], state });
+  if (state !== 'active') { res.status(410).json({ error: INVITE_STATE_MSG[state], state }); return false; }
+  return true;
+}
+
+// 下面三个处理体被「长令牌」与「短码」两套路由共用（短链让地址栏不出现令牌，也不暴露主站路径）
+function inviteInfo(req, res, inv) {
+  if (!inviteAuthOk(res, inv)) return;
   const session = db.store.reviewSessions.find(s => s.id === inv.session_id);
   const projects = inviteScopedProjects(inv).map(p => inviteProjectView(inv, p));
   const myEst = db.store.expertEstimates.filter(e => e.expert_id === inv.user_id);
@@ -3334,12 +3378,13 @@ app.get('/api/expert-invite/:token', (req, res) => {
     },
     projects
   });
-});
+}
 
-app.get('/api/expert-invite/:token/projects/:pid', (req, res) => {
-  const inv = findInviteByToken(req.params.token);
-  const state = inviteState(inv);
-  if (state !== 'active') return res.status(410).json({ error: INVITE_STATE_MSG[state], state });
+app.get('/api/expert-invite/:token', (req, res) => inviteInfo(req, res, findInviteByToken(req.params.token)));
+app.get('/api/e/:code', (req, res) => inviteInfo(req, res, findInviteByShortCode(req.params.code)));
+
+function inviteProjectDetail(req, res, inv) {
+  if (!inviteAuthOk(res, inv)) return;
   const pid = parseInt(req.params.pid);
   if (!inviteScopedProjects(inv).some(p => p.id === pid)) {
     return res.status(403).json({ error: '该项目不在您的评估范围内' });
@@ -3366,12 +3411,13 @@ app.get('/api/expert-invite/:token/projects/:pid', (req, res) => {
       { key: 'subcontract', label: '专业分包' }
     ]
   });
-});
+}
 
-app.post('/api/expert-invite/:token/estimates', (req, res) => {
-  const inv = findInviteByToken(req.params.token);
-  const state = inviteState(inv);
-  if (state !== 'active') return res.status(410).json({ error: INVITE_STATE_MSG[state], state });
+app.get('/api/expert-invite/:token/projects/:pid', (req, res) => inviteProjectDetail(req, res, findInviteByToken(req.params.token)));
+app.get('/api/e/:code/projects/:pid', (req, res) => inviteProjectDetail(req, res, findInviteByShortCode(req.params.code)));
+
+function inviteSubmit(req, res, inv) {
+  if (!inviteAuthOk(res, inv)) return;
   const p = db.store.projects.find(x => x.id === parseInt(req.body.project_id));
   if (!p || !inviteScopedProjects(inv).some(x => x.id === p.id)) {
     return res.status(403).json({ error: '该项目不在您的评估范围内' });
@@ -3423,6 +3469,19 @@ app.post('/api/expert-invite/:token/estimates', (req, res) => {
     items: saved.map(e => ({ work_item_id: e.work_item_id, days: Number(e.days), updated_at: e.updated_at || e.submitted_at })),
     skipped
   });
+}
+
+app.post('/api/expert-invite/:token/estimates', (req, res) => inviteSubmit(req, res, findInviteByToken(req.params.token)));
+app.post('/api/e/:code/estimates', (req, res) => inviteSubmit(req, res, findInviteByShortCode(req.params.code)));
+
+// 短链落地页：直接把专家评估页吐出来（不跳转），地址栏始终显示 /e/<code>，
+// 专家既看不到主站路径，也看不到长令牌。页面自身按路径里的短码调用 /api/e/<code>。
+app.get('/e/:code', (req, res) => {
+  const code = String(req.params.code || '');
+  if (!/^[A-Za-z0-9_-]{4,80}$/.test(code)) return res.status(404).send('短链无效');
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  res.sendFile(path.join(FRONTEND_DIR, 'expert.html'), err => { if (err) res.status(500).send('页面加载失败'); });
 });
 
 // ==================== 统计分析 ====================

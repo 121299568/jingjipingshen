@@ -2126,14 +2126,15 @@ function renderExpertInvites(){
   }
   document.getElementById('eiBody').innerHTML=rows.map(r=>{
     const inv=byUser[r.user_id];
-    const hasLink=inv&&eiLinkStore[inv.id];
+    const link=inv?eiLinkOf(inv.id):'';
     let acts='<button class="btn btn-sm btn-outline-primary" onclick="eiCreate('+r.user_id+')">'
       +(inv?'重新生成':'生成链接')+'</button>';
-    if(hasLink) acts+=' <button class="btn btn-sm btn-outline-secondary" onclick="eiCopy('+inv.id+')">复制</button>'
+    if(link) acts+=' <button class="btn btn-sm btn-outline-secondary" onclick="eiCopy('+inv.id+')">复制</button>'
       +' <button class="btn btn-sm btn-outline-secondary" onclick="eiQr('+inv.id+')">二维码</button>';
     if(inv&&inv.state==='active') acts+=' <button class="btn btn-sm btn-outline-danger" onclick="eiRevoke('+inv.id+')">撤销</button>';
     return '<tr>'
-      +'<td>'+esc(r.name)+' <span class="text-muted small">'+(r.role==='accountant'?'会计师':'专家')+'</span></td>'
+      +'<td>'+esc(r.name)+' <span class="text-muted small">'+(r.role==='accountant'?'会计师':'专家')+'</span>'
+        +(inv&&inv.short_code?'<div class="text-muted small"><code>/e/'+esc(inv.short_code)+'</code></div>':'')+'</td>'
       +'<td class="small">'+esc((inv&&inv.contact)||'—')+'</td>'
       +'<td>'+(inv?eiStateBadge(inv.state):eiStateBadge(''))+'</td>'
       +'<td class="small">'+(inv?eiFmt(inv.expires_at):'—')+'</td>'
@@ -2142,11 +2143,19 @@ function renderExpertInvites(){
       +'<td>'+acts+'</td></tr>';
   }).join('');
 }
+// 短链可从服务端重新取回（令牌只存哈希、取不回，但短码是明文存的），
+// 所以关闭弹窗后仍能复制；已撤销/过期的邀请不再给链接。
+function eiLinkOf(inviteId){
+  if(eiLinkStore[inviteId]) return eiLinkStore[inviteId];
+  const d=eiData||{invites:[]};
+  const inv=d.invites.find(x=>x.id===inviteId);
+  return (inv&&inv.state==='active'&&inv.link)?inv.link:'';
+}
 function renderEiLinkStore(){
   const ids=Object.keys(eiLinkStore);
   const box=document.getElementById('eiLinks');
   if(!ids.length){box.innerHTML='';return;}
-  box.innerHTML='<div class="fw-bold small mb-2">本次生成的链接（关闭弹窗后不再显示明文，可重新生成）</div>'+
+  box.innerHTML='<div class="fw-bold small mb-2">本次生成的短链（关闭弹窗后仍可复制，列表里也会显示短码）</div>'+
     ids.map(id=>{
       const l=eiLinkStore[id];
       return '<div class="border rounded p-2 mb-2"><div class="d-flex gap-2 align-items-center flex-wrap">'
@@ -2197,7 +2206,8 @@ async function eiRevoke(inviteId){
   }catch(e){alert('撤销出错：'+e.message);}
 }
 function eiCopy(inviteId){
-  const l=eiLinkStore[inviteId]; if(!l){alert('该链接的明文仅在生成时显示，请点「重新生成」获取新链接。');return;}
+  const l=eiLinkOf(inviteId);
+  if(!l){alert('该链接已撤销或已过期，请点「重新生成」获取新链接。');return;}
   if(navigator.clipboard&&navigator.clipboard.writeText){
     navigator.clipboard.writeText(l).then(()=>eiToast('链接已复制'),()=>eiCopyFallback(l));
   }else eiCopyFallback(l);
@@ -2208,7 +2218,7 @@ function eiCopyFallback(l){
   document.body.removeChild(ta);
 }
 function eiQr(inviteId){
-  const l=eiLinkStore[inviteId]; if(!l){alert('请先重新生成链接后再出二维码。');return;}
+  const l=eiLinkOf(inviteId); if(!l){alert('该链接已撤销或已过期，请先重新生成。');return;}
   const box=document.getElementById('eiQr_'+inviteId)||document.getElementById('eiLinks');
   const draw=()=>{
     box.innerHTML='<div class="small text-muted mb-1">二维码（专家扫码即可打开）</div>';
