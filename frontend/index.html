@@ -2433,7 +2433,7 @@ async function doSummaryImport(){
     const r=await fetch(API+'/sessions/import-summary',{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:fd});
     const data=await r.json();
     if(!r.ok||data.error){statusEl.innerHTML='<div class="alert alert-danger">导入失败：'+(esc(data.error)||'未知错误')+'</div>';return;}
-    statusEl.innerHTML='<div class="alert alert-success">导入成功！创建批次「'+esc(data.session_name)+'」，新增项目 '+data.created+' 个（跳过重复 '+data.skipped+' 个，表格共 '+data.total+' 行）。</div>';
+    statusEl.innerHTML='<div class="alert alert-success">导入成功！批次「'+esc(data.session_name)+'」，新增项目 '+data.created+' 个（已存在未变 '+data.unchanged+' 个，表格共 '+data.total+' 行）。</div>';
     setTimeout(()=>{const m=document.getElementById('summaryImportModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();loadAll();},1800);
   }catch(e){statusEl.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';}
 }
