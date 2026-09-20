@@ -81,6 +81,28 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
   .login-card{width:90%;padding:24px}
   .nav-item{font-size:15px;padding:14px 20px}
 }
+/* ===== 侧边导航：固定（占位）/ 自动收缩（悬浮） ===== */
+@media(min-width:769px){
+  .sidebar{width:56px;transition:width .18s ease,box-shadow .18s ease}
+  .main{margin-left:56px;transition:margin-left .18s ease}
+  /* 固定态：展开并占位 */
+  body.nav-pinned .sidebar{width:220px;box-shadow:none}
+  body.nav-pinned .main{margin-left:220px}
+  /* 自动收缩态：hover 时悬浮展开（覆盖内容，不推挤布局） */
+  body:not(.nav-pinned) .sidebar.hover-expand{width:220px;z-index:150;box-shadow:6px 0 22px rgba(0,0,0,.35)}
+  /* 收缩时只保留图标 */
+  .sidebar .nav-label{display:none;white-space:nowrap;overflow:hidden}
+  body.nav-pinned .sidebar .nav-label,.sidebar.hover-expand .nav-label{display:inline}
+  .sidebar .nav-item{justify-content:center;padding-left:0;padding-right:0}
+  body.nav-pinned .sidebar .nav-item,.sidebar.hover-expand .nav-item{justify-content:flex-start;padding-left:20px;padding-right:20px}
+  .sidebar-brand{white-space:nowrap;overflow:hidden;text-overflow:clip}
+  .sidebar .nav-pin{justify-content:center}
+  body.nav-pinned .sidebar .nav-pin,.sidebar.hover-expand .nav-pin{justify-content:flex-start;padding-left:20px}
+}
+.nav-pin{cursor:pointer;opacity:.7;transition:opacity .15s}
+.nav-pin:hover{opacity:1}
+/* ===== 即时悬浮提示（替代原生 title 的 1 秒延迟） ===== */
+#tipBox{position:fixed;z-index:3000;max-width:400px;background:#212529;color:#fff;font-size:12px;line-height:1.6;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.32);pointer-events:none;display:none;white-space:pre-wrap;word-break:break-all}
 </style>
 </head>
 <body>
@@ -102,16 +124,19 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 <!-- MAIN APP -->
 <div id="mainApp" class="app-wrap" style="display:none;min-height:100vh">
   <aside class="sidebar">
-    <div class="sidebar-brand"><i class="bi bi-calculator"></i> 经济评审系统</div>
-    <div class="nav-item active" data-page="dashboard"><i class="bi bi-speedometer2"></i>&nbsp;工作台</div>
-    <div class="nav-item" data-page="sessions"><i class="bi bi-calendar-check"></i>&nbsp;评审批次</div>
-    <div class="nav-item" data-page="projects"><i class="bi bi-folder2-open"></i>&nbsp;项目资料</div>
-    <div class="nav-item" data-page="cost-analysis"><i class="bi bi-graph-down-arrow"></i>&nbsp;工作量评估</div>
-    <div class="nav-item" data-page="stats"><i class="bi bi-bar-chart"></i>&nbsp;统计分析</div>
-    <div class="nav-item" data-page="workload-summary" id="nav-workload-summary"><i class="bi bi-clipboard-data"></i>&nbsp;评估汇总</div>
-    <div class="nav-item" data-page="annual"><i class="bi bi-calendar2-week"></i>&nbsp;年度汇总</div>
-    <div class="nav-item" data-page="users" id="nav-users"><i class="bi bi-people"></i>&nbsp;用户管理</div>
-    <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>&nbsp;退出登录</div>
+    <div class="d-flex justify-content-between align-items-center">
+      <div class="sidebar-brand"><i class="bi bi-calculator"></i><span class="nav-label">&nbsp;经济评审系统</span></div>
+      <div class="nav-item nav-pin" id="navPinBtn" onclick="toggleNavPin(event)" data-tip="固定 / 取消固定侧边栏"><i class="bi bi-pin-angle"></i></div>
+    </div>
+    <div class="nav-item active" data-page="dashboard"><i class="bi bi-speedometer2"></i><span class="nav-label">&nbsp;工作台</span></div>
+    <div class="nav-item" data-page="sessions"><i class="bi bi-calendar-check"></i><span class="nav-label">&nbsp;评审批次</span></div>
+    <div class="nav-item" data-page="projects"><i class="bi bi-folder2-open"></i><span class="nav-label">&nbsp;项目资料</span></div>
+    <div class="nav-item" data-page="cost-analysis"><i class="bi bi-graph-down-arrow"></i><span class="nav-label">&nbsp;工作量评估</span></div>
+    <div class="nav-item" data-page="stats"><i class="bi bi-bar-chart"></i><span class="nav-label">&nbsp;统计分析</span></div>
+    <div class="nav-item" data-page="workload-summary" id="nav-workload-summary"><i class="bi bi-clipboard-data"></i><span class="nav-label">&nbsp;评估汇总</span></div>
+    <div class="nav-item" data-page="annual"><i class="bi bi-calendar2-week"></i><span class="nav-label">&nbsp;年度汇总</span></div>
+    <div class="nav-item" data-page="users" id="nav-users"><i class="bi bi-people"></i><span class="nav-label">&nbsp;用户管理</span></div>
+    <div class="nav-item text-danger mt-4" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i><span class="nav-label">&nbsp;退出登录</span></div>
   </aside>
 
   <button class="menu-toggle" onclick="toggleSidebar()" aria-label="菜单"><i class="bi bi-list"></i></button>
@@ -650,6 +675,8 @@ document.addEventListener('DOMContentLoaded',()=>{
 function showMainApp(){
   document.getElementById('loginPage').style.display='none';
   document.getElementById('mainApp').style.display='block';
+  initNavPin();          // 侧边栏固定/自动收缩（记住上次选择）
+  initInstantTips();     // 即时悬浮提示（替代原生 title）
   document.getElementById('currentUserDisplay').textContent=currentUser.username+' ('+getRoleName(currentUser.role)+')'+(currentUser.business_dept?' ['+currentUser.business_dept+']':'');
   // 评估汇总页仅管理员/研发可见
   const navWorkload=document.getElementById('nav-workload-summary');
@@ -1052,11 +1079,12 @@ function renderProjects(){
       const lastOp=p.last_operation_at?new Date(p.last_operation_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
       // 导入校验告警（仅提示不拦截）：估算表与汇总表基线数字对不上时 ⚠ 显示，悬停看详情
       const warns=p.import_warnings&&p.import_warnings.length?p.import_warnings:[];
-      const warnTip=warns.map(w=>((w.file?'【'+w.file+'】':'')+(w.messages||[]).join('；'))).join('  ');
-      const warnTag=warns.length?' <span class="text-warning" style="cursor:help" title="导入校验告警（已正常导入，请人工核对）：'+esc(warnTip)+'"><i class="bi bi-exclamation-triangle-fill"></i>'+warns.length+'</span>':'';
+      // 用 data-tip 走即时悬浮提示（原生 title 有约 1 秒延迟，手感差）
+      const warnTip=warns.map(w=>((w.file?'【'+w.file+'】':'')+((w.messages||[]).join('；')))).join('\n');
+      const warnTag=warns.length?' <span class="text-warning" style="cursor:help" data-tip="导入校验告警（已正常导入，请人工核对）：\n'+esc(warnTip)+'"><i class="bi bi-exclamation-triangle-fill"></i>'+warns.length+'</span>':'';
       return '<tr>'+
         '<td>'+String(pi+1).padStart(2,'0')+'</td>'+
-        '<td title="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+warnTag+'</td>'+
+        '<td data-tip="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+warnTag+'</td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
         '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
         '<td><span class="badge '+statusBg+'">'+projectStatusLabel(p.status)+'</span></td>'+
@@ -2677,6 +2705,63 @@ async function doFileMgmtDelete(fileId,btn){
   }catch(e){msg.innerHTML='<span class="text-danger">删除失败：'+esc(e.message)+'</span>';}
   renderFileMgmt();
 }
+// ==================== 侧边栏固定 / 自动收缩（悬浮） ====================
+function initNavPin(){
+  try{
+    const pinned=localStorage.getItem('navPinned')==='1';
+    document.body.classList.toggle('nav-pinned',pinned);
+    updatePinIcon();
+    const sb=document.querySelector('.sidebar');
+    if(sb&&!sb.dataset.pinBound){
+      sb.dataset.pinBound='1';
+      sb.addEventListener('mouseenter',()=>{ if(!document.body.classList.contains('nav-pinned')) sb.classList.add('hover-expand'); });
+      sb.addEventListener('mouseleave',()=>{ sb.classList.remove('hover-expand'); });
+    }
+  }catch(e){}
+}
+function toggleNavPin(e){
+  if(e){e.stopPropagation();e.preventDefault();}
+  const p=!document.body.classList.contains('nav-pinned');
+  try{localStorage.setItem('navPinned',p?'1':'0');}catch(_){}
+  document.body.classList.toggle('nav-pinned',p);
+  const sb=document.querySelector('.sidebar');if(sb)sb.classList.remove('hover-expand');
+  updatePinIcon();
+}
+function updatePinIcon(){
+  const b=document.getElementById('navPinBtn');if(!b)return;
+  const p=document.body.classList.contains('nav-pinned');
+  const i=b.querySelector('i');if(i)i.className=p?'bi bi-pin-angle-fill':'bi bi-pin-angle';
+  b.setAttribute('data-tip',p?'取消固定（改为自动收缩）':'固定展开侧边栏');
+}
+// ==================== 即时悬浮提示（鼠标移入即显示，无 1 秒延迟） ====================
+function initInstantTips(){
+  if(window.__tipBound)return;window.__tipBound=true;
+  const box=()=>document.getElementById('tipBox');
+  document.addEventListener('mouseover',e=>{
+    const t=e.target&&e.target.closest?e.target.closest('[data-tip]'):null;
+    if(!t)return;
+    const txt=t.getAttribute('data-tip');if(!txt)return;
+    const b=box();if(!b)return;
+    b.textContent=txt;b.style.display='block';
+    positionTip(t,b);
+  },true);
+  document.addEventListener('mouseout',e=>{
+    const t=e.target&&e.target.closest?e.target.closest('[data-tip]'):null;
+    if(!t)return;
+    const b=box();if(b)b.style.display='none';
+  },true);
+  window.addEventListener('scroll',()=>{const b=box();if(b)b.style.display='none';},true);
+}
+function positionTip(el,box){
+  const r=el.getBoundingClientRect();
+  box.style.left='0px';box.style.top='0px';
+  const bw=box.offsetWidth,bh=box.offsetHeight;
+  let left=r.left+r.width/2-bw/2;
+  left=Math.max(8,Math.min(left,window.innerWidth-bw-8));
+  let top=r.bottom+8;
+  if(top+bh>window.innerHeight-8)top=r.top-bh-8;
+  box.style.left=left+'px';box.style.top=Math.max(8,top)+'px';
+}
 function inferCatFront(name){
   if(/估算|概算|预算|成本|测算|评估|工作量|报价|cost.*estimat|estimat/i.test(name))return'estimation';
   if(/可研|可行性|feasib/i.test(name))return'feasibility';
@@ -2971,6 +3056,9 @@ async function postAnnualComment(){
     </div>
   </div></div>
 </div>
+
+<!-- 即时悬浮提示容器（无延迟，替代原生 title） -->
+<div id="tipBox"></div>
 
 <!-- 批次文件管理模态框 -->
 <div class="modal fade" id="fileManageModal" tabindex="-1">
