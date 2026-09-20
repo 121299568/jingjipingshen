@@ -428,6 +428,7 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
           <button class="btn btn-sm btn-outline-success" id="wlExportBtn" onclick="exportWorkloadSummary()" style="display:none"><i class="bi bi-download"></i> 导出本批次汇总表</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="exportVersionsZip()"><i class="bi bi-archive"></i> 导出全部版本(ZIP)</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="openVersionHistory()"><i class="bi bi-clock-history"></i> 历史版本</button>
+          <button class="btn btn-sm btn-outline-dark" onclick="openExpertInviteModal()"><i class="bi bi-link-45deg"></i> 专家评估链接</button>
         </div>
       </div>
       <div id="wlBatchFilter" class="mb-3"></div>
@@ -500,6 +501,9 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
             <option value="2027">2027 年</option>
           </select>
           <button class="btn btn-success btn-sm" onclick="exportAnnual()"><i class="bi bi-download"></i> 导出汇总表</button>
+          <button class="btn btn-primary btn-sm" id="annualKdocsBtn" onclick="pushAnnualToKdocs()"><i class="bi bi-cloud-arrow-up"></i> 同步到金山云文档</button>
+          <button class="btn btn-outline-secondary btn-sm" id="annualKdocsDryBtn" onclick="pushAnnualToKdocs(true)" data-tip="只打印将要写入的矩阵，不实际写入云文档"><i class="bi bi-search"></i> 干跑核对</button>
+          <span class="small text-muted" id="kdStatus"></span>
           <span class="small text-muted" id="annualUpdated"></span>
         </div>
       </div>
@@ -611,6 +615,53 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
     <div class="modal-footer">
       <button type="button" class="btn btn-outline-secondary" onclick="exportVersionsZip()"><i class="bi bi-archive"></i> 全部版本打包下载(ZIP)</button>
       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+    </div>
+  </div></div>
+</div>
+
+<div class="modal fade" id="expertInviteModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="mb-0"><i class="bi bi-link-45deg"></i> 专家定向评估链接</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-light border small mb-3">
+        一人一链，<b>链接即身份</b>：专家点开链接即可免登录填写工作量评估，无需账号密码。<br>
+        链接默认 30 天有效、可随时撤销；专家只能看到并评估分配给自己的项目，<b>看不到其他专家填的值</b>。
+      </div>
+      <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <span class="small text-muted" id="eiSessionName"></span>
+        <label class="small text-muted ms-auto">有效期</label>
+        <select class="form-select form-select-sm" id="eiDays" style="width:auto">
+          <option value="7">7 天</option>
+          <option value="14">14 天</option>
+          <option value="30" selected>30 天</option>
+          <option value="90">90 天</option>
+        </select>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadExpertInvites()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+      </div>
+      <div id="eiWarn" class="small text-danger mb-2"></div>
+      <div class="table-responsive border rounded">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light"><tr>
+            <th style="width:130px">专家</th><th style="width:130px">联系方式</th><th style="width:110px">链接状态</th>
+            <th style="width:150px">有效期至</th><th style="width:150px">最近访问</th><th style="width:80px">提交</th>
+            <th style="width:230px">操作</th>
+          </tr></thead>
+          <tbody id="eiBody"><tr><td colspan="7" class="text-muted text-center">加载中…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="card card-custom mt-3"><div class="card-body">
+        <div class="fw-bold small mb-2">添加外部专家（无需系统账号）</div>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+          <input class="form-control form-control-sm" id="eiNewName" placeholder="专家姓名" style="width:150px">
+          <input class="form-control form-control-sm" id="eiNewContact" placeholder="手机 / 邮箱（可选）" style="width:190px">
+          <button class="btn btn-sm btn-primary" onclick="createExternalInvite()"><i class="bi bi-plus-lg"></i> 生成链接</button>
+          <span class="small text-muted">自动为其建立一个不可登录的专家账号，并纳入本批次 5 人汇总口径</span>
+        </div>
+      </div></div>
+      <div id="eiLinks" class="mt-3"></div>
     </div>
   </div></div>
 </div>
@@ -838,7 +889,7 @@ function navigateTo(page){
     case'cost-analysis':updateCostSelect();renderCostAnalysis();break;
     case'stats':applyWorkReportGating();loadStatsRich();break;
     case'workload-summary':renderWorkloadSummary();break;
-    case'annual':renderAnnual();startAnnualTimer();break;
+    case'annual':renderAnnual();startAnnualTimer();loadKdocsStatus();break;
     case'users':renderUsers();loadUserGroups();loadPermissionOptions();break;
   }
 }
@@ -1991,6 +2042,168 @@ function clearWorkloadSummary(){
   document.getElementById('wlProjects').innerHTML='';
   document.getElementById('wlEmpty').style.display='block';
   document.getElementById('wlExportBtn').style.display='none';
+}
+/* ===== 专家定向评估链接（一人一链，免登录）===== */
+let eiSessionId=null, eiData=null, eiLinkStore={};
+function openExpertInviteModal(){
+  if(!wlSelectedSessionId){alert('请先在工作量评估汇总页选择一个批次');return;}
+  eiSessionId=String(wlSelectedSessionId);
+  const nameEl=document.getElementById('wlSessionName');
+  document.getElementById('eiSessionName').textContent='批次：'+((nameEl&&nameEl.textContent.replace(/^批次：/,''))||('#'+eiSessionId));
+  document.getElementById('eiWarn').textContent='';
+  document.getElementById('eiLinks').innerHTML='';
+  document.getElementById('eiBody').innerHTML='<tr><td colspan="7" class="text-muted text-center">加载中…</td></tr>';
+  new bootstrap.Modal(document.getElementById('expertInviteModal')).show();
+  loadExpertInvites();
+}
+async function loadExpertInvites(){
+  const sid=eiSessionId||wlSelectedSessionId; if(!sid)return;
+  try{
+    const[ar,ir]=await Promise.all([
+      fetch(API+'/sessions/'+sid+'/assignments',{headers:authH()}),
+      fetch(API+'/sessions/'+sid+'/expert-invites',{headers:authH()})
+    ]);
+    const assignments=ar.ok?await ar.json():[];
+    const invites=ir.ok?((await ir.json()).invites||[]):[];
+    eiData={assignments,invites};
+    renderExpertInvites();
+    renderEiLinkStore();
+  }catch(e){
+    document.getElementById('eiBody').innerHTML='<tr><td colspan="7" class="text-danger text-center">加载失败：'+esc(e.message)+'</td></tr>';
+  }
+}
+function eiStateBadge(state){
+  const m={active:['生效中','bg-success'],expired:['已过期','bg-secondary'],revoked:['已撤销','bg-danger'],superseded:['已换新','bg-secondary']};
+  const it=m[state]||['未生成','bg-light text-dark border'];
+  return '<span class="badge '+it[1]+'">'+it[0]+'</span>';
+}
+function eiFmt(t){return t?new Date(t).toLocaleString('zh-CN',{year:'2-digit',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';}
+function eiToast(msg){
+  let t=document.getElementById('eiToast');
+  if(!t){t=document.createElement('div');t.id='eiToast';
+    t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;z-index:4000;opacity:0;transition:opacity .2s;pointer-events:none';
+    document.body.appendChild(t);}
+  t.textContent=msg;t.style.opacity='1';
+  clearTimeout(eiToast._t);eiToast._t=setTimeout(()=>{t.style.opacity='0';},2200);
+}
+function eiExpertOf(userId){
+  const d=eiData||{assignments:[],invites:[]};
+  const a=d.assignments.find(x=>x.user_id===userId);
+  if(a) return {name:a.user_name,contact:''};
+  const i=d.invites.find(x=>x.user_id===userId);
+  return i?{name:i.expert_name,contact:i.contact||''}:null;
+}
+function renderExpertInvites(){
+  const d=eiData||{assignments:[],invites:[]};
+  const byUser={}; d.invites.forEach(i=>{ if(!byUser[i.user_id]||i.id>byUser[i.user_id].id) byUser[i.user_id]=i; });
+  const rows=[];
+  d.assignments.forEach(a=>rows.push({user_id:a.user_id,name:a.user_name,role:a.user_role}));
+  d.invites.forEach(i=>{ if(!rows.some(r=>r.user_id===i.user_id)) rows.push({user_id:i.user_id,name:i.expert_name,role:'expert'}); });
+  const evalCount=d.assignments.filter(a=>a.user_role==='expert'||a.user_role==='accountant').length;
+  if(evalCount>5) document.getElementById('eiWarn').textContent='⚠ 本批次已分配 '+evalCount+' 位评估人，5 人汇总口径只统计最早分配的 5 位，请确认名单。';
+  if(!rows.length){
+    document.getElementById('eiBody').innerHTML='<tr><td colspan="7" class="text-muted text-center py-3">本批次尚未分配评审专家，请先在批次设置里分配，或在下方添加外部专家。</td></tr>';
+    return;
+  }
+  document.getElementById('eiBody').innerHTML=rows.map(r=>{
+    const inv=byUser[r.user_id];
+    const hasLink=inv&&eiLinkStore[inv.id];
+    let acts='<button class="btn btn-sm btn-outline-primary" onclick="eiCreate('+r.user_id+')">'
+      +(inv?'重新生成':'生成链接')+'</button>';
+    if(hasLink) acts+=' <button class="btn btn-sm btn-outline-secondary" onclick="eiCopy('+inv.id+')">复制</button>'
+      +' <button class="btn btn-sm btn-outline-secondary" onclick="eiQr('+inv.id+')">二维码</button>';
+    if(inv&&inv.state==='active') acts+=' <button class="btn btn-sm btn-outline-danger" onclick="eiRevoke('+inv.id+')">撤销</button>';
+    return '<tr>'
+      +'<td>'+esc(r.name)+' <span class="text-muted small">'+(r.role==='accountant'?'会计师':'专家')+'</span></td>'
+      +'<td class="small">'+esc((inv&&inv.contact)||'—')+'</td>'
+      +'<td>'+(inv?eiStateBadge(inv.state):eiStateBadge(''))+'</td>'
+      +'<td class="small">'+(inv?eiFmt(inv.expires_at):'—')+'</td>'
+      +'<td class="small">'+(inv&&inv.last_access_at?eiFmt(inv.last_access_at)+' ('+(inv.access_count||0)+' 次)':'—')+'</td>'
+      +'<td class="small">'+(inv&&inv.submit_count?(inv.submit_count+' 项'):'—')+'</td>'
+      +'<td>'+acts+'</td></tr>';
+  }).join('');
+}
+function renderEiLinkStore(){
+  const ids=Object.keys(eiLinkStore);
+  const box=document.getElementById('eiLinks');
+  if(!ids.length){box.innerHTML='';return;}
+  box.innerHTML='<div class="fw-bold small mb-2">本次生成的链接（关闭弹窗后不再显示明文，可重新生成）</div>'+
+    ids.map(id=>{
+      const l=eiLinkStore[id];
+      return '<div class="border rounded p-2 mb-2"><div class="d-flex gap-2 align-items-center flex-wrap">'
+        +'<input class="form-control form-control-sm" style="max-width:520px" readonly value="'+esc(l)+'">'
+        +'<button class="btn btn-sm btn-primary" onclick="eiCopy('+id+')">复制链接</button>'
+        +'<button class="btn btn-sm btn-outline-secondary" onclick="eiQr('+id+')">二维码</button>'
+        +'<a class="btn btn-sm btn-outline-secondary" href="'+esc(l)+'" target="_blank">预览</a>'
+        +'</div><div class="mt-2" id="eiQr_'+id+'"></div></div>';
+    }).join('');
+}
+async function eiCreate(userId){
+  const days=parseInt(document.getElementById('eiDays').value)||30;
+  const info=userId?eiExpertOf(userId):null;
+  const experts=[{user_id:userId||undefined,real_name:info?info.name:undefined,contact:(info&&info.contact)||''}];
+  await eiPostInvites(experts,days);
+}
+async function eiPostInvites(experts,days){
+  try{
+    const r=await fetch(API+'/sessions/'+eiSessionId+'/expert-invites',{method:'POST',
+      headers:{'Content-Type':'application/json',...authH()},body:JSON.stringify({days,experts})});
+    const d=await r.json();
+    if(!r.ok){alert('生成失败：'+(d.error||'未知错误'));return;}
+    const failed=(d.invites||[]).filter(v=>v.error);
+    if(failed.length) alert('部分专家未能生成：'+failed.map(v=>(v.real_name||'')+' '+v.error).join('；'));
+    (d.invites||[]).forEach(v=>{ if(v.link) eiLinkStore[v.invite_id]=v.link; });
+    if(d.warning) document.getElementById('eiWarn').textContent='⚠ '+d.warning;
+    await loadExpertInvites();
+    if((d.invites||[]).some(v=>v.link)) eiToast('链接已生成，请复制后发给专家本人');
+  }catch(e){alert('生成出错：'+e.message);}
+}
+async function createExternalInvite(){
+  const name=(document.getElementById('eiNewName').value||'').trim();
+  const contact=(document.getElementById('eiNewContact').value||'').trim();
+  if(!name){alert('请填写外部专家姓名');return;}
+  const days=parseInt(document.getElementById('eiDays').value)||30;
+  await eiPostInvites([{real_name:name,contact:contact}],days);
+  document.getElementById('eiNewName').value='';document.getElementById('eiNewContact').value='';
+}
+async function eiRevoke(inviteId){
+  if(!confirm('确定撤销该链接？撤销后专家将无法再提交评估（已提交的数据不受影响）。'))return;
+  try{
+    const r=await fetch(API+'/expert-invites/'+inviteId+'/revoke',{method:'POST',headers:authH()});
+    const d=await r.json();
+    if(!r.ok){alert('撤销失败：'+(d.error||'未知错误'));return;}
+    delete eiLinkStore[inviteId];
+    await loadExpertInvites();
+    eiToast('链接已撤销');
+  }catch(e){alert('撤销出错：'+e.message);}
+}
+function eiCopy(inviteId){
+  const l=eiLinkStore[inviteId]; if(!l){alert('该链接的明文仅在生成时显示，请点「重新生成」获取新链接。');return;}
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(l).then(()=>eiToast('链接已复制'),()=>eiCopyFallback(l));
+  }else eiCopyFallback(l);
+}
+function eiCopyFallback(l){
+  const ta=document.createElement('textarea');ta.value=l;document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');eiToast('链接已复制');}catch(_){prompt('请手动复制下面的链接：',l);}
+  document.body.removeChild(ta);
+}
+function eiQr(inviteId){
+  const l=eiLinkStore[inviteId]; if(!l){alert('请先重新生成链接后再出二维码。');return;}
+  const box=document.getElementById('eiQr_'+inviteId)||document.getElementById('eiLinks');
+  const draw=()=>{
+    box.innerHTML='<div class="small text-muted mb-1">二维码（专家扫码即可打开）</div>';
+    const holder=document.createElement('div');box.appendChild(holder);
+    try{ new QRCode(holder,{text:l,width:176,height:176}); }
+    catch(e){ box.innerHTML='<div class="small text-danger">二维码生成失败，请直接复制链接发送。</div>'; }
+  };
+  if(window.QRCode){draw();return;}
+  box.innerHTML='<div class="small text-muted">正在加载二维码组件…</div>';
+  const s=document.createElement('script');
+  s.src='https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+  s.onload=draw;
+  s.onerror=()=>{box.innerHTML='<div class="small text-muted">当前网络无法加载二维码组件，请用「复制链接」发给专家。</div>';};
+  document.head.appendChild(s);
 }
 async function selectWlSession(sid){
   wlSelectedSessionId=String(sid);
@@ -3276,6 +3489,48 @@ async function saveAnnualRow(pid){
     if(!r.ok){const e=await r.json().catch(()=>({}));alert('保存失败：'+(e.error||r.status));return;}
     renderAnnual();
   }catch(e){alert('保存异常：'+e.message);}
+}
+/* ===== 金山云文档同步（年度经济评审结果汇总表）===== */
+async function loadKdocsStatus(){
+  const el=document.getElementById('kdStatus'); if(!el)return;
+  try{
+    const r=await fetch(API+'/kdocs/status',{headers:authH()});
+    if(!r.ok){ // 无权限（事业部等）：不展示同步入口
+      el.textContent='';
+      ['annualKdocsBtn','annualKdocsDryBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.display='none';});
+      return;
+    }
+    const d=await r.json();
+    if(!d.configured){el.innerHTML='<span class="text-danger" title="在 backend/.env 填入凭据后即可同步">云文档未配置（缺 '+(d.missing||[]).join('、')+'）</span>';return;}
+    if(d.last_sync){
+      const t=String(d.last_sync.at||'').replace('T',' ').slice(0,16);
+      el.innerHTML=d.last_sync.ok
+        ? '<span class="text-success">上次同步 '+t+'（'+d.last_sync.rows+' 行 → '+(d.last_sync.sheet_name||'')+'）</span>'
+        : '<span class="text-danger" title="'+esc(d.last_sync.message||'')+'">上次同步失败 '+t+'</span>';
+    } else el.textContent='尚未同步过';
+  }catch(e){el.textContent='';}
+}
+async function pushAnnualToKdocs(dryRun){
+  const btn=document.getElementById(dryRun?'annualKdocsDryBtn':'annualKdocsBtn');
+  try{
+    if(btn)btn.disabled=true;
+    const r=await fetch(API+'/annual/'+annualYear+'/kdocs/push'+(dryRun?'?dryRun=1':''),
+      {method:'POST',headers:{'Content-Type':'application/json',...authH()},body:'{}'});
+    const d=await r.json();
+    if(!r.ok){alert((dryRun?'干跑核对失败：':'同步失败：')+(d.error||'未知错误'));return;}
+    if(dryRun){
+      const p=d.preview||{};
+      alert('干跑核对通过（未写入云文档）\n\n'
+        +'年度：'+annualYear+'\n'
+        +'数据行：'+(p.total_rows||0)+' 行 · 列数：'+((p.headers||[]).length)+'\n\n'
+        +'第 2 行字段名（前 8 列）：'+((p.headers||[]).slice(0,8).join(' | '))+' …\n'
+        +'合计行（前 6 列）：'+((p.totals||[]).slice(0,6).join(' | ')));
+    }else{
+      alert('已同步到金山云文档：'+(d.sheetName||(d.meta&&d.meta.sheet_name)||'')+'，共 '+((d.meta||{}).rows||0)+' 行。');
+    }
+    loadKdocsStatus();
+  }catch(e){alert('同步出错：'+e.message);}
+  finally{if(btn)btn.disabled=false;}
 }
 function exportAnnual(){ window.open(API+'/annual/'+annualYear+'/export?token='+encodeURIComponent(localStorage.getItem('token')||''),'_blank'); }
 async function postAnnualComment(){

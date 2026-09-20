@@ -206,14 +206,6 @@ const SCHEMA = {
     table: 'annual',
     cols: ['id', 'year', 'data', 'updated_at'],
     bool: [], num: ['id', 'year'], json: ['data'], indexes: ['UNIQUE KEY `uk_year` (`year`)']
-  },
-  // 专家定向免登录评估链接：一人一链，链接即身份。
-  // 令牌哈希/有效期/项目范围等字段不在已知列里，按适配器约定自动落入 extra JSON，读写均无损。
-  expertInvites: {
-    table: 'expertInvites',
-    cols: ['id', 'session_id', 'user_id', 'expert_name', 'status', 'created_by', 'created_at', 'updated_at'],
-    bool: [], num: ['id', 'session_id', 'user_id', 'created_by'],
-    indexes: ['KEY `idx_session_id` (`session_id`)', 'KEY `idx_user_id` (`user_id`)', 'KEY `idx_status` (`status`)']
   }
 };
 
@@ -308,39 +300,10 @@ function ddlFor(name) {
   return `CREATE TABLE IF NOT EXISTS \`${def.table}\` (\n${parts}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`;
 }
 
-// 自动补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表补新列。
-// 历史上新增过的列（如 workItems.expert_days、expertEstimates.slot）在先行建立的库里缺失，
-// 会导致该集合整批 REPLACE 报 "Unknown column" 而静默失败 → 数据只存在内存、重启即丢。
-// 这里按 SCHEMA 定义逐表比对并自动 ALTER 补齐，彻底避免这类问题复发。
-async function ensureColumns(p, name) {
-  const def = SCHEMA[name];
-  const [rows] = await p.query(
-    'SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
-    [config.db.database, def.table]);
-  const have = new Set(rows.map(r => r.c));
-  if (!have.size) return []; // 表刚建好（或不存在），无需补列
-  const added = [];
-  for (const c of [...def.cols, 'extra']) {
-    if (have.has(c)) continue;
-    if (!COL_TYPE[c]) { console.error(`[db.mysql] 跳过未知列类型 ${def.table}.${c}`); continue; }
-    try {
-      await p.query(`ALTER TABLE \`${def.table}\` ADD COLUMN \`${c}\` ${COL_TYPE[c]}`);
-      added.push(c);
-    } catch (e) {
-      console.error(`[db.mysql] 补列失败 ${def.table}.${c}:`, e.message);
-    }
-  }
-  return added;
-}
-
 async function ensureSchema(p) {
-  const report = [];
   for (const name of COLLECTIONS) {
     await p.query(ddlFor(name));
-    const added = await ensureColumns(p, name);
-    if (added.length) report.push(`${SCHEMA[name].table}(${added.join(', ')})`);
   }
-  if (report.length) console.log('[db.mysql] 已自动补齐缺失列 → ' + report.join(' | '));
 }
 
 // ---------- 载入 ----------

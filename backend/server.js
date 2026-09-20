@@ -2935,12 +2935,9 @@ app.patch('/api/projects/:id/annual', auth(['admin', 'rd', 'biz']), (req, res) =
 });
 
 // 导出年度评审结果汇总 xlsx（严格对齐 49 列模板：双层表头 评审前/评审后 + 合计行）
-app.get('/api/annual/:year/export', auth(['admin', 'rd']), (req, res) => {
-  const year = parseInt(req.params.year);
-  if (!year || isNaN(year)) return res.status(400).json({ error: '无效年份' });
-  const summary = buildAnnualSummary(year, req.user);
-  const { columns, rows, totals } = summary;
-  const groupBanner = { base: '', pre: '评审前', post: '评审后', audit: '' };
+// 年度汇总的二维矩阵（表头两行 + 合计行 + 数据行）
+// 导出 xlsx 与同步到金山云文档共用同一份 aoa，保证两侧版式与数值完全一致。
+function buildAnnualAoa(columns, rows, totals) {
   // 第1行：分组旗帜（base/audit 留空，pre 跨 19 列，post 跨 15 列）
   const row1 = columns.map(c => (c.group === 'pre' ? '评审前' : (c.group === 'post' ? '评审后' : '')));
   // 第2行：字段名
@@ -2960,7 +2957,16 @@ app.get('/api/annual/:year/export', auth(['admin', 'rd']), (req, res) => {
     return v;
   });
   // 合计行置于表头之后、项目之前，与源表模板版式一致
-  const aoa = [row1, row2, totalRow, ...dataRows];
+  return [row1, row2, totalRow, ...dataRows];
+}
+
+app.get('/api/annual/:year/export', auth(['admin', 'rd']), (req, res) => {
+  const year = parseInt(req.params.year);
+  if (!year || isNaN(year)) return res.status(400).json({ error: '无效年份' });
+  const summary = buildAnnualSummary(year, req.user);
+  const { columns, rows, totals } = summary;
+  // 表头两行 + 合计行 + 数据行（与云文档同步共用同一份 aoa）
+  const aoa = buildAnnualAoa(columns, rows, totals);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   // 双层表头样式：第1行分组合并、第2行加粗
   const range = XLSX.utils.decode_range(ws['!ref']);
@@ -2987,6 +2993,357 @@ app.get('/api/annual/:year/export', auth(['admin', 'rd']), (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fname)}`);
   res.send(buf);
+});
+
+// ==================== 金山云文档（WPS 365）同步 ====================
+// 年度汇总仍由系统实时计算；本组接口把同一份矩阵推送到金山云文档的智能表格。
+// 凭据走 .env（KDOCS_CLIENT_ID / KDOCS_CLIENT_SECRET / KDOCS_FILE_ID / KDOCS_SHEET_NAME），
+// 未配置时只返回明确提示，不影响系统其它功能。
+function kdocsModule() { return require('./kdocs-sync'); }
+
+app.get('/api/kdocs/status', auth(['admin', 'rd']), (req, res) => {
+  let kdocs;
+  try { kdocs = kdocsModule(); }
+  catch (e) { return res.json({ configured: false, error: '同步模块加载失败：' + e.message }); }
+  let last = null;
+  try { last = JSON.parse(getSetting('kdocs_last_sync') || 'null'); } catch (_) { last = null; }
+  res.json({
+    configured: !!kdocs.configOk(),
+    missing: kdocs.missingConfig(),
+    sheet_name: kdocs.CFG.sheetName,
+    file_id_tail: kdocs.CFG.fileId ? String(kdocs.CFG.fileId).slice(-6) : '',
+    last_sync: last
+  });
+});
+
+app.post('/api/annual/:year/kdocs/push', auth(['admin', 'rd']), async (req, res) => {
+  const year = parseInt(req.params.year);
+  if (!year || isNaN(year)) return res.status(400).json({ error: '无效年份' });
+  let kdocs;
+  try { kdocs = kdocsModule(); }
+  catch (e) { return res.status(500).json({ error: '同步模块加载失败：' + e.message }); }
+  if (!kdocs.configOk()) {
+    const miss = kdocs.missingConfig();
+    return res.status(400).json({ error: '金山云文档未配置，缺少：' + miss.join('、'), missing: miss });
+  }
+  const dryRun = req.query.dryRun === '1' || (req.body && req.body.dryRun === true);
+  try {
+    const summary = buildAnnualSummary(year, req.user);
+    if (!summary || !summary.rows || !summary.rows.length) {
+      return res.status(400).json({ error: `未找到 ${year} 年度的评审数据，暂无可同步内容` });
+    }
+    const aoa = buildAnnualAoa(summary.columns, summary.rows, summary.totals);
+    const r = await kdocs.pushAoa(aoa, { dryRun });
+    const meta = {
+      at: new Date().toISOString(), year, ok: !!r.ok, dry_run: !!dryRun,
+      rows: summary.rows.length, cols: (aoa[0] || []).length,
+      by: req.user.real_name || req.user.username,
+      sheet_name: r.sheetName || kdocs.CFG.sheetName,
+      message: r.ok ? (dryRun ? '干跑核对通过（未写入）' : '同步成功') : ('同步失败：' + JSON.stringify(r.raw || {}).slice(0, 200))
+    };
+    if (!dryRun) setSetting('kdocs_last_sync', JSON.stringify(meta));
+    db.logWorkflow(null, 'kdocs_sync', `${dryRun ? '干跑核对' : '同步'}金山云文档（${year} 年度汇总 ${meta.rows} 行）：${meta.message}`, req.user.id);
+    if (!r.ok) return res.status(502).json(Object.assign({ error: meta.message }, r));
+    const out = Object.assign({}, r, { meta });
+    if (dryRun) out.preview = { headers: aoa[1], totals: aoa[2], first_row: aoa[3] || null, total_rows: summary.rows.length };
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: '同步异常：' + e.message });
+  }
+});
+
+// ==================== 专家定向免登录评估链接 ====================
+// 一人一链，链接即身份：令牌 32 字节随机，库内只存 sha256 哈希（链接泄漏不等于库泄漏）。
+// 默认 30 天有效、可随时撤销、只看到并只能评估分配给自己的项目、看不到其他专家填的值。
+// 提交的数据同样写入 expertEstimates（expert_id = 链接绑定的专家账号），
+// 因此 5 人评估汇总、工作量汇总表、告警、导出全部自动联动，无需另做同步。
+const INVITE_DEFAULT_DAYS = 30;
+
+function sha256Hex(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
+
+// 对外可访问的站点根地址（生成给专家的链接用）
+function inviteBaseUrl(req) {
+  const envBase = process.env.PUBLIC_BASE_URL || '';
+  if (envBase) return envBase.replace(/\/+$/, '');
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return host ? `${proto}://${host}` : '';
+}
+
+function inviteState(inv) {
+  if (!inv) return 'invalid';
+  if (inv.status === 'revoked') return 'revoked';
+  if (inv.status === 'superseded') return 'superseded';
+  if (inv.expires_at && Date.now() > Date.parse(inv.expires_at)) return 'expired';
+  return 'active';
+}
+const INVITE_STATE_MSG = {
+  invalid: '链接无效，请向管理员索取新的评估链接',
+  revoked: '该链接已被撤销，请联系管理员重新生成',
+  superseded: '该链接已被新链接替代，请使用管理员最新发给您的链接',
+  expired: '该链接已过期，请联系管理员重新生成'
+};
+
+function findInviteByToken(token) {
+  const t = String(token || '');
+  if (t.length < 20) return null;
+  const h = sha256Hex(t);
+  return (db.store.expertInvites || []).find(i => i.token_hash === h) || null;
+}
+
+// 只取参与专家评估的两类明细：人员外包 / 专业分包（与登录版口径一致）
+function inviteEvalItems(projectId) {
+  return db.store.workItems.filter(w =>
+    w.project_id === projectId && (w.category === 'outsourcing' || w.category === 'subcontract'));
+}
+
+function inviteScopedProjects(inv) {
+  let ps = db.store.projects.filter(p => p.session_id === inv.session_id);
+  if (Array.isArray(inv.project_ids) && inv.project_ids.length) {
+    const set = new Set(inv.project_ids.map(Number));
+    ps = ps.filter(p => set.has(p.id));
+  }
+  return ps;
+}
+
+function inviteProjectView(inv, p) {
+  const items = inviteEvalItems(p.id);
+  const mine = db.store.expertEstimates.filter(e => e.project_id === p.id && e.expert_id === inv.user_id);
+  const mineIds = new Set(mine.map(m => m.work_item_id));
+  const done = items.filter(it => mineIds.has(it.id)).length;
+  return {
+    id: p.id,
+    project_name: p.project_name || ('项目' + p.id),
+    project_code: p.project_code || '',
+    biz_department: p.biz_department || '',
+    project_type: p.project_type || '',
+    status: p.status,
+    needs_estimate: needsEstimate(p),
+    locked: !!projectLocked(p),
+    item_count: items.length,
+    done_count: done,
+    submitted: items.length > 0 && done === items.length
+  };
+}
+
+// 生成 / 复用定向链接（管理员、研发中心）
+app.post('/api/sessions/:id/expert-invites', auth(['admin', 'rd']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sid);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const list = Array.isArray(req.body.experts) ? req.body.experts : [];
+  if (!list.length) return res.status(400).json({ error: '请至少选择一位专家' });
+  const days = Math.max(1, Math.min(365, parseInt(req.body.days) || INVITE_DEFAULT_DAYS));
+  const perm = req.body.perm === 'estimate_confirm' ? 'estimate_confirm' : 'estimate';
+  if (!db.store.expertInvites) db.store.expertInvites = [];
+  if (!db.store.sessionAssignments) db.store.sessionAssignments = [];
+  const base = inviteBaseUrl(req);
+  const results = [];
+  for (const e of list) {
+    let user = null, createdUser = false;
+    if (e.user_id) user = db.store.users.find(u => u.id === parseInt(e.user_id)) || null;
+    if (!user && e.real_name) {
+      const rn = String(e.real_name).trim();
+      user = db.store.users.find(u => u.real_name === rn && (u.role === 'expert' || u.role === 'accountant')) || null;
+    }
+    if (!user) {
+      const rn = String(e.real_name || '').trim();
+      if (!rn) { results.push({ real_name: e.real_name || '', error: '缺少专家姓名' }); continue; }
+      // 外聘专家：自动建一个不可登录的专家账号，保证 5 人汇总口径与登录专家完全一致
+      user = {
+        id: db.nextId(db.store.users),
+        username: 'ext_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex'),
+        password: db.hashPassword(crypto.randomBytes(24).toString('hex')),
+        real_name: rn, role: 'expert', department: '外聘专家', business_dept: null,
+        contact: e.contact || '', is_active: true, ext_no_login: true,
+        created_at: new Date().toISOString()
+      };
+      db.store.users.push(user);
+      createdUser = true;
+    }
+    // 保证该专家在本批次评估名单内（5 人汇总只取最早分配的 5 位）
+    if (!db.store.sessionAssignments.some(a => a.session_id === sid && a.user_id === user.id)) {
+      db.store.sessionAssignments.push({
+        id: db.nextId(db.store.sessionAssignments), session_id: sid, user_id: user.id,
+        user_role: user.role, user_name: user.real_name,
+        assigned_by: req.user.id, assigned_at: new Date().toISOString()
+      });
+    }
+    // 一人一链：同批次同专家的旧链接作废
+    db.store.expertInvites.forEach(i => {
+      if (i.session_id === sid && i.user_id === user.id && i.status === 'active') i.status = 'superseded';
+    });
+    const token = crypto.randomBytes(32).toString('base64url');
+    const inv = {
+      id: db.nextId(db.store.expertInvites),
+      token_hash: sha256Hex(token), token_hint: token.slice(0, 6),
+      session_id: sid, user_id: user.id, expert_name: user.real_name,
+      contact: e.contact || user.contact || '',
+      project_ids: (Array.isArray(e.project_ids) && e.project_ids.length) ? e.project_ids.map(Number) : null,
+      perm, status: 'active',
+      expires_at: new Date(Date.now() + days * 86400000).toISOString(),
+      created_by: req.user.id, created_at: new Date().toISOString(),
+      last_access_at: null, access_count: 0, submit_count: 0, last_submit_at: null
+    };
+    db.store.expertInvites.push(inv);
+    results.push({
+      invite_id: inv.id, user_id: user.id, real_name: user.real_name, created_user: createdUser,
+      link: base ? (base + '/expert.html?k=' + token) : ('/expert.html?k=' + token),
+      expires_at: inv.expires_at, session_name: session.name
+    });
+  }
+  db.save();
+  db.logWorkflow(null, 'create_expert_invites',
+    `生成专家定向评估链接 ${results.filter(r => r.link).length} 条（批次「${session.name}」，有效期 ${days} 天）`, req.user.id);
+  const assignedCount = db.store.sessionAssignments
+    .filter(a => a.session_id === sid && (a.user_role === 'expert' || a.user_role === 'accountant')).length;
+  res.json({
+    session_id: sid, session_name: session.name, days, invites: results,
+    assigned_evaluators: assignedCount,
+    warning: assignedCount > 5 ? `本批次已分配 ${assignedCount} 位评估人，5 人汇总口径只统计最早分配的 5 位` : ''
+  });
+});
+
+app.get('/api/sessions/:id/expert-invites', auth(['admin', 'rd']), (req, res) => {
+  const sid = parseInt(req.params.id);
+  const list = (db.store.expertInvites || []).filter(i => i.session_id === sid)
+    .sort((a, b) => b.id - a.id)
+    .map(i => ({
+      id: i.id, user_id: i.user_id, expert_name: i.expert_name, contact: i.contact || '',
+      state: inviteState(i), perm: i.perm || 'estimate',
+      expires_at: i.expires_at, created_at: i.created_at,
+      last_access_at: i.last_access_at || null, access_count: i.access_count || 0,
+      submit_count: i.submit_count || 0, last_submit_at: i.last_submit_at || null,
+      project_ids: i.project_ids || null
+    }));
+  res.json({ session_id: sid, invites: list });
+});
+
+app.post('/api/expert-invites/:iid/revoke', auth(['admin', 'rd']), (req, res) => {
+  const inv = (db.store.expertInvites || []).find(i => i.id === parseInt(req.params.iid));
+  if (!inv) return res.status(404).json({ error: '链接不存在' });
+  inv.status = 'revoked';
+  inv.revoked_by = req.user.id;
+  inv.revoked_at = new Date().toISOString();
+  db.save();
+  db.logWorkflow(null, 'revoke_expert_invite', `撤销专家「${inv.expert_name}」的定向评估链接`, req.user.id);
+  res.json({ success: true, id: inv.id, state: inviteState(inv) });
+});
+
+// ---------- 以下 3 个接口供专家免登录页面调用，不校验 JWT，只校验链接令牌 ----------
+app.get('/api/expert-invite/:token', (req, res) => {
+  const inv = findInviteByToken(req.params.token);
+  const state = inviteState(inv);
+  if (state !== 'active') return res.status(410).json({ error: INVITE_STATE_MSG[state], state });
+  const session = db.store.reviewSessions.find(s => s.id === inv.session_id);
+  const projects = inviteScopedProjects(inv).map(p => inviteProjectView(inv, p));
+  const myEst = db.store.expertEstimates.filter(e => e.expert_id === inv.user_id);
+  inv.last_access_at = new Date().toISOString();
+  inv.access_count = (inv.access_count || 0) + 1;
+  db.save();
+  res.json({
+    expert_name: inv.expert_name,
+    role_label: (db.store.users.find(u => u.id === inv.user_id) || {}).role === 'accountant' ? '会计师事务所' : '评审专家',
+    session: session ? { id: session.id, name: session.name, review_time: session.review_time || '' } : { id: inv.session_id, name: '批次' + inv.session_id, review_time: '' },
+    expires_at: inv.expires_at,
+    perm: inv.perm || 'estimate',
+    stats: {
+      total: projects.length,
+      todo: projects.filter(p => p.needs_estimate && !p.submitted && !p.locked).length,
+      done: projects.filter(p => p.submitted).length,
+      my_estimate_count: myEst.length
+    },
+    projects
+  });
+});
+
+app.get('/api/expert-invite/:token/projects/:pid', (req, res) => {
+  const inv = findInviteByToken(req.params.token);
+  const state = inviteState(inv);
+  if (state !== 'active') return res.status(410).json({ error: INVITE_STATE_MSG[state], state });
+  const pid = parseInt(req.params.pid);
+  if (!inviteScopedProjects(inv).some(p => p.id === pid)) {
+    return res.status(403).json({ error: '该项目不在您的评估范围内' });
+  }
+  const p = db.store.projects.find(x => x.id === pid);
+  const items = inviteEvalItems(pid).map(w => {
+    const mine = db.store.expertEstimates.find(e =>
+      e.project_id === pid && e.work_item_id === w.id && e.expert_id === inv.user_id);
+    return {
+      id: w.id, category: w.category,
+      work_task: w.work_task || '', work_item: w.work_item || '', description: w.description || '',
+      person: w.person || '', person_days: w.person_days != null ? w.person_days : null,
+      cost: Number(w.cost) || 0, unit_price: Number(w.unit_price) || 0,
+      my_days: mine ? Number(mine.days) : null,
+      my_comment: mine ? (mine.comment || '') : '',
+      my_submitted_at: mine ? (mine.updated_at || mine.submitted_at || null) : null
+    };
+  });
+  res.json({
+    project: inviteProjectView(inv, p),
+    items,
+    categories: [
+      { key: 'outsourcing', label: '人员外包' },
+      { key: 'subcontract', label: '专业分包' }
+    ]
+  });
+});
+
+app.post('/api/expert-invite/:token/estimates', (req, res) => {
+  const inv = findInviteByToken(req.params.token);
+  const state = inviteState(inv);
+  if (state !== 'active') return res.status(410).json({ error: INVITE_STATE_MSG[state], state });
+  const p = db.store.projects.find(x => x.id === parseInt(req.body.project_id));
+  if (!p || !inviteScopedProjects(inv).some(x => x.id === p.id)) {
+    return res.status(403).json({ error: '该项目不在您的评估范围内' });
+  }
+  const lockReason = projectLocked(p);
+  if (lockReason) return res.status(403).json({ error: lockReason + '，禁止提交或修改评估' });
+  // 归一化入参：既接受 {items:[...]} 批量，也接受单条 {work_item_id, days, comment}
+  let items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!items.length && req.body.work_item_id) items = [req.body];
+  if (!items.length) return res.status(400).json({ error: '请提交要评估的人天数' });
+  const allowed = new Set(inviteEvalItems(p.id).map(w => w.id));
+  const saved = [], skipped = [];
+  for (const it of items) {
+    const wid = parseInt(it.work_item_id);
+    const days = Number(it.days);
+    if (!allowed.has(wid)) { skipped.push({ work_item_id: wid, reason: '工作项不属于该项目的外包/分包明细' }); continue; }
+    if (!isFinite(days) || days <= 0) { skipped.push({ work_item_id: wid, reason: '人天必须为大于 0 的数字' }); continue; }
+    const existing = db.store.expertEstimates.find(e =>
+      e.project_id === p.id && e.work_item_id === wid && e.expert_id === inv.user_id);
+    const now = new Date().toISOString();
+    if (existing) {
+      existing.days = days;
+      if (it.comment != null) existing.comment = String(it.comment).slice(0, 255);
+      existing.updated_at = now;
+      existing.source = 'invite_link';
+      saved.push(existing);
+    } else {
+      const est = {
+        id: db.nextId(db.store.expertEstimates),
+        project_id: p.id, work_item_id: wid,
+        expert_id: inv.user_id, expert_name: inv.expert_name, expert_role: 'expert',
+        days, comment: it.comment != null ? String(it.comment).slice(0, 255) : '',
+        submitted_at: now, source: 'invite_link', invite_id: inv.id
+      };
+      db.store.expertEstimates.push(est);
+      saved.push(est);
+    }
+    persistWorkItemRollup(p.id, wid);
+  }
+  if (!saved.length) return res.status(400).json({ error: '没有可保存的评估值', skipped });
+  p.updated_at = new Date().toISOString();
+  inv.submit_count = (inv.submit_count || 0) + saved.length;
+  inv.last_submit_at = new Date().toISOString();
+  db.save();
+  saved.forEach(e => db.logWorkflow(p.id, 'submit_estimate',
+    `专家${inv.expert_name}（定向链接）评估工作项${e.work_item_id}: ${e.days}人天`, inv.user_id));
+  res.json({
+    success: true, saved: saved.length,
+    items: saved.map(e => ({ work_item_id: e.work_item_id, days: Number(e.days), updated_at: e.updated_at || e.submitted_at })),
+    skipped
+  });
 });
 
 // ==================== 统计分析 ====================

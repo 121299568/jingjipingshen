@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>专家工作量评估</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --line:#e5e7eb; --text:#1f2430; --muted:#6b7280;
+    --brand:#2563eb; --brand-d:#1d4ed8; --ok:#15803d; --warn:#b45309; --danger:#c0281f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:16px}
+  .top{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+  .top h1{margin:0 0 6px;font-size:17px;font-weight:600}
+  .meta{color:var(--muted);font-size:13px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .chip{background:#f3f4f6;border-radius:999px;padding:3px 12px;font-size:13px;color:#374151}
+  .chip b{font-weight:600}
+  .chip.todo{background:#fef3c7;color:#92400e}
+  .chip.done{background:#dcfce7;color:#166534}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+  .prow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;cursor:pointer}
+  .prow:hover .pname{color:var(--brand)}
+  .pname{font-size:15px;font-weight:600;word-break:break-word}
+  .pmeta{color:var(--muted);font-size:12.5px;margin-top:4px}
+  .badge{flex:none;font-size:12px;padding:3px 10px;border-radius:999px;white-space:nowrap}
+  .b-todo{background:#fef3c7;color:#92400e}
+  .b-done{background:#dcfce7;color:#166534}
+  .b-none{background:#f3f4f6;color:#6b7280}
+  .b-lock{background:#fee2e2;color:#991b1b}
+  .back{display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:var(--brand);
+    cursor:pointer;font-size:14px;padding:4px 0;margin-bottom:8px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border-bottom:1px solid var(--line);padding:8px 8px;text-align:left;vertical-align:top}
+  th{background:#f9fafb;font-weight:600;color:#374151;white-space:nowrap;position:sticky;top:0}
+  td.num,th.num{text-align:right;white-space:nowrap}
+  .cat{font-size:14px;font-weight:600;margin:16px 0 6px}
+  .cat:first-child{margin-top:4px}
+  input[type=number]{width:88px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;text-align:right}
+  input[type=number]:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 2px rgba(37,99,235,.15)}
+  .saved{color:var(--ok);font-size:12px;white-space:nowrap}
+  .bar{position:sticky;bottom:0;background:rgba(255,255,255,.96);border-top:1px solid var(--line);
+    padding:10px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+  button.primary{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer}
+  button.primary:hover{background:var(--brand-d)}
+  button.primary:disabled{background:#9ca3af;cursor:not-allowed}
+  button.ghost{background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#111827;color:#fff;
+    padding:10px 18px;border-radius:8px;font-size:13px;z-index:99;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+  .center{text-align:center;padding:48px 16px;color:var(--muted)}
+  .err{max-width:520px;margin:60px auto;background:#fff;border:1px solid var(--line);border-radius:12px;padding:28px;text-align:center}
+  .err h2{margin:0 0 8px;font-size:16px;color:var(--danger)}
+  .hint{color:var(--muted);font-size:12.5px;margin-top:6px}
+  .tbl-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff;max-height:60vh}
+</style>
+</head>
+<body>
+<div id="app"><div class="center">正在加载…</div></div>
+<div class="toast" id="toast"></div>
+<script>
+const TOKEN=new URLSearchParams(location.search).get('k')||'';
+const API='/api/expert-invite/'+encodeURIComponent(TOKEN);
+let STATE=null, CUR=null;
+const $=id=>document.getElementById(id);
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function money(n){return '¥'+Number(n||0).toLocaleString();}
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+async function api(path,opts){
+  const r=await fetch(path,opts);
+  let d={};try{d=await r.json();}catch(_){}
+  if(!r.ok) throw new Error(d.error||('请求失败（HTTP '+r.status+'）'));
+  return d;
+}
+const CAT={outsourcing:'人员外包',subcontract:'专业分包'};
+
+function renderError(msg){
+  $('app').innerHTML='<div class="err"><h2>无法打开评估页</h2><div>'+esc(msg)+'</div>'
+    +'<div class="hint">如需帮助，请联系经济评审管理员重新生成评估链接。</div></div>';
+}
+
+function renderList(){
+  const s=STATE;
+  const today=new Date();
+  const left=Math.max(0,Math.ceil((new Date(s.expires_at)-today)/86400000));
+  let h='<div class="wrap"><div class="top">'
+    +'<h1>专家工作量评估</h1>'
+    +'<div class="meta">'+esc(s.expert_name)+' · '+esc(s.role_label)+' · '+esc(s.session.name)
+      +(s.session.review_time?(' · 评审时间 '+esc(s.session.review_time)):'')+'</div>'
+    +'<div class="chips">'
+      +'<span class="chip">待评估 <b>'+s.stats.todo+'</b> 个项目</span>'
+      +'<span class="chip done">已提交 <b>'+s.stats.done+'</b> 个</span>'
+      +'<span class="chip">链接有效期剩余 <b>'+left+'</b> 天</span>'
+    +'</div>'
+    +'<div class="hint">请只填写您本人的评估值。系统仅展示您自己提交的人天，不含其他专家数据。</div>'
+  +'</div>';
+  if(!s.projects.length){
+    h+='<div class="card center">本批次暂无可评估的项目。</div>';
+  }
+  s.projects.forEach(p=>{
+    const cls=p.submitted?'b-done':(p.locked?'b-lock':(p.needs_estimate?'b-todo':'b-none'));
+    const txt=p.submitted?'已提交':(p.locked?'已归档，不可修改':(p.needs_estimate?('待评估 · '+p.done_count+'/'+p.item_count):'无需评估'));
+    h+='<div class="card"><div class="prow" onclick="openProject('+p.id+')">'
+      +'<div><div class="pname">'+esc(p.project_name)+'</div>'
+      +'<div class="pmeta">'+esc(p.project_code||'—')+' · '+esc(p.biz_department||'—')+' · '+esc(p.project_type||'—')+'</div></div>'
+      +'<span class="badge '+cls+'">'+esc(txt)+'</span></div></div>';
+  });
+  h+='</div>';
+  $('app').innerHTML=h;
+}
+
+async function openProject(pid){
+  $('app').innerHTML='<div class="center">正在加载项目明细…</div>';
+  try{
+    const d=await api(API+'/projects/'+pid);
+    CUR=d; renderProject();
+  }catch(e){ renderError(e.message); }
+}
+
+function renderProject(){
+  const d=CUR, p=d.project;
+  let h='<div class="wrap"><button class="back" onclick="backToList()">← 返回项目列表</button>'
+    +'<div class="top"><h1 style="font-size:15px">'+esc(p.project_name)+'</h1>'
+    +'<div class="meta">'+esc(p.project_code||'—')+' · '+esc(p.biz_department||'—')+' · 参保人天请按实际工作量填写</div>'
+    +'<div class="chips"><span class="badge '+(p.submitted?'b-done':(p.locked?'b-lock':'b-todo'))+'">'
+      +(p.submitted?'已全部提交':(p.locked?'已归档，不可修改':('待评估 '+p.done_count+'/'+p.item_count)))
+      +'</span></div></div>';
+  if(!d.items.length){
+    h+='<div class="card center">该项目的成本明细中没有「人员外包 / 专业分包」条目，无需专家评估。</div></div>';
+    $('app').innerHTML=h; return;
+  }
+  d.categories.forEach(c=>{
+    const items=d.items.filter(x=>x.category===c.key);
+    if(!items.length) return;
+    h+='<div class="cat">'+esc(c.label)+'（'+items.length+' 项）</div>'
+      +'<div class="tbl-wrap"><table><thead><tr>'
+      +'<th>任务</th><th>工作项</th><th>说明</th><th>人员</th><th class="num">原人天</th><th class="num">原费用</th>'
+      +'<th class="num" style="width:120px">我的评估人天</th><th style="width:96px">状态</th>'
+      +'</tr></thead><tbody>';
+    items.forEach(w=>{
+      h+='<tr>'
+        +'<td>'+esc(w.work_task||'—')+'</td>'
+        +'<td>'+esc(w.work_item||'—')+'</td>'
+        +'<td>'+esc(w.description||'—')+'</td>'
+        +'<td>'+esc(w.person||'—')+'</td>'
+        +'<td class="num">'+(w.person_days!=null?w.person_days:'—')+'</td>'
+        +'<td class="num" style="color:#6b7280">'+money(w.cost)+'</td>'
+        +'<td class="num"><input type="number" min="0" step="0.5" data-wid="'+w.id+'" '
+          +(p.locked?'disabled ':'')+'value="'+(w.my_days!=null?w.my_days:'')+'" '
+          +'placeholder="'+(w.person_days!=null?w.person_days:'?')+'"></td>'
+        +'<td>'+(w.my_days!=null?'<span class="saved">已提交 '+w.my_days+'</span>':'')+'</td>'
+        +'</tr>';
+    });
+    h+='</tbody></table></div>';
+  });
+  h+='<div class="bar"><div class="hint">填写后点右侧按钮提交；同一工作项可再次提交覆盖原值。</div>'
+    +'<button class="primary" id="submitBtn"'+(p.locked?' disabled':'')+' onclick="submitAll('+p.id+')">'
+    +(p.locked?'已归档，不可提交':'提交我的评估')+'</button></div></div>';
+  $('app').innerHTML=h;
+}
+
+function backToList(){ CUR=null; history.replaceState(null,'','?k='+encodeURIComponent(TOKEN)); load(); }
+
+async function submitAll(pid){
+  const inputs=[...document.querySelectorAll('input[data-wid]')];
+  const items=[];
+  inputs.forEach(i=>{
+    if(i.value!=='') items.push({work_item_id:parseInt(i.dataset.wid),days:parseFloat(i.value)});
+  });
+  if(!items.length){toast('请先填写要评估的人天数');return;}
+  const btn=$('submitBtn'); btn.disabled=true; btn.textContent='提交中…';
+  try{
+    const r=await api(API+'/estimates',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({project_id:pid,items})});
+    toast('已提交 '+r.saved+' 项评估'+(r.skipped&&r.skipped.length?('，'+r.skipped.length+' 项被跳过'):''));
+    await openProject(pid);
+    if(STATE){ // 同步列表状态
+      const p=STATE.projects.find(x=>x.id===pid);
+      if(p){ p.done_count=(r.items||[]).length; }
+    }
+  }catch(e){
+    toast(e.message);
+    btn.disabled=false; btn.textContent='提交我的评估';
+  }
+}
+
+async function load(){
+  if(!TOKEN){ renderError('链接缺少访问令牌，请使用管理员发给您的完整链接打开'); return; }
+  try{
+    STATE=await api(API);
+    renderList();
+  }catch(e){ renderError(e.message); }
+}
+load();
+</script>
+</body>
+</html>
