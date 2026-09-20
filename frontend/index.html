@@ -413,6 +413,8 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
           <select class="form-select form-select-sm" id="wlDeptSelect" style="width:auto;min-width:170px" title="按事业部筛选导出范围"><option value="">全部事业部</option></select>
           <button class="btn btn-sm btn-outline-primary" onclick="exportWlByDept()"><i class="bi bi-files"></i> 按事业部导出汇总表</button>
           <button class="btn btn-sm btn-outline-success" id="wlExportBtn" onclick="exportWorkloadSummary()" style="display:none"><i class="bi bi-download"></i> 导出本批次汇总表</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="exportVersionsZip()"><i class="bi bi-archive"></i> 导出全部版本(ZIP)</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="openVersionHistory()"><i class="bi bi-clock-history"></i> 历史版本</button>
         </div>
       </div>
       <div id="wlBatchFilter" class="mb-3"></div>
@@ -553,8 +555,9 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
       <div class="mb-3">
         <label class="form-label">导入方式</label>
         <select class="form-select" id="summaryMode" onchange="toggleSummaryMode()">
-          <option value="attach">挂接到已有批次</option>
+          <option value="attach">挂接到已有批次（仅新增，跳过已存在）</option>
           <option value="create">根据表格直接创建新批次</option>
+          <option value="update">增量同步到已有批次（来者为准：更新/新增/删除行）</option>
         </select>
       </div>
       <div class="mb-3" id="summaryAttachBox">
@@ -571,6 +574,30 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
       <button type="button" class="btn btn-outline-secondary" onclick="downloadSummaryTemplate()"><i class="bi bi-download"></i>下载模板</button>
       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
       <button type="button" class="btn btn-primary" onclick="doSummaryImport()">导入</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- 增量同步预览确认 -->
+<div class="modal fade" id="summaryPreviewModal" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5>增量同步预览（确认后写入）</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body" id="summaryPreviewBody"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+      <button type="button" class="btn btn-danger" onclick="confirmSummaryUpdate()"><i class="bi bi-check2"></i> 确认同步（含删除）</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- 历史版本查看 -->
+<div class="modal fade" id="versionHistoryModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header"><h5><i class="bi bi-clock-history"></i> 文件历史版本</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body" id="versionHistoryBody"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline-secondary" onclick="exportVersionsZip()"><i class="bi bi-archive"></i> 全部版本打包下载(ZIP)</button>
+      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
     </div>
   </div></div>
 </div>
@@ -1992,6 +2019,37 @@ function exportWorkloadSummary(){
   if(!wlSelectedSessionId){alert('请先选择一个批次');return;}
   window.location.href=API+'/sessions/'+wlSelectedSessionId+'/workload-summary/export?token='+encodeURIComponent(localStorage.getItem('token'));
 }
+// 导出该批次当前版+全部历史版本文件（ZIP，含 manifest 清单）
+function exportVersionsZip(){
+  if(!wlSelectedSessionId){alert('请先选择一个批次');return;}
+  window.location.href=API+'/sessions/'+wlSelectedSessionId+'/export-versions-zip?token='+encodeURIComponent(localStorage.getItem('token'));
+}
+// 查看该批次各文件的历史版本（同一逻辑文件的新旧版本）
+async function openVersionHistory(){
+  if(!wlSelectedSessionId){alert('请先选择一个批次');return;}
+  const body=document.getElementById('versionHistoryBody');
+  body.innerHTML='<div class="text-muted">正在加载...</div>';
+  new bootstrap.Modal(document.getElementById('versionHistoryModal')).show();
+  try{
+    const r=await fetch(API+'/sessions/'+wlSelectedSessionId+'/version-history',{headers:authH()});
+    const d=await r.json();
+    if(!r.ok||d.error){body.innerHTML='<div class="alert alert-danger">加载失败：'+esc(d.error||'未知错误')+'</div>';return;}
+    const groups=(d.groups||[]).filter(g=>g.versions&&g.versions.length);
+    if(!groups.length){body.innerHTML='<div class="alert alert-secondary">该批次暂无文件版本记录。</div>';return;}
+    const TYPE_CN={summary:'评审汇总表',offline_eval:'离线评估表',cost_estimate:'成本估算表',project_doc:'项目文档'};
+    let html='';
+    groups.forEach(g=>{
+      html+='<div class="border rounded mb-3"><div class="px-3 py-2 bg-light small fw-bold">'+esc(TYPE_CN[g.import_type]||g.import_type||'文件')+' <span class="text-muted">('+esc(g.logical_key||'')+')</span></div>';
+      html+='<table class="table table-sm mb-0 align-middle"><thead class="table-light"><tr><th style="width:70px">版本</th><th>文件名</th><th style="width:150px">上传时间</th><th style="width:110px">上传人</th><th style="width:90px">状态</th><th style="width:70px"></th></tr></thead><tbody>';
+      g.versions.forEach(v=>{
+        const t=v.upload_time?new Date(v.upload_time).toLocaleString('zh-CN'):'';
+        html+='<tr'+(v.is_current?'':' class="text-muted"')+'><td>v'+v.version+'</td><td class="text-break">'+esc(v.originalname||'')+'</td><td class="small">'+t+'</td><td class="small">'+esc(v.uploader_name||'')+'</td><td>'+(v.is_current?'<span class="badge bg-success">当前版</span>':'<span class="badge bg-secondary">历史版</span>')+'</td><td>'+(v.url?'<a class="small" href="'+esc(v.url)+'" target="_blank">下载</a>':'')+'</td></tr>';
+      });
+      html+='</tbody></table></div>';
+    });
+    body.innerHTML=html;
+  }catch(e){body.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';}
+}
 function renderWorkloadCards(d){
   const completion=d.batch_work_item_count>0?Math.round(d.batch_evaluated_count/d.batch_work_item_count*100):0;
   const reduction=Number(d.batch_total_reduction||0);
@@ -2327,7 +2385,7 @@ function saveProject(){
 }
 function toggleSummaryMode(){
   const m=document.getElementById('summaryMode').value;
-  document.getElementById('summaryAttachBox').style.display=m==='attach'?'block':'none';
+  document.getElementById('summaryAttachBox').style.display=(m==='attach'||m==='update')?'block':'none';
   document.getElementById('summaryCreateBox').style.display=m==='create'?'block':'none';
 }
 function downloadSummaryTemplate(){
@@ -2336,13 +2394,28 @@ function downloadSummaryTemplate(){
   .then(b=>{const url=URL.createObjectURL(b);const a=document.createElement('a');a.href=url;a.download='评审汇总表导入模板.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);})
   .catch(e=>alert('下载模板失败: '+(e&&e.error||e&&e.message||'未知错误')));
 }
+let pendingSummaryFile=null, pendingSummarySessionId=null;
 async function doSummaryImport(){
   const file=document.getElementById('summaryFileInput').files[0];
   const statusEl=document.getElementById('summaryImportStatus');
   const mode=document.getElementById('summaryMode').value;
   if(!file){alert('请选择 Excel 文件');return;}
   if(!file.name.match(/\.xlsx?$/i)){alert('请选择 .xlsx 或 .xls 格式的文件');return;}
-  if(mode==='attach' && !document.getElementById('summarySessionId').value){alert('请选择要挂接的批次');return;}
+  if((mode==='attach'||mode==='update') && !document.getElementById('summarySessionId').value){alert('请选择目标批次');return;}
+  // 增量同步：先 dryRun 预览，确认后再真正写入（删除行会级联清除项目及关联数据）
+  if(mode==='update'){
+    statusEl.innerHTML='<div class="alert alert-info">正在比对汇总表与系统内现有数据...</div>';
+    try{
+      const fd=new FormData();fd.append('file',file);fd.append('mode','update');fd.append('session_id',document.getElementById('summarySessionId').value);
+      const r=await fetch(API+'/sessions/import-summary?dryRun=1',{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:fd});
+      const dd=await r.json();
+      if(!r.ok||dd.error){statusEl.innerHTML='<div class="alert alert-danger">预览失败：'+(esc(dd.error)||'未知错误')+'</div>';return;}
+      if(dd.created===0 && dd.updated===0 && dd.deleted===0){statusEl.innerHTML='<div class="alert alert-secondary">本次上传与系统内现有数据完全一致，无变化，无需导入。</div>';return;}
+      pendingSummaryFile=file; pendingSummarySessionId=document.getElementById('summarySessionId').value;
+      showSummaryPreview(dd);
+    }catch(e){statusEl.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';}
+    return;
+  }
   statusEl.innerHTML='<div class="alert alert-info">正在解析汇总表...</div>';
   const fd=new FormData();
   fd.append('file',file);
@@ -2357,6 +2430,42 @@ async function doSummaryImport(){
     const data=await r.json();
     if(!r.ok||data.error){statusEl.innerHTML='<div class="alert alert-danger">导入失败：'+(esc(data.error)||'未知错误')+'</div>';return;}
     statusEl.innerHTML='<div class="alert alert-success">导入成功！创建批次「'+esc(data.session_name)+'」，新增项目 '+data.created+' 个（跳过重复 '+data.skipped+' 个，表格共 '+data.total+' 行）。</div>';
+    setTimeout(()=>{const m=document.getElementById('summaryImportModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();loadAll();},1800);
+  }catch(e){statusEl.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';}
+}
+// 增量同步预览弹窗：列出 新增/更新/删除 并二次确认
+function showSummaryPreview(dd){
+  const ch=dd.changedFieldsByProject||{};
+  let html='<div class="alert alert-warning small mb-2">将按「项目编号/名称」逐行比对，以本次上传为准：</div>';
+  html+='<ul class="list-unstyled mb-2 small">';
+  html+='<li class="text-success">新增 <b>'+dd.created+'</b> 行</li>';
+  html+='<li class="text-primary">更新 <b>'+dd.updated+'</b> 行</li>';
+  html+='<li class="text-danger">删除 <b>'+dd.deleted+'</b> 行'+(dd.deleted_names&&dd.deleted_names.length?('：'+esc(dd.deleted_names.join('、'))):'')+'</li>';
+  html+='</ul>';
+  const changeKeys=Object.keys(ch);
+  if(changeKeys.length){
+    html+='<div class="small mb-1"><b>将更新的字段：</b></div><div class="border rounded p-2 mb-2" style="max-height:180px;overflow:auto">';
+    const FIELD_CN={project_name:'项目名称',project_code:'项目编号',biz_department:'承建部门',project_type:'项目类型',contract_amount:'合同额',internal_estimated_cost:'内部预估成本',is_restricted_subcontract:'限制分包',subcontract_scope:'分包范围'};
+    changeKeys.forEach(pid=>{const o=ch[pid];html+='<div class="mb-1">· '+esc(o.project_name||('项目'+pid))+'：'+Object.keys(o.changes).map(k=>esc(FIELD_CN[k]||k)).join('、')+'</div>';});
+    html+='</div>';
+  }
+  if(dd.deleted>0)html+='<div class="text-danger small">⚠ 删除的项目及其工作量评估、确认、成本明细等关联数据将被一并清除，不可恢复。</div>';
+  document.getElementById('summaryPreviewBody').innerHTML=html;
+  new bootstrap.Modal(document.getElementById('summaryPreviewModal')).show();
+}
+async function confirmSummaryUpdate(){
+  if(!pendingSummaryFile)return;
+  const statusEl=document.getElementById('summaryImportStatus');
+  statusEl.innerHTML='<div class="alert alert-info">正在写入增量更新...</div>';
+  const fd=new FormData();
+  fd.append('file',pendingSummaryFile);fd.append('mode','update');fd.append('session_id',pendingSummarySessionId);
+  try{
+    const r=await fetch(API+'/sessions/import-summary',{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:fd});
+    const data=await r.json();
+    pendingSummaryFile=null;pendingSummarySessionId=null;
+    const pm=document.getElementById('summaryPreviewModal');if(pm&&bootstrap.Modal.getInstance(pm))bootstrap.Modal.getInstance(pm).hide();
+    if(!r.ok||data.error){statusEl.innerHTML='<div class="alert alert-danger">导入失败：'+(esc(data.error)||'未知错误')+'</div>';return;}
+    statusEl.innerHTML='<div class="alert alert-success">增量同步完成！新增 '+data.created+' / 更新 '+data.updated+' / 未变 '+data.unchanged+' / 删除 '+data.deleted+' 行。</div>';
     setTimeout(()=>{const m=document.getElementById('summaryImportModal');if(m&&bootstrap.Modal.getInstance(m))bootstrap.Modal.getInstance(m).hide();loadAll();},1800);
   }catch(e){statusEl.innerHTML='<div class="alert alert-danger">网络错误：'+esc(e.message)+'</div>';}
 }
