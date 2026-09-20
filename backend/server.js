@@ -1381,13 +1381,15 @@ async function handleFolderUpload(req, res) {
   let overrides = {};
   try { overrides = JSON.parse(req.body.overrides || '{}') || {}; } catch (_) {}
   const projects = db.store.projects.filter(p => p.session_id === sessionId);
-  const resolveContent = require('./resolve-project-content').resolveProjectByContent;
+  const rpcModule = require('./resolve-project-content');
+  const resolveContent = rpcModule.resolveProjectByContent;
+  const bestNameFragmentMatch = rpcModule.bestNameFragmentMatch;
   // 第一遍：逐文件解析归属（人工改派 > 文件内容识别 > 文件名兜底）。内容识别为异步（pdf/docx 需读取文件内容）
   const pre = await Promise.all(files.map(async (f, i) => {
     const rel = (relPaths[i] || f.originalname || '').toString();
     const realName = decodeFilename(f.originalname);
     const override = overrides[String(i)] || {};
-    let match = null, matchedBy = '';
+    let match = null, matchedBy = '', conflict = null;
     if (override.projectId) { match = projects.find(p => p.id === parseInt(override.projectId)); if (match) matchedBy = 'manual'; }
     // 强文件名信号优先于内容识别：文件名包含项目编号或完整项目名时直接定归属，
     // 不让较弱的内容部分匹配抢跑（曾导致估算表因含「有限责任公司」通用词被错配到别的项目）
@@ -1402,7 +1404,15 @@ async function handleFolderUpload(req, res) {
     }
     if (!match) {
       const c = await resolveContent(f.path, projects);
-      if (c) { match = c.project; matchedBy = c.by; }
+      if (c) {
+        // 文件名与内容交叉校验：文件名片段明确指向另一个项目时视为冲突，
+        // 宁可不匹配（进收件箱人工分配），也不让「文件名 A 项目、内容 B 项目」的文件错配。
+        // 典型场景：模板复制后只改了文件名、没改表内「项目名称」单元格。
+        const fc = bestNameFragmentMatch(base, projects);
+        if (fc && fc.project.id !== c.project.id) {
+          conflict = { contentProject: c.project.project_name, fileProject: fc.project.project_name };
+        } else { match = c.project; matchedBy = c.by; }
+      }
     }
     if (!match) {
       // 弱文件名兜底：项目名包含文件名主体。要求主体 ≥6 字，
@@ -1412,7 +1422,7 @@ async function handleFolderUpload(req, res) {
         if (byName.length) { match = byName[0]; matchedBy = 'name'; }
       }
     }
-    return { f, i, rel, realName, override, match, matchedBy };
+    return { f, i, rel, realName, override, match, matchedBy, conflict };
   }));
   // 第二遍：同文件夹归并——若某文件夹内有文件解析出项目，该文件夹下其余未匹配文件一并挂接到该项目
   const byFolder = {};
@@ -1426,13 +1436,17 @@ async function handleFolderUpload(req, res) {
     for (const it of group) if (it.match) cnt[it.match.id] = (cnt[it.match.id] || 0) + 1;
     let folderPid = null, max = 0;
     for (const pid in cnt) if (cnt[pid] > max) { max = cnt[pid]; folderPid = parseInt(pid); }
-    if (folderPid != null) for (const it of group) if (!it.match) { it.match = projects.find(p => p.id === folderPid); it.matchedBy = 'folder'; }
+    if (folderPid != null) for (const it of group) if (!it.match && !it.conflict) { it.match = projects.find(p => p.id === folderPid); it.matchedBy = 'folder'; }
   }
   const report = [];
   for (const it of pre) {
-    const { f, i, rel, realName, override, match, matchedBy } = it;
+    const { f, i, rel, realName, override, match, matchedBy, conflict } = it;
     const category = (override.category && override.category !== 'auto') ? override.category : inferFileCategory(realName);
     const validation = { level: 'ok', messages: [] };
+    if (conflict) {
+      validation.level = 'warn';
+      validation.messages.push(`文件名与内容指向不同项目（文件名似「${conflict.fileProject}」、内容为「${conflict.contentProject}」），未自动匹配，请人工分配`);
+    }
     const isExcel = /\.(xlsx|xls)$/i.test(realName);
     let parsed = null;
     if (match && isExcel) {

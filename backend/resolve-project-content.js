@@ -131,4 +131,34 @@ async function resolveProjectByContent(filePath, projects) {
   return best ? { project: best, by: bestBy } : null;
 }
 
-module.exports = { normStr, extractXlsxText, extractPdfText, extractDocxText, extractText, resolveProjectByContent };
+// 判断文件名更「像」哪个项目：取各项目名中出现在文件名里、且【不被同批次其他项目名共享】的
+// 最长区分片段（6~12 连续字符，去通用词后剩 ≥4 字）。
+// 共享片段（如同系列模板共有的「国网山东省电力公司物资」前缀）没有区分度，不计分——
+// 否则同系列不同城市的项目会全部打平。返回得分最高的唯一项目；无任何独有片段命中则返回 null。
+// 用于与内容识别结果交叉校验：文件名指向 A、内容指向 B 时视为冲突，宁可不匹配交人工分配。
+function bestNameFragmentMatch(base, projects) {
+  const nb = normStr(base);
+  if (nb.length < 6) return null;
+  const names = projects.map(p => ({ p, nn: normStr(p.project_name || '') }));
+  let best = null, bestLen = 0;
+  for (const { p, nn } of names) {
+    if (nn.length < 8) continue;
+    const others = names.filter(x => x.p.id !== p.id && x.nn).map(x => x.nn);
+    let foundLen = 0;
+    for (let L = Math.min(12, nn.length); L >= 6; L--) {
+      let ok = false;
+      for (let s = 0; s + L <= nn.length; s++) {
+        const frag = nn.substr(s, L);
+        if (!nb.includes(frag) || distinctLen(frag) < 4) continue;
+        // 片段必须为该项目独有：不出现在其他任何项目名中，否则视为打平、跳过
+        if (others.some(onn => onn.includes(frag))) { ok = false; continue; }
+        ok = true; break;
+      }
+      if (ok) { foundLen = L; break; }
+    }
+    if (foundLen > bestLen) { bestLen = foundLen; best = p; }
+  }
+  return best ? { project: best, len: bestLen } : null;
+}
+
+module.exports = { normStr, extractXlsxText, extractPdfText, extractDocxText, extractText, resolveProjectByContent, bestNameFragmentMatch };
