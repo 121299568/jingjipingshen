@@ -2036,10 +2036,14 @@ async function openVersionHistory(){
     if(!r.ok||d.error){body.innerHTML='<div class="alert alert-danger">加载失败：'+esc(d.error||'未知错误')+'</div>';return;}
     const groups=(d.groups||[]).filter(g=>g.versions&&g.versions.length);
     if(!groups.length){body.innerHTML='<div class="alert alert-secondary">该批次暂无文件版本记录。</div>';return;}
+    // 有历史版本的排在前面
+    groups.sort((a,b)=>(b.versions.length-a.versions.length)||0);
+    const withHist=groups.filter(g=>g.versions.length>1).length;
     const TYPE_CN={summary:'评审汇总表',offline_eval:'离线评估表',cost_estimate:'成本估算表',project_doc:'项目文档'};
-    let html='';
+    let html='<div class="alert alert-info small mb-2">共 <b>'+groups.length+'</b> 个文件，其中 <b>'+withHist+'</b> 个存在历史版本（重传后旧版自动保留）。</div>';
     groups.forEach(g=>{
-      html+='<div class="border rounded mb-3"><div class="px-3 py-2 bg-light small fw-bold">'+esc(TYPE_CN[g.import_type]||g.import_type||'文件')+' <span class="text-muted">('+esc(g.logical_key||'')+')</span></div>';
+      const keyLabel=(g.logical_key&&g.logical_key.indexOf('misc:')!==0)?(' <span class="text-muted">('+esc(g.logical_key)+')</span>'):'';
+      html+='<div class="border rounded mb-3"><div class="px-3 py-2 bg-light small fw-bold">'+esc(TYPE_CN[g.import_type]||g.import_type||'文件')+keyLabel+(g.versions.length>1?' <span class="badge bg-warning text-dark ms-1">'+g.versions.length+' 个版本</span>':' <span class="badge bg-light text-muted ms-1">仅当前版</span>')+'</div>';
       html+='<table class="table table-sm mb-0 align-middle"><thead class="table-light"><tr><th style="width:70px">版本</th><th>文件名</th><th style="width:150px">上传时间</th><th style="width:110px">上传人</th><th style="width:90px">状态</th><th style="width:70px"></th></tr></thead><tbody>';
       g.versions.forEach(v=>{
         const t=v.upload_time?new Date(v.upload_time).toLocaleString('zh-CN'):'';
