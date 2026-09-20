@@ -1385,7 +1385,10 @@ function cascadeDeleteProject(projectId) {
   db.store.travelItems = db.store.travelItems.filter(t => t.project_id !== projectId);
   db.store.expertEstimates = db.store.expertEstimates.filter(e => e.project_id !== projectId);
   db.store.confirmations = db.store.confirmations.filter(c => c.project_id !== projectId);
-  db.store.files = db.store.files.filter(f => f.project_id !== projectId);
+  // 文件不做物理删除也不丢记录：解绑项目并打标记，保留文件版本历史供后续审计导出
+  (db.store.files || []).forEach(f => {
+    if (f.project_id === projectId) { f.orphaned_from_project_id = projectId; f.project_deleted_at = new Date().toISOString(); f.project_id = null; }
+  });
   db.store.projects = db.store.projects.filter(p => p.id !== projectId);
 }
 
