@@ -107,14 +107,18 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
 body.nav-pinned .nav-pin{background:rgba(224,36,36,.14);opacity:1}
 body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
 /* ===== 评估汇总表（项目经济评审结果汇总表）===== */
-.wl-wrap{max-height:72vh;overflow:auto;position:relative;background:#fff}
-.wl-wrap table{border-collapse:separate;border-spacing:0;font-size:12.5px}
-.wl-wrap thead th{position:sticky;top:0;z-index:4;background:#f8fafc;white-space:nowrap;box-shadow:inset 0 -1px 0 #dfe3e8}
-.wl-wrap thead tr.wl-h2 th{top:32px}
+/* 关键：--wl-c1/--wl-c2 与 colgroup 列宽同源；--wl-h1 与首行表头等高，冻结偏移永不失配 */
+.wl-wrap{max-height:72vh;overflow:auto;position:relative;background:#fff;--wl-c1:44px;--wl-c2:252px;--wl-h1:26px}
+.wl-wrap table{border-collapse:separate;border-spacing:0;font-size:12.5px;table-layout:fixed;width:100%}
+.wl-wrap thead th{position:sticky;top:0;z-index:4;background:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:inset 0 -1px 0 #dfe3e8}
+.wl-wrap thead tr.wl-h1 th{height:var(--wl-h1);padding-top:0;padding-bottom:0;vertical-align:middle}
+.wl-wrap thead tr.wl-h2 th{top:var(--wl-h1)}
 .wl-wrap thead .wl-group{background:#eef2ff;color:#3730a3;font-weight:600;text-align:center;box-shadow:inset -1px 0 0 #fff,inset 0 -1px 0 #dfe3e8}
 .wl-freeze{position:sticky;left:0;z-index:5;background:#fff;box-shadow:inset -1px 0 0 #e5e7eb}
-.wl-freeze2{position:sticky;left:46px;z-index:5;background:#fff;box-shadow:inset -1px 0 0 #e5e7eb}
+.wl-freeze2{position:sticky;left:var(--wl-c1);z-index:5;background:#fff;box-shadow:inset -1px 0 0 #cbd5e1,3px 0 6px -3px rgba(15,23,42,.14)}
 .wl-wrap thead .wl-freeze,.wl-wrap thead .wl-freeze2{background:#f8fafc;z-index:6}
+/* 斑马纹 + 悬浮高亮（含冻结列） */
+.wl-wrap tbody tr:nth-child(even) td{background:#fcfdff}
 .wl-wrap tbody tr:hover td{background:#f6f9ff}
 .wl-wrap tfoot td{position:sticky;bottom:0;background:#f1f5f9;z-index:4;font-weight:600}
 .wl-wrap tfoot .wl-freeze,.wl-wrap tfoot .wl-freeze2{background:#f1f5f9;z-index:6}
@@ -122,16 +126,23 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
 .wl-zero{color:#c3c7cf}
 .wl-neg{color:#d93025;font-weight:600}
 .wl-warn{color:#b45309;font-weight:600}
-/* 项目名称：完整模式多行完整显示；精简模式单行省略号 */
-.wl-name{white-space:normal;word-break:break-all;overflow:visible;line-height:1.4}
-.wl-compact .wl-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* 精简模式：隐藏业务方向组与部分明细列 */
+/* 长文本列：默认最多 2 行截断，悬浮即时看全文；精简模式收成 1 行 */
+.wl-txt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.45;word-break:break-word}
+.wl-wrap.wl-compact .wl-txt{-webkit-line-clamp:1}
+.wl-name{font-weight:500}
+.wl-wrap.wl-compact .wl-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 异常行：首列红色标记条 + 问题单元格警示底 */
+.wl-wrap tbody tr.wl-flag .wl-freeze{box-shadow:inset 3px 0 0 #e5484d,inset -1px 0 0 #e5e7eb}
+.wl-wrap thead tr.wl-h1 th.wl-freeze{box-shadow:inset -1px 0 0 #e5e7eb}
+.wl-wrap thead tr.wl-h1 th.wl-freeze2{box-shadow:inset -1px 0 0 #cbd5e1,3px 0 6px -3px rgba(15,23,42,.14)}
+.wl-cell-bad{background:#fff5f5!important;color:#c0281f!important;font-weight:600}
+/* 精简模式：隐藏业务方向组与明细列 */
 .wl-compact .wl-g-direction,.wl-compact .wl-detail{display:none}
 .wl-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.wl-toolbar .form-control-sm{width:auto;min-width:160px}
+.wl-toolbar .form-control-sm{width:auto;min-width:150px}
 .wl-toolbar .btn-sm{padding:.25rem .55rem}
 /* ===== 即时悬浮提示（替代原生 title 的 1 秒延迟） ===== */
-#tipBox{position:fixed;z-index:3000;max-width:400px;background:#212529;color:#fff;font-size:12px;line-height:1.6;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.32);pointer-events:none;display:none;white-space:pre-wrap;word-break:break-all}
+#tipBox{position:fixed;z-index:3000;max-width:520px;background:#212529;color:#fff;font-size:12px;line-height:1.6;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.32);pointer-events:none;display:none;white-space:pre-wrap;word-break:break-word}
 </style>
 </head>
 <body>
@@ -1962,6 +1973,7 @@ function exportTableToCSV(){
 // ==================== 评估汇总（管理员/研发）====================
 let wlSelectedSessionId=null;
 let wlCompactMode=false; // 精简模式开关（5a127b3 重写时漏声明，导致评估汇总页 ReferenceError）
+let wlAnomalyOnly=false; // 只看异常项筛选开关
 function renderWorkloadSummary(){
   wlSelectedSessionId=null; wlCurrentData=null;
   const nameEl=document.getElementById('wlSessionName'); if(nameEl) nameEl.textContent='';
@@ -2084,49 +2096,55 @@ function fmtWlMoney(n){const v=Number(n);return (isNaN(v)||n==null)?'¥0':'¥'+v
 function renderWorkloadProjectTable(d){
   const list=(d.projects||[]);
   if(!list.length){document.getElementById('wlProjects').innerHTML='<div class="text-muted text-center py-4">该批次暂无项目。</div>';return;}
-  // 列分组：基础列（冻结）+ 各业务分组
+  // 列分组：基础列（冻结）+ 各业务分组。w=列宽(px)，与冻结偏移同源；txt=长文本列（2 行截断+悬浮全文）
   const groups=[
     {name:'项目信息',cols:[
-      {k:'biz_department',label:'承建部门'},
-      {k:'project_type',label:'项目类型'},
+      {k:'biz_department',label:'承建部门',w:132},
+      {k:'project_type',label:'项目类型',w:104},
     ]},
     {name:'合同与成本',cols:[
-      {k:'contract_amount',label:'合同额',money:true},
-      {k:'total_cost',label:'总成本估算',money:true},
-      {k:'profit_rate',label:'估算利润率',pct:true},
+      {k:'contract_amount',label:'合同额',money:true,w:108},
+      {k:'total_cost',label:'总成本估算',money:true,w:108},
+      {k:'profit_rate',label:'估算利润率',pct:true,w:88},
     ]},
     {name:'人员成本',cols:[
-      {k:'long_term_cost',label:'长期职工',money:true},
-      {k:'zhongshi_cost',label:'中实职工',money:true},
-      {k:'huazhao_cost',label:'华兆职工',money:true},
-      {k:'outsourcing_cost',label:'人员外包',money:true},
+      {k:'long_term_cost',label:'长期职工',money:true,w:96},
+      {k:'zhongshi_cost',label:'中实职工',money:true,w:96},
+      {k:'huazhao_cost',label:'华兆职工',money:true,w:96},
+      {k:'outsourcing_cost',label:'人员外包',money:true,w:96},
     ]},
     {name:'专业分包',cols:[
-      {k:'subcontract_cost',label:'专业分包',money:true},
-      {k:'subcontract_ratio',label:'分包占比',pct:true},
-      {k:'is_restricted_subcontract',label:'限制分包'},
-      {k:'subcontract_scope',label:'分包范围',detail:true},
+      {k:'subcontract_cost',label:'专业分包',money:true,w:100},
+      {k:'subcontract_ratio',label:'分包占比',pct:true,w:80},
+      {k:'is_restricted_subcontract',label:'限制分包',w:76},
+      {k:'subcontract_scope',label:'分包范围',detail:true,txt:true,w:180},
     ]},
     {name:'其他费用',cols:[
-      {k:'procurement_cost',label:'采购',money:true},
-      {k:'travel_cost',label:'差旅',money:true},
-      {k:'third_party_test_cost',label:'第三方测试',money:true},
-      {k:'ip_cost',label:'知识产权',money:true},
+      {k:'procurement_cost',label:'采购',money:true,w:92},
+      {k:'travel_cost',label:'差旅',money:true,w:92},
+      {k:'third_party_test_cost',label:'第三方测试',money:true,w:96},
+      {k:'ip_cost',label:'知识产权',money:true,w:92},
     ]},
     {name:'业务方向',cls:'wl-g-direction',cols:[
-      {k:'is_digital',label:'数字化'},
-      {k:'business_direction',label:'业务方向',detail:true},
-      {k:'business_sub_direction',label:'业务子方向',detail:true},
-      {k:'product_direction',label:'产品方向',detail:true},
+      {k:'is_digital',label:'数字化',w:68},
+      {k:'business_direction',label:'业务方向',detail:true,txt:true,w:150},
+      {k:'business_sub_direction',label:'业务子方向',detail:true,txt:true,w:150},
+      {k:'product_direction',label:'产品方向',detail:true,txt:true,w:130},
     ]},
   ];
   const moneyKeys=['contract_amount','total_cost','long_term_cost','zhongshi_cost','huazhao_cost','outsourcing_cost','subcontract_cost','procurement_cost','travel_cost','third_party_test_cost','ip_cost'];
   const totals={};moneyKeys.forEach(k=>totals[k]=0);
-  // 表头：第一行分组（跨列），第二行明细；前两列冻结跨两行
-  const groupRow='<tr>'+'<th rowspan="2" class="wl-freeze">序号</th>'+'<th rowspan="2" class="wl-freeze2 wl-name">项目名称</th>'+
-    groups.map(g=>'<th colspan="'+g.cols.length+'" class="wl-group '+g.cls+'">'+g.name+'</th>').join('')+'</tr>';
-  const subRow='<tr class="wl-h2">'+groups.map(g=>g.cols.map(c=>'<th class="'+(c.detail?'wl-detail ':'')+g.cls+'">'+c.label+'</th>').join('')).join('')+'</tr>';
-  let tbody='';
+  // 冻结列宽（与 CSS 变量 --wl-c1/--wl-c2 同源）
+  const WL_C1=44, WL_C2=252;
+  // 列宽总和 → 表格 min-width，避免 table-layout:fixed 在容器不足时把列按比例压扁
+  const fullW=WL_C1+WL_C2+groups.reduce((s,g)=>s+g.cols.reduce((a,c)=>a+(c.w||96),0),0);
+  const compactW=WL_C1+WL_C2+groups.filter(g=>!g.cls).reduce((s,g)=>s+g.cols.filter(c=>!c.detail).reduce((a,c)=>a+(c.w||96),0),0);
+  // 表头：第一行分组（跨列，固定高度供第二行吸顶定位），第二行明细；前两列冻结跨两行
+  const groupRow='<tr class="wl-h1">'+'<th rowspan="2" class="wl-freeze">序号</th>'+'<th rowspan="2" class="wl-freeze2">项目名称</th>'+
+    groups.map(g=>'<th colspan="'+g.cols.length+'" class="wl-group '+(g.cls||'')+'">'+g.name+'</th>').join('')+'</tr>';
+  const subRow='<tr class="wl-h2">'+groups.map(g=>g.cols.map(c=>'<th class="'+(c.detail?'wl-detail ':'')+(g.cls||'')+'">'+c.label+'</th>').join('')).join('')+'</tr>';
+  let tbody='', anomalyCount=0;
+  const tipAttr=(s,min)=>{const t=String(s==null?'':s);return t.length>min?' data-tip="'+esc(t)+'"':'';};
   list.forEach((p,idx)=>{
     const cs=p.cost_summary||{};
     const tc=Number(cs.total_cost)||0, sub=Number(cs.subcontract_cost)||0;
@@ -2142,31 +2160,46 @@ function renderWorkloadProjectTable(d){
       business_direction:p.business_direction||'-',
       business_sub_direction:p.business_sub_direction||'-', product_direction:p.product_direction||'-'
     };
-    let cells='<td class="wl-freeze wl-num">'+row.idx+'</td>';
-    let nameCell='<td class="wl-freeze2 wl-name">'+esc(row.project_name);
-    if(p.needs_estimate===false) nameCell+=' <span class="badge bg-light text-dark border" title="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span>';
-    nameCell+='</td>';
+    // 异常判定：用于行首红色标记、问题单元格高亮与「只看异常」筛选
+    const ca=Number(p.contract_amount)||0;
+    const prRaw=cs.profit_rate!=null?Number(cs.profit_rate):null;
+    const anom=[];
+    if(!(ca>0)) anom.push('合同额为 0 或缺失');
+    if(ca>0&&tc>ca) anom.push('总成本估算 ¥'+tc.toLocaleString()+' 超过合同额 ¥'+ca.toLocaleString());
+    if(prRaw!=null&&prRaw<0) anom.push('估算利润率为负（'+(Math.round(prRaw*10000)/100)+'%）');
+    if(anom.length)anomalyCount++;
+    const rowTip=anom.length?' data-tip="⚠ 需关注：'+esc(anom.join('；'))+'"':'';
+    let cells='<td class="wl-freeze wl-num"'+rowTip+'>'+row.idx+'</td>';
+    let nameCell='<td class="wl-freeze2 wl-name wl-txt"'+tipAttr(row.project_name,17)+'>';
+    if(p.needs_estimate===false) nameCell+='<span class="badge bg-light text-dark border" data-tip="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span> ';
+    nameCell+=esc(row.project_name)+'</td>';
     cells+=nameCell;
     groups.forEach(g=>g.cols.forEach(c=>{
       const v=row[c.k];
-      const cls=(c.detail?'wl-detail ':'')+g.cls+' ';
+      const cls=(c.detail?'wl-detail ':'')+(g.cls||'')+' ';
       if(c.money){
-        const n=Number(v)||0; const c2=cls+'wl-num'+(n===0?' wl-zero':'');
+        const n=Number(v)||0;
+        const bad=(c.k==='contract_amount'&&ca<=0)||(c.k==='total_cost'&&ca>0&&tc>ca);
+        const c2=cls+'wl-num'+(n===0?' wl-zero':'')+(bad?' wl-cell-bad':'');
         cells+='<td class="'+c2+'">¥'+n.toLocaleString()+'</td>';
       } else if(c.pct){
-        const c2=cls+'wl-num'+(v==null?' wl-zero':'');
+        const bad=(c.k==='profit_rate'&&prRaw!=null&&prRaw<0);
+        const c2=cls+'wl-num'+(v==null?' wl-zero':'')+(bad?' wl-cell-bad':'');
         cells+='<td class="'+c2+'">'+(v==null?'-':Math.round(v*100)/100+'%')+'</td>';
+      } else if(c.txt){
+        const s=String(v==null?'':v);
+        cells+='<td class="'+cls+'wl-txt"'+tipAttr(s,18)+'>'+esc(s||'-')+'</td>';
       } else {
-        cells+='<td class="'+cls+'">'+esc(v==null?'':v)+'</td>';
+        cells+='<td class="'+cls+'"'+tipAttr(v,14)+'>'+esc(v==null?'':v)+'</td>';
       }
     }));
-    tbody+='<tr>'+cells+'</tr>';
+    tbody+='<tr'+(anom.length?' class="wl-flag" data-anom="1"':' data-anom="0"')+'>'+cells+'</tr>';
     moneyKeys.forEach(k=>totals[k]+=Number(row[k])||0);
   });
   // 合计行（冻结列 + 仅金额/占比列有值）
   let footCells='<td class="wl-freeze wl-num">合计</td>'+'<td class="wl-freeze2 wl-name"></td>';
   groups.forEach(g=>g.cols.forEach(c=>{
-    const cls=(c.detail?'wl-detail ':'')+g.cls+' ';
+    const cls=(c.detail?'wl-detail ':'')+(g.cls||'')+' ';
     if(c.money){
       const n=Number(totals[c.k])||0;
       footCells+='<td class="'+cls+'wl-num">¥'+n.toLocaleString()+'</td>';
@@ -2177,32 +2210,58 @@ function renderWorkloadProjectTable(d){
       footCells+='<td class="'+cls+'"></td>';
     }
   }));
-  const tfoot='<tr>'+footCells+'</tr>';
-  // 固定布局需要显式列宽：序号46 + 项目名称220 + 数据列（明细列150/普通110），与冻结偏移严格对齐
-  const colgroup='<colgroup><col style="width:46px"><col style="width:220px">'+
-    groups.map(g=>g.cols.map(c=>'<col style="width:'+(c.detail?'150px':'110px')+'">').join('')).join('')+'</colgroup>';
+  const tfoot='<tr id="wlFootRow">'+footCells+'</tr>';
+  // 固定布局显式列宽：与冻结列偏移（CSS 变量 --wl-c1/--wl-c2）严格同源
+  const colgroup='<colgroup><col style="width:'+WL_C1+'px"><col style="width:'+WL_C2+'px">'+
+    groups.map(g=>g.cols.map(c=>'<col style="width:'+(c.w||96)+'px">').join('')).join('')+'</colgroup>';
   const toolbar='<div class="wl-toolbar">'+
     '<input class="form-control form-control-sm" id="wlFilter" placeholder="搜索项目名称 / 部门" oninput="wlFilterTable()">'+
+    '<button class="btn btn-sm btn-outline-danger" id="wlAnomalyBtn" onclick="toggleWlAnomaly()" data-tip="只看合同额缺失、总成本超合同额、估算利润率为负的项目"><i class="bi bi-exclamation-triangle"></i> 只看异常'+(anomalyCount?' ('+anomalyCount+')':'')+'</button>'+
     '<button class="btn btn-sm btn-outline-secondary" id="wlCompactBtn" onclick="toggleWlCompact()"><i class="bi bi-arrows-angle-contract"></i> 精简</button>'+
     '</div>';
-  const html='<div class="card card-custom"><div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2"><div><h6 class="mb-0">项目经济评审结果汇总表</h6><div class="text-muted small">共 '+list.length+' 个项目 · 单位：元 · 向左滚动可固定查看项目名称</div></div>'+toolbar+'</div>'+
-    '<div class="card-body p-0"><div class="wl-wrap'+(wlCompactMode?' wl-compact':'')+'" id="wlWrap"><table class="table table-sm mb-0 align-middle">'+colgroup+'<thead class="table-light">'+groupRow+subRow+'</thead><tbody>'+tbody+'</tbody><tfoot>'+tfoot+'</tfoot></table></div></div></div>';
+  const caption='共 '+list.length+' 个项目 · 单位：元 · 左右滚动时前两列固定'+(anomalyCount?(' · <span class="text-danger">'+anomalyCount+' 项需关注</span>'):'');
+  const html='<div class="card card-custom"><div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2"><div><h6 class="mb-0">项目经济评审结果汇总表</h6><div class="text-muted small" id="wlCaption">'+caption+'</div></div>'+toolbar+'</div>'+
+    '<div class="card-body p-0"><div class="wl-wrap'+(wlCompactMode?' wl-compact':'')+'" id="wlWrap" data-fw="'+fullW+'" data-cw="'+compactW+'" style="--wl-c1:'+WL_C1+'px;--wl-c2:'+WL_C2+'px"><table class="table table-sm mb-0 align-middle" id="wlTable" style="min-width:'+(wlCompactMode?compactW:fullW)+'px">'+colgroup+'<thead class="table-light">'+groupRow+subRow+'</thead><tbody>'+tbody+'</tbody><tfoot>'+tfoot+'</tfoot></table></div></div></div>';
   document.getElementById('wlProjects').innerHTML=html;
+  wlFilterTable();
 }
 function toggleWlCompact(){
   wlCompactMode=!wlCompactMode;
   const btn=document.getElementById('wlCompactBtn');
   if(btn)btn.innerHTML=wlCompactMode?'<i class="bi bi-arrows-angle-expand"></i> 完整':'<i class="bi bi-arrows-angle-contract"></i> 精简';
   const wrap=document.getElementById('wlWrap');
-  if(wrap)wrap.classList.toggle('wl-compact',wlCompactMode);
+  if(wrap){
+    wrap.classList.toggle('wl-compact',wlCompactMode);
+    const t=document.getElementById('wlTable');
+    if(t)t.style.minWidth=(wlCompactMode?(wrap.dataset.cw||'0'):(wrap.dataset.fw||'0'))+'px';
+  }
+  wlFilterTable();
+}
+function toggleWlAnomaly(){
+  wlAnomalyOnly=!wlAnomalyOnly;
+  const b=document.getElementById('wlAnomalyBtn');
+  if(b)b.classList.toggle('active',wlAnomalyOnly);
+  wlFilterTable();
 }
 function wlFilterTable(){
   const q=(document.getElementById('wlFilter').value||'').trim().toLowerCase();
   const wrap=document.getElementById('wlWrap');if(!wrap)return;
+  let total=0,visible=0,anomTotal=0;
   wrap.querySelectorAll('tbody tr').forEach(tr=>{
-    const txt=tr.textContent.toLowerCase();
-    tr.style.display=(!q||txt.includes(q))?'':'none';
+    total++;
+    const isAnom=tr.getAttribute('data-anom')==='1';
+    if(isAnom)anomTotal++;
+    const show=(!q||tr.textContent.toLowerCase().includes(q))&&(!wlAnomalyOnly||isAnom);
+    tr.style.display=show?'':'none';
+    if(show)visible++;
   });
+  const cap=document.getElementById('wlCaption');
+  if(cap){
+    let t='共 '+total+' 个项目 · 单位：元 · 左右滚动时前两列固定';
+    if(anomTotal)t+=' · <span class="text-danger">'+anomTotal+' 项需关注</span>';
+    if(visible!==total)t+=' · 当前显示 <b>'+visible+'</b> 个'+(wlAnomalyOnly?'（仅异常）':'');
+    cap.innerHTML=t;
+  }
 }
 
 // USERS
