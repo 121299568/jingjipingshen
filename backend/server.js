@@ -1535,6 +1535,15 @@ app.get('/api/sessions/:id/inbox', auth(['admin', 'rd', 'biz']), (req, res) => {
   res.json(list);
 });
 
+// 按批次列出全部文件（项目文件 + 收件箱待分配），供前端「文件管理」面板使用
+app.get('/api/sessions/:id/files', auth(['admin', 'rd', 'biz']), (req, res) => {
+  const sessionId = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sessionId);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const pids = new Set(db.store.projects.filter(p => p.session_id === sessionId).map(p => p.id));
+  res.json(db.store.files.filter(f => (f.inbox && f.session_id === sessionId) || (!f.inbox && pids.has(f.project_id))));
+});
+
 // 收件箱文件改派到具体项目
 app.post('/api/files/:id/reassign', auth(['admin', 'rd']), (req, res) => {
   const fileId = parseInt(req.params.id);

@@ -174,6 +174,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f0f2f5}
             <option value="">（未选择批次）</option>
           </select>
           <button class="btn btn-warning btn-sm" onclick="openFolderUploadModal()"><i class="bi bi-folder2-open"></i> 文件夹批量上传</button>
+          <button class="btn btn-outline-primary btn-sm" onclick="openFileManageModal()"><i class="bi bi-hdd-stack"></i> 文件管理</button>
           <button class="btn btn-info btn-sm" onclick="openOfflineEvalModal()"><i class="bi bi-file-earmark-arrow-up"></i> 导入离线评估表</button>
           <div class="input-group input-group-sm" style="width:auto">
             <select class="form-select" id="deptExportSelect" style="width:auto"><option value="">全部事业部</option></select>
@@ -2607,6 +2608,75 @@ function openFolderUploadModal(){
   folderFiles=[];
   new bootstrap.Modal(document.getElementById('folderUploadModal')).show();
 }
+// ==================== 批次文件管理 ====================
+let fileMgmtFiles=[];
+function openFileManageModal(){
+  const sel=document.getElementById('fileMgmtBatch');
+  sel.innerHTML=sessions.slice().sort((a,b)=>a.id-b.id).map(s=>'<option value="'+s.id+'">'+esc(s.name||s.session_name||'批次'+s.id)+'</option>').join('');
+  const cur=document.getElementById('projBatchSelect');
+  if(cur&&cur.value)sel.value=cur.value;
+  document.getElementById('fileMgmtMsg').innerHTML='';
+  new bootstrap.Modal(document.getElementById('fileManageModal')).show();
+  renderFileMgmt();
+}
+async function renderFileMgmt(){
+  const sid=parseInt(document.getElementById('fileMgmtBatch').value);
+  const body=document.getElementById('fileMgmtBody');
+  const countEl=document.getElementById('fileMgmtCount');
+  if(!sid){body.innerHTML='<tr><td colspan="6" class="text-muted text-center py-4">请选择评审批次</td></tr>';countEl.textContent='';return;}
+  body.innerHTML='<tr><td colspan="6" class="text-muted text-center py-4">加载中…</td></tr>';
+  try{
+    const r=await fetch(API+'/sessions/'+sid+'/files',{headers:authH()});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    fileMgmtFiles=await r.json();
+  }catch(e){fileMgmtFiles=[];body.innerHTML='<tr><td colspan="6" class="text-danger text-center py-4">加载失败：'+esc(e.message)+'</td></tr>';return;}
+  const inboxOnly=document.getElementById('fileMgmtInboxOnly').checked;
+  const list=inboxOnly?fileMgmtFiles.filter(f=>f.inbox):fileMgmtFiles;
+  const ps=projects.filter(p=>p.session_id===sid).sort((a,b)=>a.id-b.id);
+  countEl.textContent='共 '+list.length+' 个文件'+(inboxOnly?'（收件箱 '+fileMgmtFiles.filter(f=>f.inbox).length+'）':'');
+  if(!list.length){body.innerHTML='<tr><td colspan="6" class="text-muted text-center py-4">'+(inboxOnly?'收件箱为空，没有待分配文件':'该批次暂无文件')+'</td></tr>';return;}
+  body.innerHTML=list.map(f=>{
+    const opts='<option value="">'+(f.inbox?'— 分配到项目 —':'（未指定）')+'</option>'+
+      ps.map(p=>'<option value="'+p.id+'"'+(f.project_id===p.id?' selected':'')+' title="'+esc(p.project_name||'')+'">'+esc((p.project_name||('项目'+p.id)).substring(0,26))+'</option>').join('');
+    const projCell=f.inbox?'<span class="badge bg-warning text-dark">收件箱待分配</span>':'<span class="badge bg-success">已归属</span>';
+    return '<tr'+(f.inbox?' class="table-warning"':'')+'>'+
+      '<td class="small" title="'+esc(f.originalname||'')+'">'+esc((f.originalname||'').substring(0,40))+'</td>'+
+      '<td><div class="d-flex align-items-center gap-1">'+projCell+
+        '<select class="form-select form-select-sm" style="min-width:200px" onchange="doFileMgmtReassign('+f.id+',this.value)">'+opts+'</select></div></td>'+
+      '<td class="small">'+esc(catName(f.file_category)||f.file_category||'-')+'</td>'+
+      '<td class="small text-muted">'+esc(f.uploader_name||'-')+'</td>'+
+      '<td class="small text-muted">'+fmtTime(f.upload_time)+'</td>'+
+      '<td class="text-nowrap">'+
+        (f.url?'<a class="btn btn-outline-secondary btn-sm" href="'+esc(f.url)+'" target="_blank" title="下载/查看"><i class="bi bi-download"></i></a> ':'')+
+        '<button class="btn btn-outline-danger btn-sm" onclick="doFileMgmtDelete('+f.id+',this)"><i class="bi bi-trash"></i></button>'+
+      '</td></tr>';
+  }).join('');
+}
+async function doFileMgmtReassign(fileId,projectId){
+  const msg=document.getElementById('fileMgmtMsg');
+  if(!projectId){msg.innerHTML='<span class="text-muted">已取消选择，文件归属未变更</span>';renderFileMgmt();return;}
+  try{
+    const r=await fetch(API+'/files/'+fileId+'/reassign',{method:'POST',headers:{...authH(),'Content-Type':'application/json'},body:JSON.stringify({projectId:parseInt(projectId)})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    msg.innerHTML='<span class="text-success"><i class="bi bi-check2"></i> 文件已重新分配</span>';
+    const p=projects.find(x=>x.id===parseInt(projectId));
+    if(p)loadFiles().catch(()=>{});
+  }catch(e){msg.innerHTML='<span class="text-danger">改派失败：'+esc(e.message)+'</span>';}
+  renderFileMgmt();
+}
+async function doFileMgmtDelete(fileId,btn){
+  const f=fileMgmtFiles.find(x=>x.id===fileId);
+  if(!confirm('确定删除文件「'+((f&&f.originalname)||fileId)+'」？\n磁盘文件将一并删除，不可恢复。'))return;
+  const msg=document.getElementById('fileMgmtMsg');
+  try{
+    const r=await fetch(API+'/files/'+fileId,{method:'DELETE',headers:authH()});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    msg.innerHTML='<span class="text-success"><i class="bi bi-check2"></i> 文件已删除</span>';
+  }catch(e){msg.innerHTML='<span class="text-danger">删除失败：'+esc(e.message)+'</span>';}
+  renderFileMgmt();
+}
 function inferCatFront(name){
   if(/估算|概算|预算|成本|测算|评估|工作量|报价|cost.*estimat|estimat/i.test(name))return'estimation';
   if(/可研|可行性|feasib/i.test(name))return'feasibility';
@@ -2899,6 +2969,32 @@ async function postAnnualComment(){
       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
       <button type="button" class="btn btn-primary" id="offlineEvalBtn" onclick="doImportOfflineEval()"><i class="bi bi-cloud-upload"></i> 开始导入</button>
     </div>
+  </div></div>
+</div>
+
+<!-- 批次文件管理模态框 -->
+<div class="modal fade" id="fileManageModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header"><h5>批次文件管理</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <div class="d-flex gap-2 mb-3 align-items-center flex-wrap">
+        <label class="form-label mb-0 small text-muted">批次</label>
+        <select class="form-select form-select-sm" id="fileMgmtBatch" style="width:auto" onchange="renderFileMgmt()"></select>
+        <span class="form-check form-check-inline small mb-0 ms-2">
+          <input class="form-check-input" type="checkbox" id="fileMgmtInboxOnly" onchange="renderFileMgmt()">
+          <label class="form-check-label" for="fileMgmtInboxOnly">只看收件箱（待分配）</label>
+        </span>
+        <span id="fileMgmtCount" class="text-muted small ms-auto"></span>
+      </div>
+      <div class="table-responsive" style="max-height:60vh;overflow:auto">
+        <table class="table table-sm table-hover mb-0">
+          <thead class="table-light"><tr><th>文件名</th><th style="width:26%">所属项目（下拉可改派）</th><th>类别</th><th>上传人</th><th>时间</th><th style="width:130px">操作</th></tr></thead>
+          <tbody id="fileMgmtBody"></tbody>
+        </table>
+      </div>
+      <div id="fileMgmtMsg" class="mt-2 small"></div>
+    </div>
+    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button></div>
   </div></div>
 </div>
 
