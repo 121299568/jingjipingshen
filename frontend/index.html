@@ -173,6 +173,8 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
 .dt-wrap thead .dt-f{background:#f8fafc;z-index:6}
 .dt-wrap tfoot .dt-f{background:#f1f5f9;z-index:6}
 .dt-zero{color:#c3c7cf}
+/* 需关注行：与评估汇总页 .wl-flag 同款红色左边框（告警统一并入「⚠ 需关注」悬浮提示后的行标记） */
+.dt-wrap tbody tr.dt-flag>td:first-child{box-shadow:inset 3px 0 0 #e5484d,inset -1px 0 0 #e5e7eb}
 /* 操作列：按钮不换行也不许被裁（固定布局下 overflow:hidden 会把按钮切掉） */
 .dt-acts{white-space:nowrap;overflow:visible;text-overflow:clip;text-align:right}
 /* 年度汇总页的行内可编辑单元格 */
@@ -1251,16 +1253,14 @@ function renderProjects(){
       const has=c=>pf.some(f=>f.file_category===c);
       const statusBg=statusBadgeClass(p.status);
       const lastOp=p.last_operation_at?new Date(p.last_operation_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
-      // 导入校验告警（仅提示不拦截）：估算表与汇总表基线数字对不上时 ⚠ 显示，悬停看详情
+      // 导入校验告警（仅提示不拦截）：统一并入行级「⚠ 需关注」悬浮提示 + 行标红（与评估汇总页同一种告警形式）
       const warns=p.import_warnings&&p.import_warnings.length?p.import_warnings:[];
-      // 用 data-tip 走即时悬浮提示（原生 title 有约 1 秒延迟，手感差）
-      const warnTip=warns.map(w=>((w.file?'【'+w.file+'】':'')+((w.messages||[]).join('；')))).join('\n');
-      const warnTag=warns.length?' <span class="text-warning" style="cursor:help" data-tip="导入校验告警（已正常导入，请人工核对）：\n'+esc(warnTip)+'"><i class="bi bi-exclamation-triangle-fill"></i>'+warns.length+'</span>':'';
-      return '<tr>'+
+      const warnMsgs=[]; warns.forEach(w=>(w.messages||[]).forEach(m=>warnMsgs.push(m)));
+      const warnTip=warnMsgs.length?' data-tip="⚠ 需关注：'+esc(warnMsgs.join('；'))+'"':'';
+      return '<tr'+(warnMsgs.length?' class="dt-flag"':'')+'>'+
         '<td class="dt-num">'+String(pi+1).padStart(2,'0')+'</td>'+
-        // 项目名不再用 substring 硬截断（会把转义实体切断），交给两行截断 + 悬浮看全文；
-        // 告警角标放在名称之前，避免被截断吃掉（页面上已有这个约定：徽标前置）
-        '<td class="dt-txt" data-tip="'+esc(p.project_name||'')+'"><span class="dt-clamp">'+warnTag+esc(p.project_name||'')+'</span></td>'+
+        // 项目名不再用 substring 硬截断（会把转义实体切断），交给两行截断 + 悬浮看全文
+        '<td class="dt-txt" data-tip="'+esc(p.project_name||'')+'"><span class="dt-clamp">'+esc(p.project_name||'')+'</span></td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
         '<td class="dt-num">'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
         '<td><span class="badge '+statusBg+'">'+projectStatusLabel(p.status)+'</span></td>'+
@@ -2456,22 +2456,21 @@ function renderWorkloadProjectTable(d){
     // 异常判定：用于行首红色标记、问题单元格高亮与「只看异常」筛选
     const iec=(p.internal_estimated_cost!=null&&p.internal_estimated_cost!=='')?Number(p.internal_estimated_cost):null;
     const prRaw=cs.profit_rate!=null?Number(cs.profit_rate):null;
+    // 导入校验告警（估算表与汇总表基线对不上等）：统一并入「⚠ 需关注」行提示，与其它异常同一种告警形式
+    const wn=p.import_warnings&&p.import_warnings.length?p.import_warnings:[];
     const anom=[];
     if(!(ca>0)) anom.push('合同额为 0 或缺失');
     if(ca>0&&tc>ca) anom.push('总成本估算 ¥'+tc.toLocaleString()+' 超过合同额 ¥'+ca.toLocaleString());
     if(prRaw!=null&&prRaw<0) anom.push('估算利润率为负（'+(Math.round(prRaw*10000)/100)+'%）');
     if(iec!=null&&tc>iec) anom.push('成本估算 ¥'+tc.toLocaleString()+' 超过内部填报预估 ¥'+iec.toLocaleString());
+    wn.forEach(w=>(w.messages||[]).forEach(m=>anom.push(m)));
     if(anom.length)anomalyCount++;
     const costBad=(ca>0&&tc>ca)||(iec!=null&&tc>iec);
     const rowTip=anom.length?' data-tip="⚠ 需关注：'+esc(anom.join('；'))+'"':'';
     let cells='<td class="wl-freeze wl-num"'+rowTip+'>'+row.idx+'</td>';
-    // 导入校验告警（与项目资料页同款 ⚠ 角标 + 悬浮详情；仅提示不拦截）
-    const wn=p.import_warnings&&p.import_warnings.length?p.import_warnings:[];
-    const wnTip=wn.map(w=>((w.file?'【'+w.file+'】':'')+((w.messages||[]).join('；')))).join('\n');
-    const wnTag=wn.length?' <span class="text-warning" style="cursor:help" data-tip="导入校验告警（已正常导入，请人工核对）：\n'+esc(wnTip)+'"><i class="bi bi-exclamation-triangle-fill"></i>'+wn.length+'</span>':'';
     let nameCell='<td class="wl-freeze2 wl-name wl-txt"'+tipAttr(row.project_name,17)+'><span class="wl-clamp">';
     if(p.needs_estimate===false) nameCell+='<span class="badge bg-light text-dark border" data-tip="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span> ';
-    nameCell+=wnTag+esc(row.project_name)+'</span></td>';
+    nameCell+=esc(row.project_name)+'</span></td>';
     cells+=nameCell;
     visGroups.forEach(g=>g.cols.forEach(c=>{
       const v=row[c.k];
