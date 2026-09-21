@@ -89,7 +89,7 @@ function makeApp(loc) {
     return json({}, 404);
   };
   const APP = new Function('window', 'document', 'location', 'history', 'fetch', 'URLSearchParams', 'setTimeout', 'console',
-    script + '\nreturn { openProject:openProject, renderList:renderList, setEstimateStep:setEstimateStep, submitAll:submitAll, getState:()=>STATE, appHtml:()=>document.getElementById("app").innerHTML };'
+    script + '\nreturn { openProject:openProject, renderList:renderList, setEstimateStep:setEstimateStep, stepDays:stepDays, submitAll:submitAll, getState:()=>STATE, appHtml:()=>document.getElementById("app").innerHTML };'
   )({}, document, loc, { replaceState() {} }, fetch, URLSearchParams, f => f(), console);
   return { APP, get appHTML() { return appHTML; }, get lastPost() { return lastPost; }, urls, document };
 }
@@ -136,16 +136,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const colCount = (h.match(/<col style="width:/g) || []).length;
   const thCount = (h.match(/<th[ >]/g) || []).length;
   const groupCount = (h.match(/<colgroup>/g) || []).length;
-  check('每个表格 colgroup 列数与表头一致（8 列 × 2 类）',
-    groupCount === 2 && colCount === thCount && colCount % 8 === 0,
+  check('每个表格 colgroup 列数与表头一致（7 列 × 2 类）',
+    groupCount === 2 && colCount === thCount && colCount % 7 === 0,
     groupCount + '表 / ' + colCount + 'col / ' + thCount + 'th');
-  // 任务/工作项/说明 自适应（合计 64.5%）——内容展示全
-  check('三列文本列宽度自适应（15%/15%/34.5%）',
-    h.includes('<col style="width:15%"><col style="width:15%"><col style="width:34.5%">'));
-  // 人员/原人天/原费用/我的评估人天/状态 宽度够用即可（原费用略宽）
-  check('五个窄列宽度够用即可（6/4.5/8/8/9%）',
-    h.includes('<col style="width:6%"><col style="width:4.5%"><col style="width:8%"><col style="width:8%"><col style="width:9%">'));
-  check('原费用列宽于原人天列（费用列宽一些）', h.indexOf('width:4.5%') < h.indexOf('width:8%'));
+  // 任务/工作项/说明 自适应（合计 77.5%）——内容展示全
+  check('三列文本列宽度自适应（18%/18%/41.5%）',
+    h.includes('<col style="width:18%"><col style="width:18%"><col style="width:41.5%">'));
+  // 原人天/原费用/我的评估人天/状态 宽度够用即可（原费用略宽）
+  check('四个窄列宽度够用即可（原人天 4.5 / 原费用 8 / 评估人天 6 / 状态 4%）',
+    h.includes('<col style="width:4.5%"><col style="width:8%"><col style="width:6%"><col style="width:4%">'));
+  const widths = [...h.matchAll(/<col style="width:([\d.]+)%">/g)].map(m => parseFloat(m[1]));
+  const oneTable = widths.slice(0, 7).reduce((a, b) => a + b, 0);
+  check('单表列宽合计 100%（不留空档，也不靠浏览器补齐）', Math.abs(oneTable - 100) < 0.01, oneTable + '%');
+  check('原费用列宽于原人天列（费用列宽一些）', widths[4] > widths[3], widths[3] + ' vs ' + widths[4]);
   check('三个文本列都用换行容器展示全文（9 格）',
     (h.match(/<td class="txt"><span class="clamp">/g) || []).length === 9,
     (h.match(/<td class="txt"><span class="clamp">/g) || []).length);
@@ -157,14 +160,62 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     /class="more"[^>]*>展开全文</.test(h) && /\.clamp\.open\{[^}]*display:block/.test(html));
   check('短说明不给按钮（避免噪音）',
     (h.match(/class="more"/g) || []).length === 1, (h.match(/class="more"/g) || []).length);
-  check('人员列单行省略（窄列不换行）',
-    /<td class="nw"/.test(h) && /td\.nw\{[^}]*text-overflow:ellipsis/.test(html));
+  check('人员列已移除（workItems 里本就没有该字段，一直在显示 —）',
+    !/<th>人员<\/th>/.test(h) && !/class="nw"/.test(h) && !/td\.nw\{/.test(html));
   check('最后一列「状态」靠右（表头 + 单元格）',
-    /<th class="st">状态<\/th>/.test(h) && /<td class="st statuscell">/.test(h) && /td\.st,th\.st\{[^}]*text-align:right/.test(html));
+    /<th class="st">状态<\/th>/.test(h) && /<td class="st statuscell"/.test(h) && /td\.st,th\.st\{[^}]*text-align:right/.test(html));
+  check('状态列只写「已提交 / 未提交」文案（不带数值）',
+    /<td class="st statuscell"[^>]*><span class="saved">已提交<\/span><\/td>/.test(h)
+    && /<td class="st statuscell"[^>]*><span class="pending">未提交<\/span><\/td>/.test(h));
+  check('状态悬浮标题补充人天明细', /title="已提交 10 人天（原 12）"/.test(h),
+    (h.match(/title="已提交[^"]*"/) || [])[0]);
+  check('无用残留样式已清理（saved.adj / adjnote）',
+    !/\.saved\.adj\{/.test(html) && !/\.adjnote\{/.test(html) && !/class="adjnote"/.test(h));
   check('金额/人天右对齐等宽数字', /td\.num,th\.num\{[^}]*tabular-nums/.test(html));
   check('明细页显示序号进度', /第 1 \/ 3 个项目/.test(h), (h.match(/第 \d+ \/ \d+ 个项目/) || [])[0]);
   check('明细页项目名最多两行', /\.ptitle\{[^}]*line-clamp:2/.test(html));
   check('表格可视高度按视口计算（不用 60vh 浪费）', /max-height:calc\(100vh - \d+px\)/.test(html));
+
+  // ===== C2. 人天步进器：左「−」右「+」替代原生上下箭头 =====
+  check('人天列用「− 输入框 ＋」步进器',
+    /<div class="stepper"><button type="button" class="sbtn" onclick="stepDays\(this,-1\)"[^>]*>−<\/button><input type="number"[^>]*data-wid="101"[^>]*><button type="button" class="sbtn" onclick="stepDays\(this,1\)"[^>]*>\+<\/button><\/div>/.test(h));
+  check('每行一对按钮（3 行 × 2 = 6）', (h.match(/class="sbtn"/g) || []).length === 6, (h.match(/class="sbtn"/g) || []).length);
+  check('按钮带 aria-label（− 减少 / + 增加）',
+    (h.match(/aria-label="减少"/g) || []).length === 3 && (h.match(/aria-label="增加"/g) || []).length === 3);
+  check('原生上下箭头已隐藏（不出现两套控件并存）',
+    /::-webkit-inner-spin-button\{-webkit-appearance:none/.test(html) && /input\[type=number\]\{[^}]*appearance:textfield/.test(html));
+  check('输入框不再为原生箭头预留右内边距（改居中）',
+    /input\[type=number\]\{[^}]*text-align:center/.test(html) && !/padding:3px 14px 3px 6px/.test(html));
+  check('步进按钮样式（17px 窄按钮 / 悬浮高亮 / 禁用降透明）',
+    /\.sbtn\{[^}]*width:17px/.test(html) && /\.sbtn:hover:not\(:disabled\)/.test(html) && /\.sbtn:disabled\{[^}]*opacity/.test(html));
+  check('底部提示改为「左右 ± 按步长微调」', /左右 ± 按步长微调/.test(h));
+
+  // 行为：加减 / 下限 / 浮点 / 空值回落 / 高亮联动 / 归档禁用
+  const mkStep = (val, pd, disabled) => {
+    const inp = mkEl('<input data-wid="7" value="' + val + '" step="0.5" data-pd="' + pd + '">');
+    if (disabled) inp.disabled = true;
+    return { inp, btn: { parentNode: { querySelector: () => inp } } };
+  };
+  let S = mkStep('12', '12');
+  A.APP.stepDays(S.btn, 1);
+  check('＋ 按步长加（12 → 12.5）', S.inp.value === '12.5', S.inp.value);
+  A.APP.stepDays(S.btn, -1); A.APP.stepDays(S.btn, -1);
+  check('− 按步长减（12.5 → 11.5）', S.inp.value === '11.5', S.inp.value);
+  check('改动后输入框标黄（与原人天不同）', S.inp.classList.contains('adj'));
+  A.APP.stepDays(S.btn, 1);
+  check('回到原人天时取消标黄', !S.inp.classList.contains('adj'), S.inp.value);
+  S = mkStep('0.5', '0.5');
+  A.APP.stepDays(S.btn, -1); A.APP.stepDays(S.btn, -1);
+  check('下限为 0（不出现负数）', S.inp.value === '0', S.inp.value);
+  S = mkStep('0', '0');
+  for (let i = 0; i < 3; i++) A.APP.stepDays(S.btn, 1);
+  check('消除浮点误差（三次 +0.5 = 1.5）', S.inp.value === '1.5', S.inp.value);
+  S = mkStep('', '18');
+  A.APP.stepDays(S.btn, 1);
+  check('空值回落到原人天再增减（→ 18.5）', S.inp.value === '18.5', S.inp.value);
+  S = mkStep('5', '5', true);
+  A.APP.stepDays(S.btn, 1);
+  check('归档（禁用）时按钮不生效', S.inp.value === '5', S.inp.value);
 
   // ===== D. 步长 =====
   const steps = A.document.querySelectorAll('.stepbtn');
