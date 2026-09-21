@@ -116,8 +116,42 @@ const checks = [
   ['精简模式去掉长明细列(分包范围)', !outC.includes('分包范围')],
   ['精简模式保留核心列', outC.includes('承建部门') && outC.includes('总成本估算')],
   ['两模式行数一致', (outC.match(/data-anom=/g) || []).length === nProj],
-  ['精简模式按钮为“完整”', outC.includes('完整</button>')]
+  ['精简模式按钮为“完整”', outC.includes('完整</button>')],
+  // 2026-09-21 起：专家评估列组去掉「评估后成本」，评估进度改为「完成专家数/专家总数」
+  ['★ 专家评估列组只有 2 列（已删除「评估后成本」）',
+    /name:'专家评估'[\s\S]{0,400}?cols:\[[\s\S]{0,300}?\]\s*\}/.test(block) &&
+    !/label:'评估后成本'/.test(block) && /label:'核减额'/.test(block) && /label:'评估进度'/.test(block)],
+  ['评估进度文案为「N 人」口径（非「N 项」）',
+    /expert_done_count\|\|0\)\+'\/'[\s\S]{0,80}?' 人'/.test(block) && !/' 项'/.test(block)]
 ];
+
+// ---- 行为断言：人员外包 / 专业分包展示「专家评估后」金额 ----
+{
+  const mk = (p) => {
+    const api = buildApi(false, false);
+    api.render({ projects: [p], evaluators: [{ slot: 1, user_id: 1, user_name: '专家A' }, { slot: 2, user_id: 2, user_name: '专家B' }] });
+    return api.document.getElementById('wlProjects').innerHTML;
+  };
+  const baseP = {
+    project_id: 901, project_name: '评估后金额验证项目', contract_amount: 1000000, needs_estimate: true,
+    evaluated_count: 5, work_item_count: 5, expert_done_count: 1, expert_total_count: 2,
+    cost_summary: { total_cost: 800000, outsourcing_cost: 300000, subcontract_cost: 200000 },
+    outsourcing_evaluated_cost: 240000, outsourcing_original_cost: 300000,
+    subcontract_evaluated_cost: 150000, subcontract_original_cost: 200000
+  };
+  const hEval = mk(baseP);
+  const tr = (hEval.match(/<tr[\s\S]*?<\/tr>/g) || []).join('');
+  // 原值只应出现在 data-tip 里，单元格里必须是评估后金额
+  checks.push(['外包列展示评估后金额 ¥240,000（原值仅作提示）',
+    /<td[^>]*data-tip="评估后（原 ¥300,000）"[^>]*>¥240,000</.test(tr) && !/>¥300,000</.test(tr)]);
+  checks.push(['分包列展示评估后金额 ¥150,000（原值仅作提示）',
+    /<td[^>]*data-tip="评估后（原 ¥200,000）"[^>]*>¥150,000</.test(tr) && !/>¥200,000</.test(tr)]);
+  checks.push(['评估后金额带原值对照提示', /data-tip="评估后（原 ¥300,000）"/.test(tr)]);
+  checks.push(['评估进度按「完成专家数/专家总数」显示 1/2 人', tr.includes('1/2 人')]);
+  const noEval = mk(Object.assign({}, baseP, { evaluated_count: 0, expert_done_count: 0 }));
+  const tr2 = (noEval.match(/<tr[\s\S]*?<\/tr>/g) || []).join('');
+  checks.push(['未评估项目仍展示原值 ¥300,000', tr2.includes('¥300,000')]);
+}
 let bad = 0;
 checks.forEach(([n, ok]) => { if (!ok) bad++; console.log((ok ? 'PASS  ' : 'FAIL  ') + n); });
 console.log('项目数=' + nProj + '  异常行=' + anomRows + '（独立算出 ' + expectedAnom + '）');

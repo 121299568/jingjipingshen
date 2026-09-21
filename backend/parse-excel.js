@@ -99,9 +99,110 @@ function detectHeaderRow(grid, lastRow, kws, fallback) {
   return fallback;
 }
 
+// ---------- 公式兜底求值 ----------
+// ★ 背景：SheetJS 社区版没有公式引擎，只能读 Excel 存盘时写下的「缓存值」。
+//   由程序生成的 xlsx（openpyxl / 模板导出等）常常只有公式没有缓存值（或缓存为 0），
+//   表现为「Excel 里打开看着有数，系统解析出来是 0」。
+//   这里对「有公式且缓存值为空或 0」的单元格做一次保守重算：
+//   只支持 SUM(区域) / 单格引用（含跨表）/ 四则运算 / 括号；算不出就保持原样不动。
+function colToNum(a) { let n = 0; for (const ch of a) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; }
+function makeFormulaEvaler(wb) {
+  const memo = {};
+  function cellValue(sheet, addr, depth) {
+    const key = sheet + '!' + addr;
+    if (memo[key] !== undefined) return memo[key];
+    if (depth > 6) return null;
+    const ws = wb.Sheets[sheet];
+    if (!ws) return null;
+    const cell = ws[addr];
+    if (!cell) return null;
+    memo[key] = null; // 环检测占位
+    let v = null;
+    if (cell.f && (cell.v == null || cell.v === 0)) {
+      v = evalExpr(sheet, String(cell.f), depth + 1);
+    }
+    if (v == null && typeof cell.v === 'number') v = cell.v;
+    memo[key] = v;
+    return v;
+  }
+  function rangeSum(sheet, a1, a2, depth) {
+    const m1 = String(a1).match(/^([A-Z]+)(\d+)$/), m2 = String(a2).match(/^([A-Z]+)(\d+)$/);
+    if (!m1 || !m2) return null;
+    let s = 0, any = false;
+    for (let r = +m1[2]; r <= +m2[2] && r <= +m2[2]; r++) {
+      for (let c = colToNum(m1[1]); c <= colToNum(m2[1]); c++) {
+        const v = cellValue(sheet, XLSX.utils.encode_cell({ r: r - 1, c }), depth);
+        if (typeof v === 'number') { s += v; any = true; }
+      }
+    }
+    return any ? s : null;
+  }
+  function evalRef(sheet, ref, depth) {
+    let sh = sheet, rs = String(ref).replace(/\$/g, '');
+    const m = rs.match(/^'([^']+)'!(.+)$/) || rs.match(/^([^'!]+)!(.+)$/);
+    if (m) { sh = m[1]; rs = m[2]; }
+    if (rs.includes(':')) { const [a, b] = rs.split(':'); return rangeSum(sh, a, b, depth); }
+    return cellValue(sh, rs, depth);
+  }
+  function evalExpr(sheet, f, depth) {
+    let s = String(f).replace(/^=/, '').trim();
+    if (!s || /#REF|#VALUE|#NAME/.test(s)) return null;
+    // 含我们不支持的函数（IF/ROUND/VLOOKUP…）直接放弃，避免算错
+    const fns = s.match(/[A-Za-z\u4e00-\u9fa5_]+\s*\(/g) || [];
+    if (fns.some(x => !/^SUM\s*\($/i.test(x))) return null;
+    s = s.replace(/SUM\s*\(([^()]*)\)/gi, (_, inner) => {
+      let sum = 0, any = false;
+      inner.split(',').forEach(p => {
+        const t = p.trim();
+        if (!t) return;
+        const v = evalRef(sheet, t, depth);
+        if (typeof v === 'number') { sum += v; any = true; }
+      });
+      return any ? '(' + sum + ')' : '(0)';
+    });
+    // 剩余裸引用（含跨表）
+    // 表名允许含数字/下划线（如「Sheet1!A1」「专业分包成本估算 !F9」）
+    s = s.replace(/(?:'([^']+)'!|([A-Za-z\u4e00-\u9fa5][\w\u4e00-\u9fa5]*)!)?(\$?[A-Z]{1,3}\$?\d{1,7})/g, (mm, q, n2, addr) => {
+      const v = evalRef(q || n2 || sheet, addr, depth);
+      return typeof v === 'number' ? String(v) : '0';
+    });
+    if (!/^[\d\s+\-*/().%]+$/.test(s)) return null;
+    try {
+      const val = Function('"use strict";return (' + s.replace(/%/g, '/100') + ')')();
+      return typeof val === 'number' && isFinite(val) ? val : null;
+    } catch (e) { return null; }
+  }
+  return { evalExpr, cellValue };
+}
+// 对整个工作簿做一次兜底：只改写「有公式且缓存为空或 0」且重算出非 0 的单元格
+function recalcFormulaCells(wb) {
+  if (!wb || !wb.Sheets) return 0;
+  const E = makeFormulaEvaler(wb);
+  let fixed = 0;
+  for (const sn of wb.SheetNames) {
+    const ws = wb.Sheets[sn];
+    if (!ws || !ws['!ref']) continue;
+    const rng = XLSX.utils.decode_range(ws['!ref']);
+    for (let r = rng.s.r; r <= rng.e.r; r++) {
+      for (let c = rng.s.c; c <= rng.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (!cell || !cell.f) continue;
+        if (!(cell.v === 0 || cell.v == null || cell.v === '')) continue; // 缓存已有有效值，不干预
+        const v = E.evalExpr(sn, String(cell.f), 0);
+        if (typeof v === 'number' && isFinite(v) && Math.abs(v) > 1e-9) {
+          cell.v = v; cell.t = 'n'; fixed++;
+        }
+      }
+    }
+  }
+  return fixed;
+}
+
 // ---------- 主解析 ----------
 function parseProjectExcel(filePath) {
   const wb = XLSX.readFile(filePath, { cellFormula: true, raw: true });
+  recalcFormulaCells(wb);
   const sheets = resolveSheets(wb);
 
   const result = {
@@ -472,6 +573,7 @@ function parseInquiryExcel(filePath) {
   let wb;
   try { wb = XLSX.readFile(filePath, { cellFormula: true, raw: true }); }
   catch (e) { return { __parseError: e && e.message, items: [] }; }
+  recalcFormulaCells(wb);
   const items = [];
   const seen = new Set();
   for (const sheetName of wb.SheetNames) {
@@ -511,7 +613,7 @@ function parseInquiryExcel(filePath) {
   return { items };
 }
 
-module.exports = { parseProjectExcel, parseInquiryExcel };
+module.exports = { parseProjectExcel, parseInquiryExcel, recalcFormulaCells };
 
 if (require.main === module) {
   const file = process.argv[2];

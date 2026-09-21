@@ -922,6 +922,13 @@ function applyWorkReportGating(){
   b.style.display=can?'inline-block':'none';
 }
 function authH(){const t=localStorage.getItem('token');return t?{Authorization:'Bearer '+t}:{};}
+// /uploads 静态资源走 authorizeFile 鉴权（不带 Authorization 头即 401「未登录」）。
+// 用 <a href> 直接开新窗口时请求头带不上，必须把 token 拼到 query 上（后端同时支持 ?token=）。
+function fileUrl(u){
+  const t=localStorage.getItem('token')||'';
+  const sep=(u||'').indexOf('?')>=0?'&':'?';
+  return (u||'')+(t?sep+'token='+encodeURIComponent(t):'');
+}
 // XSS 转义：所有插入 innerHTML 的用户可控字符串都必须经过它
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
@@ -1518,7 +1525,7 @@ function renderUploadPage(){
           '<div class="file-actions flex-shrink-0">'+
             autoTag+
             '<span class="badge '+(f.file_category==='estimation'?'badge-cat-estimation':'badge-cat')+' me-1">'+catName+'</span>'+
-            '<a href="'+API.replace('/api','')+f.url+'" target="_blank" class="btn btn-outline-primary" title="预览"><i class="bi bi-eye"></i></a>'+delBtn+
+            '<a href="'+fileUrl(API.replace('/api','')+f.url)+'" target="_blank" class="btn btn-outline-primary" title="预览"><i class="bi bi-eye"></i></a>'+delBtn+
           '</div>'+
         '</div>'+
       '</div></div>';
@@ -2484,7 +2491,7 @@ async function openVersionHistory(){
       html+='<table class="table table-sm mb-0 align-middle"><thead class="table-light"><tr><th style="width:70px">版本</th><th>文件名</th><th style="width:150px">上传时间</th><th style="width:110px">上传人</th><th style="width:90px">状态</th><th style="width:70px"></th></tr></thead><tbody>';
       g.versions.forEach(v=>{
         const t=v.upload_time?new Date(v.upload_time).toLocaleString('zh-CN'):'';
-        html+='<tr'+(v.is_current?'':' class="text-muted"')+'><td>v'+v.version+'</td><td class="text-break">'+esc(v.originalname||'')+'</td><td class="small">'+t+'</td><td class="small">'+esc(v.uploader_name||'')+'</td><td>'+(v.is_current?'<span class="badge bg-success">当前版</span>':'<span class="badge bg-secondary">历史版</span>')+'</td><td>'+(v.url?'<a class="small" href="'+esc(v.url)+'" target="_blank">下载</a>':'')+'</td></tr>';
+        html+='<tr'+(v.is_current?'':' class="text-muted"')+'><td>v'+v.version+'</td><td class="text-break">'+esc(v.originalname||'')+'</td><td class="small">'+t+'</td><td class="small">'+esc(v.uploader_name||'')+'</td><td>'+(v.is_current?'<span class="badge bg-success">当前版</span>':'<span class="badge bg-secondary">历史版</span>')+'</td><td>'+(v.url?'<a class="small" href="'+esc(fileUrl(v.url))+'" target="_blank">下载</a>':'')+'</td></tr>';
       });
       html+='</tbody></table></div>';
     });
@@ -2551,7 +2558,6 @@ function renderWorkloadProjectTable(d){
       {k:'ip_cost',label:'知识产权',money:true,w:92},
     ]},
     {name:'专家评估',cls:'wl-g-expert',cols:[
-      {k:'adjusted_total_cost',label:'评估后成本',money:true,expert:true,w:116},
       {k:'expert_reduction',label:'核减额',money:true,expert:true,w:104},
       {k:'expert_progress',label:'评估进度',expert:true,w:104},
     ]},
@@ -2562,7 +2568,7 @@ function renderWorkloadProjectTable(d){
       {k:'product_direction',label:'产品方向',detail:true,txt:true,w:130},
     ]},
   ];
-  const moneyKeys=['contract_amount','total_cost','long_term_cost','zhongshi_cost','huazhao_cost','outsourcing_cost','subcontract_cost','procurement_cost','travel_cost','third_party_test_cost','ip_cost','adjusted_total_cost','expert_reduction'];
+  const moneyKeys=['contract_amount','total_cost','long_term_cost','zhongshi_cost','huazhao_cost','outsourcing_cost','subcontract_cost','procurement_cost','travel_cost','third_party_test_cost','ip_cost','expert_reduction'];
   const totals={};moneyKeys.forEach(k=>totals[k]=0);
   // 冻结列宽（与 CSS 变量 --wl-c1/--wl-c2 同源）
   const WL_C1=44, WL_C2=252;
@@ -2593,12 +2599,21 @@ function renderWorkloadProjectTable(d){
       is_restricted_subcontract:p.is_restricted_subcontract||'-', subcontract_scope:p.subcontract_scope||'-',
       adjusted_total_cost:(p.needs_estimate===false||!(p.evaluated_count>0))?null:(p.adjusted_total_cost!=null?p.adjusted_total_cost:null),
       expert_reduction:(p.needs_estimate===false||!(p.evaluated_count>0))?null:(p.expert_reduction!=null?p.expert_reduction:null),
-      expert_progress:(p.needs_estimate===false)?'免评估':(((p.evaluated_count||0)+'/'+(p.work_item_count||0))+' 项'),
+      expert_progress:'', // 由下方统一按「完成专家数/专家总数」口径赋值
       business_direction:p.business_direction||'-',
       business_sub_direction:p.business_sub_direction||'-', product_direction:p.product_direction||'-'
     };
     // 异常判定：调用全局共享判定 projectAlerts()（与项目资料页同一口径），
     // 用于行首红色标记、问题单元格高亮与「只看异常」筛选
+    // 人员外包 / 专业分包：有专家评估时展示「评估后」金额（评估进度按人统计）
+    const hasEval=p.needs_estimate!==false&&(p.evaluated_count||0)>0;
+    row.outsourcing_cost=hasEval&&p.outsourcing_evaluated_cost!=null?Number(p.outsourcing_evaluated_cost):(Number(cs.outsourcing_cost)||0);
+    row.subcontract_cost=hasEval&&p.subcontract_evaluated_cost!=null?Number(p.subcontract_evaluated_cost):sub;
+    row.subcontract_ratio=ca>0?row.subcontract_cost/ca*100:null;
+    // 提示键名必须与列 key 对齐（渲染时按 c.k+'_tip' 取）
+    row.outsourcing_cost_tip=hasEval&&Math.abs((Number(p.outsourcing_original_cost)||0)-row.outsourcing_cost)>0.5?('评估后（原 ¥'+Math.round(Number(p.outsourcing_original_cost)||0).toLocaleString()+'）'):'';
+    row.subcontract_cost_tip=hasEval&&Math.abs((Number(p.subcontract_original_cost)||0)-row.subcontract_cost)>0.5?('评估后（原 ¥'+Math.round(Number(p.subcontract_original_cost)||0).toLocaleString()+'）'):'';
+    row.expert_progress=(p.needs_estimate===false)?'免评估':(((p.expert_done_count||0)+'/'+(p.expert_total_count||0))+' 人');
     const al=projectAlerts(p);
     const iec=al.iec;
     const prRaw=al.prRaw;
@@ -2632,7 +2647,9 @@ function renderWorkloadProjectTable(d){
         const n=Number(v)||0;
         const bad=(c.k==='contract_amount'&&ca<=0)||(c.k==='total_cost'&&costBad);
         const c2=cls+'wl-num'+(n===0?' wl-zero':'')+(bad?' wl-cell-bad':'');
-        cells+='<td class="'+c2+'">¥'+n.toLocaleString()+'</td>';
+        // 人员外包/专业分包在专家评估后展示的是评估后金额，悬浮提示带上原值便于对照
+        const mt=row[c.k+'_tip']||'';
+        cells+='<td class="'+c2+'"'+(mt?' data-tip="'+esc(mt)+'"':'')+'>¥'+n.toLocaleString()+'</td>';
       } else if(c.pct){
         const bad=(c.k==='profit_rate'&&prRaw!=null&&prRaw<0);
         const c2=cls+'wl-num'+(v==null?' wl-zero':'')+(bad?' wl-cell-bad':'');
@@ -3449,7 +3466,7 @@ async function renderFileMgmt(){
       '<td class="small text-muted">'+esc(f.uploader_name||'-')+'</td>'+
       '<td class="small text-muted">'+fmtTime(f.upload_time)+'</td>'+
       '<td class="text-nowrap">'+
-        (f.url?'<a class="btn btn-outline-secondary btn-sm" href="'+esc(f.url)+'" target="_blank" title="下载/查看"><i class="bi bi-download"></i></a> ':'')+
+        (f.url?'<a class="btn btn-outline-secondary btn-sm" href="'+esc(fileUrl(f.url))+'" target="_blank" title="下载/查看"><i class="bi bi-download"></i></a> ':'')+
         '<button class="btn btn-outline-danger btn-sm" onclick="doFileMgmtDelete('+f.id+',this)"><i class="bi bi-trash"></i></button>'+
       '</td></tr>';
   }).join('');

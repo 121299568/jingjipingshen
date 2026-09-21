@@ -2455,10 +2455,24 @@ function buildWorkloadSummary(sid, user) {
     // 因此「评估后总成本」= 原总成本 − 工作项原成本合计 + 工作项评估后成本合计，
     // 直接用 Σ工作项 adjusted 当总成本会漏掉采购等大额费用，口径不对。
     let totalAdjusted = 0, evaluatedWI = 0, totalOriginalWI = 0;
+    // 人员外包 / 专业分包是专家评估的唯二对象：汇总页这两列要展示「评估后」金额，
+    // 因此按 category 分别累计评估前/后合计（未评估的工作项 adjusted 即原值，口径自洽）
+    const adjByCat = { outsourcing: 0, subcontract: 0 };
+    const origByCat = { outsourcing: 0, subcontract: 0 };
+    const doneExperts = new Set();
     wis.forEach(w => {
       const r = computeWorkItemRollup(p.id, w.id, evaluators) || {};
       totalAdjusted += r.adjusted_cost || 0;
       totalOriginalWI += Number(w.cost) || 0;
+      const cat = String(w.category || '');
+      if (cat === 'outsourcing' || cat === 'subcontract') {
+        adjByCat[cat] += r.adjusted_cost || 0;
+        origByCat[cat] += Number(w.cost) || 0;
+      }
+      // 该工作项上提交了有效人天的评审人 → 记入「已完成专家」
+      (r.expert_days || []).forEach((d, i) => {
+        if (d != null && d > 0 && r.evaluators && r.evaluators[i]) doneExperts.add(r.evaluators[i].user_id);
+      });
       if ((r.expert_count || 0) > 0) evaluatedWI++;
     });
     totalAdjusted = Math.round(totalAdjusted * 100) / 100;
@@ -2486,7 +2500,15 @@ function buildWorkloadSummary(sid, user) {
       // 导入校验告警透传到评估汇总页（该页数据来自本接口，非 /api/projects；漏了这行则 ⚠ 角标永远不显示）
       import_warnings: p.import_warnings || [],
       work_item_count: wis.length, evaluated_count: evaluatedWI,
-      total_adjusted_cost: totalAdjusted
+      total_adjusted_cost: totalAdjusted,
+      // 人员外包 / 专业分包的「评估后」金额与「评估前」原值（明细合计口径，供汇总页展示与对照）
+      outsourcing_evaluated_cost: Math.round(adjByCat.outsourcing * 100) / 100,
+      outsourcing_original_cost: Math.round(origByCat.outsourcing * 100) / 100,
+      subcontract_evaluated_cost: Math.round(adjByCat.subcontract * 100) / 100,
+      subcontract_original_cost: Math.round(origByCat.subcontract * 100) / 100,
+      // 评估进度（按人）：已完成该项目的评审人数 / 评审人总数
+      expert_done_count: doneExperts.size,
+      expert_total_count: evaluators.length
     };
   });
   const evaluatorProgress = evaluators.map(ev => {

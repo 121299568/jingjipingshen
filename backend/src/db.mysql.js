@@ -430,16 +430,26 @@ async function doSave(p, store) {
 }
 
 // 单个集合的整表回写：REPLACE 全量行 + 清掉内存中已不存在的孤儿行
+// ★ 批量分块：逐行 REPLACE 在 workflowLogs 破万行时一轮回写要 8 秒以上，
+//   提交评估后数据长时间只在内存（未落盘），此期间重启即永久丢失。
+//   改成一次 VALUES 多行（REPLACE 原生支持，语义与逐行等价：按主键替换），
+//   每块 500 行控制 SQL 长度；往返次数从 N 行降到 ceil(N/500) 次。
+const WRITE_CHUNK = 500;
 async function writeCollection(p, name, rows) {
   const def = SCHEMA[name];
   const table = def.table;
   const cols = [...def.cols, 'extra'];
   const colList = cols.map(c => `\`${c}\``).join(',');
-  const placeholders = cols.map(() => '?').join(',');
-  const sql = `REPLACE INTO \`${table}\` (${colList}) VALUES (${placeholders})`;
-  for (const row of rows) {
-    const vals = def.cols.map(c => toVal(c, def, row));
-    vals.push(extraOf(def, row));
+  const oneRow = () => '(' + cols.map(() => '?').join(',') + ')';
+  for (let i = 0; i < rows.length; i += WRITE_CHUNK) {
+    const chunk = rows.slice(i, i + WRITE_CHUNK);
+    const sql = `REPLACE INTO \`${table}\` (${colList}) VALUES ` + chunk.map(oneRow).join(',');
+    const vals = [];
+    for (const row of chunk) {
+      const v = def.cols.map(c => toVal(c, def, row));
+      v.push(extraOf(def, row));
+      vals.push(...v);
+    }
     await p.query(sql, vals);
   }
   // 删除内存中已不存在的孤儿行（支持删项目/删用户等真正落库）
@@ -458,4 +468,4 @@ function save(store) {
   return saveChain;
 }
 
-module.exports = { load, save, getPool, SCHEMA, ddlFor, rowToObj, extraOf, toVal, fromVal };
+module.exports = { load, save, getPool, SCHEMA, ddlFor, rowToObj, extraOf, toVal, fromVal, writeCollection, writeRow };
