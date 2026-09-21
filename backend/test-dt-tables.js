@@ -24,6 +24,20 @@ const ANNUAL_MAIN = ANNUAL_COLUMNS.length + 1; // + 操作列
 const projBlock = script.slice(script.indexOf('function renderProjects(){'), script.indexOf('function renderBizConfirmSummary(){'));
 const annualBlock = script.slice(script.indexOf('function annualMoney('), script.indexOf('async function saveAnnualRow('));
 
+// 告警规则唯一来源：渲染函数依赖页面里的 projectAlerts()/alertRowAttrs()，
+// 桩沙箱必须注入"真身"（而非空壳），否则规则被绕开、测试变成假绿。
+function grabFn(src, name) {
+  const s = src.indexOf('function ' + name + '(');
+  if (s < 0) throw new Error('函数缺失: ' + name);
+  let d = 0;
+  for (let i = src.indexOf('{', s); i < src.length; i++) {
+    if (src[i] === '{') d++;
+    else if (src[i] === '}') { d--; if (d === 0) return src.slice(s, i + 1); }
+  }
+  throw new Error('括号不配平: ' + name);
+}
+const ALERT_SRC = grabFn(script, 'projectAlerts') + '\n' + grabFn(script, 'alertRowAttrs');
+
 // ---------- 通用桩 ----------
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function mkDoc() {
@@ -58,7 +72,7 @@ const renderProjects = new Function(
   'sessions', 'projects', 'files', 'openBatches', 'currentUser', 'esc', 'batchLabel',
   'sessionStatusBadge', 'statusBadgeClass', 'projectStatusLabel', 'canDeleteProject', 'fmtTime',
   'renderBizConfirmSummary', 'document',
-  projBlock + '\nreturn renderProjects;'
+  ALERT_SRC + '\n' + projBlock + '\nreturn renderProjects;'
 )(SES, PJ, [], new Set(['s1']), { role: 'admin' }, esc,
   i => '第' + i + '批', s => '<span class="badge">' + s + '</span>',
   () => 'bg-warning text-dark', s => ({ reviewing: '评审中', completed: '已完成' }[s] || s),
@@ -87,12 +101,20 @@ check('项目资料页：序号/金额右对齐等宽数字',
 check('项目资料页：金额为 0 时仍显示 —（不误判为缺失）', /<td class="dt-num">-<\/td>/.test(pOut));
 check('项目资料页：操作列够宽且不被裁（184px + dt-acts）',
   /<col style="width:184px">/.test(pOut) && /class="dt-acts"/.test(pOut));
-// 2026-09-21 起：告警不再用 ⚠ 角标，统一并入行级「⚠ 需关注」悬浮提示 + 行标红
+// 2026-09-21 起：告警不再用 ⚠ 角标，统一并入行级「⚠ 需关注」悬浮提示 + 行标红。
+// 且项目资料页与评估汇总页共用 projectAlerts()：合同额为 0 属共享规则，必须与导入校验告警一起出现在提示里
 check('项目资料页：告警行标红 dt-flag（仅 1 行，无告警行不标）',
   count(pOut, /class="dt-flag"/g) === 1);
 check('项目资料页：告警并入「⚠ 需关注」行提示（序号格 data-tip），不再渲染 ⚠ 角标',
-  /<tr class="dt-flag">[\s\S]*?<td class="dt-num" data-tip="⚠ 需关注：估算表与汇总表基线不一致">02<\/td>/.test(pOut) &&
+  /<tr class="dt-flag">[\s\S]*?<td class="dt-num" data-tip="⚠ 需关注：合同额为 0 或缺失；估算表与汇总表基线不一致">02<\/td>/.test(pOut) &&
   !/bi-exclamation-triangle-fill/.test(pOut));
+check('项目资料页：批次头部显示「N 项需关注」计数（便于与评估汇总页对数）',
+  /<span class="badge bg-danger"[^>]*>1 项需关注<\/span>/.test(pOut));
+check('前端：告警规则唯一来源 projectAlerts() 已定义（两页共用，防再次各写一份）',
+  /function projectAlerts\(p\)\{/.test(script) && /function alertRowAttrs\(msgs,\s*rowClass\)\{/.test(script));
+check('项目资料页：标红行与「需关注」提示严格配对（防"红了但没提示"复发）',
+  count(pOut, /class="dt-flag"/g) === count(pOut, /data-tip="⚠ 需关注：/g) &&
+  count(pOut, /data-tip="⚠ 需关注：/g) === 1);
 check('项目资料页：表头为 dt-num 的金额列也右对齐', /<th class="dt-num">合同金额<\/th>/.test(pOut));
 
 // =======================================================================

@@ -17,6 +17,21 @@ const block = script.slice(s0, e1);
 
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// 告警规则唯一来源：渲染函数依赖页面里的 projectAlerts()/alertRowAttrs()，桩沙箱必须注入真身。
+// 注意与下面的 expectedAnom「独立算式」并存 —— 一份是被测实现，一份是独立口径，两者必须相等。
+function grabFn(src, name) {
+  const s = src.indexOf('function ' + name + '(');
+  if (s < 0) throw new Error('函数缺失: ' + name);
+  let d = 0;
+  for (let i = src.indexOf('{', s); i < src.length; i++) {
+    if (src[i] === '{') d++;
+    else if (src[i] === '}') { d--; if (d === 0) return src.slice(s, i + 1); }
+  }
+  throw new Error('括号不配平: ' + name);
+}
+const ALERT_SRC = grabFn(script, 'projectAlerts') + '\n' + grabFn(script, 'alertRowAttrs');
+const projectAlertsReal = new Function('return ' + grabFn(script, 'projectAlerts'))();
+
 function buildApi(compact, anomalyOnly) {
   const store = {};
   const document = {
@@ -26,7 +41,7 @@ function buildApi(compact, anomalyOnly) {
     }
   };
   const fn = new Function('esc', 'wlCompactMode', 'wlAnomalyOnly', 'wlCurrentData', 'document', 'window',
-    block + '\nreturn { render: renderWorkloadProjectTable, document };');
+    ALERT_SRC + '\n' + block + '\nreturn { render: renderWorkloadProjectTable, document };');
   return fn(esc, compact, anomalyOnly, null, document, {});
 }
 
@@ -88,6 +103,10 @@ const checks = [
   ['表头两行列数自洽', headerCols(out) === headerSubCols(out) + 2],
   ['行数与数据一致', allRows === nProj],
   ['异常行标记数正确', anomRows === expectedAnom],
+  ['标红行与「⚠ 需关注」提示严格配对（防"红了但没提示"复发）',
+    (out.match(/data-tip="⚠ 需关注：/g) || []).length === anomRows],
+  ['★ 共享 projectAlerts() 与独立算式结果一致（规则未被改坏/未分叉）',
+    (sample.projects || []).filter(p => projectAlertsReal(p).msgs.length > 0).length === expectedAnom],
   ['异常按钮计数正确', out.includes('只看异常' + (expectedAnom ? ' (' + expectedAnom + ')' : '<'))],
   ['异常行有红色标记类', expectedAnom === 0 || out.includes('class="wl-flag"')],
   ['问题单元格高亮', expectedAnom === 0 || out.includes('wl-cell-bad')],

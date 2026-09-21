@@ -13,3 +13,7 @@ Thumbs.db
 .env
 *.env
 backups/
+
+# 前端桩测试/预览产物（脚本写到自身目录，属生成物，不进版本库）
+backend/wl-out*.html
+backend/preview-*.html
