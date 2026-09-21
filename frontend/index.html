@@ -2440,12 +2440,13 @@ function renderWorkloadProjectTable(d){
   list.forEach((p,idx)=>{
     const cs=p.cost_summary||{};
     const tc=Number(cs.total_cost)||0, sub=Number(cs.subcontract_cost)||0;
+    const ca=Number(p.contract_amount)||0; // 合同额：分包占比新分母
     const row={
       idx:idx+1, project_name:p.project_name||('项目'+p.project_id), biz_department:p.biz_department||'-',
       project_type:p.project_type||'-', contract_amount:p.contract_amount||0, total_cost:tc,
       profit_rate:cs.profit_rate!=null?Number(cs.profit_rate)*100:null,
       long_term_cost:cs.long_term_cost||0, zhongshi_cost:cs.zhongshi_cost||0, huazhao_cost:cs.huazhao_cost||0,
-      outsourcing_cost:cs.outsourcing_cost||0, subcontract_cost:sub, subcontract_ratio:tc>0?sub/tc*100:null,
+      outsourcing_cost:cs.outsourcing_cost||0, subcontract_cost:sub, subcontract_ratio:ca>0?sub/ca*100:null,
       procurement_cost:cs.procurement_cost||0, travel_cost:cs.travel_cost||0, third_party_test_cost:cs.third_party_test_cost||0,
       ip_cost:cs.ip_cost||0, is_digital:p.is_digital?'是':'否',
       is_restricted_subcontract:p.is_restricted_subcontract||'-', subcontract_scope:p.subcontract_scope||'-',
@@ -2453,7 +2454,6 @@ function renderWorkloadProjectTable(d){
       business_sub_direction:p.business_sub_direction||'-', product_direction:p.product_direction||'-'
     };
     // 异常判定：用于行首红色标记、问题单元格高亮与「只看异常」筛选
-    const ca=Number(p.contract_amount)||0;
     const iec=(p.internal_estimated_cost!=null&&p.internal_estimated_cost!=='')?Number(p.internal_estimated_cost):null;
     const prRaw=cs.profit_rate!=null?Number(cs.profit_rate):null;
     const anom=[];
@@ -2503,7 +2503,7 @@ function renderWorkloadProjectTable(d){
       const n=Number(totals[c.k])||0;
       footCells+='<td class="'+cls+'wl-num">¥'+n.toLocaleString()+'</td>';
     } else if(c.pct){
-      const v=totals.total_cost>0?totals.subcontract_cost/totals.total_cost*100:null;
+      const v=totals.contract_amount>0?totals.subcontract_cost/totals.contract_amount*100:null;
       footCells+='<td class="'+cls+'wl-num">'+(v==null?'':Math.round(v*100)/100+'%')+'</td>';
     } else {
       footCells+='<td class="'+cls+'"></td>';
