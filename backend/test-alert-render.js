@@ -61,10 +61,15 @@ const F = {
   costOver: { id: 902, project_id: 902, project_name: '成本超额项目', session_id: 1, status: 'draft', biz_department: DEPT, contract_amount: 1000000, internal_estimated_cost: 30600, cost_summary: { total_cost: 1011622.9, profit_rate: 0.12, outsourcing_cost: 999, subcontract_cost: 100 } },
   noContract: { id: 903, project_id: 903, project_name: '合同额缺失项目', session_id: 1, status: 'draft', biz_department: DEPT, contract_amount: 0, cost_summary: { total_cost: 0 } },
   negProfit: { id: 904, project_id: 904, project_name: '利润率为负项目', session_id: 1, status: 'draft', biz_department: DEPT, contract_amount: 1000000, cost_summary: { total_cost: 100, profit_rate: -0.05 } },
-  clean: { id: 905, project_id: 905, project_name: '正常项目', session_id: 1, status: 'draft', biz_department: DEPT, contract_amount: 1000000, import_warnings: [] }
+  clean: { id: 905, project_id: 905, project_name: '正常项目', session_id: 1, status: 'draft', biz_department: DEPT, contract_amount: 1000000, import_warnings: [] },
+  // ★ 成本估算与内部填报预估「同额」：真实数据里 total_cost 是浮点累加值（125046.64000000001），
+  //   与 internal_estimated_cost（125046.64）差 1.45e-11。裸比较 tc>iec 会误报
+  //   「成本估算 ¥125,046.64 超过内部填报预估 ¥125,046.64」——两个数字看起来一模一样。
+  //   正解：四舍五入到分且差额需 >0.01（与后端上传校验同口径）。本夹具必须不被标红。
+  nearEqual: { id: 906, project_id: 906, project_name: '同额浮点误差项目', session_id: 1, status: 'draft', biz_department: DEPT, contract_amount: 1000000, internal_estimated_cost: 125046.64, cost_summary: { total_cost: 125046.64000000001, profit_rate: 0.2 } }
 };
 const sessions = [{ id: 1, name: '第十五批经济评审', status: 'in_progress' }];
-const LIST = [F.warnOnly, F.costOver, F.noContract, F.negProfit, F.clean];
+const LIST = [F.warnOnly, F.costOver, F.noContract, F.negProfit, F.clean, F.nearEqual];
 
 console.log('APP =', APP);
 
@@ -82,6 +87,10 @@ ok(!/bi-exclamation-triangle-fill/.test(rp), '项目资料页：已不再渲染 
 const rpFlags = (rp.match(/class="dt-flag"/g) || []).length;
 ok(rpFlags === 4, '项目资料页：告警行 4 行（干净项目不标红），实际 ' + rpFlags);
 ok(/\d+ 项需关注/.test(rp) && rp.includes('4 项需关注'), '项目资料页：批次头部显示「4 项需关注」计数徽标');
+// ★ 同额不告警：夹具中 906（125046.64000000001 vs 125046.64）必须不产生该条告警
+const rpIec = (rp.match(/超过内部填报预估/g) || []).length;
+ok(rpIec === 1, '★ 项目资料页：内部填报预估规则只命中 1 个（同额浮点误差不误报），实际 ' + rpIec);
+ok(!/超过内部填报预估 ¥125,046\.64/.test(rp), '★ 项目资料页：不再出现「¥125,046.64 超过 ¥125,046.64」同额告警');
 
 // ---- 评估汇总页 ----
 const data = { session_id: 1, session_name: '第十五批经济评审', projects: LIST };
@@ -98,6 +107,8 @@ ok(!/bi-exclamation-triangle-fill/.test(rw), '评估汇总页：已不再渲染 
 const rwFlags = (rw.match(/class="wl-flag"/g) || []).length;
 ok(rwFlags === 4, '评估汇总页：告警行 4 行，实际 ' + rwFlags);
 ok(/\d+ 项需关注/.test(rw), '评估汇总页：表头下方显示「需关注」计数');
+const rwIec = (rw.match(/超过内部填报预估/g) || []).length;
+ok(rwIec === 1, '★ 评估汇总页：内部填报预估规则只命中 1 个（同额浮点误差不误报），实际 ' + rwIec);
 
 // ---- 两页一致性（本次 bug 的回归断言）----
 ok(rpFlags === rwFlags, '★ 两页告警项目数一致：项目资料页 ' + rpFlags + ' = 评估汇总页 ' + rwFlags);
