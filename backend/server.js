@@ -2324,6 +2324,8 @@ function buildWorkloadSummary(sid, user) {
       subcontract_scope: p.subcontract_scope || '',
       cost_summary: cs,
       needs_estimate: needsEstimate(p),
+      // 导入校验告警透传到评估汇总页（该页数据来自本接口，非 /api/projects；漏了这行则 ⚠ 角标永远不显示）
+      import_warnings: p.import_warnings || [],
       work_item_count: wis.length, evaluated_count: evaluatedWI,
       total_adjusted_cost: Math.round(totalAdjusted * 100) / 100
     };
