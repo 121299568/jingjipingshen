@@ -39,8 +39,9 @@
   .b-lock{background:#fee2e2;color:#991b1b}
   .back{display:inline-flex;align-items:center;gap:5px;background:none;border:none;color:var(--brand);
     cursor:pointer;font-size:13px;padding:2px 0;margin-bottom:4px}
-  /* 固定布局 + 显式列宽：窄列单行不换行（宽度够用即可），文本列换行把内容展示全 */
-  table{width:100%;min-width:1080px;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
+  /* 固定布局 + 显式列宽：窄列单行不换行（宽度够用即可），文本列换行把内容展示全。
+     min-width 决定窄列的像素下限（百分比随表格宽度缩放），1200 是窄列「够用」的最低档 */
+  table{width:100%;min-width:1200px;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
   th,td{border-bottom:1px solid var(--line);padding:3px 7px;text-align:left;vertical-align:middle}
   th{background:#f8fafc;font-weight:600;color:#374151;position:sticky;top:0;z-index:2;font-size:12px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:inset 0 -1px 0 #dfe3e8}
@@ -269,13 +270,17 @@ function renderProject(){
   d.categories.forEach(c=>{
     const items=d.items.filter(x=>x.category===c.key);
     if(!items.length) return;
-    // 列宽口径：任务/工作项/说明自适应（共 77.5%）并换行展示全文；
-    // 原人天/原费用/我的评估人天/状态「够用即可」（原费用略宽），最后一列状态靠右。
-    // 「人员」列已去掉——workItems 里本就没有这个字段，一直在显示「—」，白占宽度。
+    // 列宽：百分比会随表格宽度缩放，所以按最窄场景（table min-width:1200px）反推，
+    // 保证窄屏横滚时也不挤；更宽只会更宽松。四列窄列的像素预算（td 左右内边距共 14px）：
+    //   原人天   ← 表头「原人天」3字×12=36 → 50px（4.2%）
+    //   原费用   ← 内容百万级 ¥2,700,000 ≈ 73 → 87px（7.3%，比原人天宽）
+    //   我的评估人天 ← 表头 6字×12=72、stepper(− 输入 +) 约 78 → 92px（7.7%）
+    //   状态     ← 内容「已提交」3字×11=33 → 47px（3.9%）
+    // 取整留出余量后为 4.5% / 8% / 8% / 4.5%，余下 75% 全部给三列文本列（17% / 17% / 41%）。
     h+='<div class="cat">'+esc(c.label)+'（'+items.length+' 项）</div>'
       +'<div class="tbl-wrap"><table><colgroup>'
-      +'<col style="width:18%"><col style="width:18%"><col style="width:41.5%">'
-      +'<col style="width:4.5%"><col style="width:8%"><col style="width:6%"><col style="width:4%">'
+      +'<col style="width:17%"><col style="width:17%"><col style="width:41%">'
+      +'<col style="width:4.5%"><col style="width:8%"><col style="width:8%"><col style="width:4.5%">'
       +'</colgroup><thead><tr>'
       +'<th>任务</th><th>工作项</th><th>说明</th><th class="num">原人天</th><th class="num">原费用</th>'
       +'<th class="num">我的评估人天</th><th class="st">状态</th>'

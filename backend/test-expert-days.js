@@ -132,23 +132,39 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('改动过的行标黄（adj）', byWid(101).classList.contains('adj') && !byWid(102).classList.contains('adj'));
 
   // ===== C. 列宽口径与全文展示 =====
-  check('表格固定布局 + 最小宽度 1080', /table\{[^}]*table-layout:fixed/.test(html) && /table\{[^}]*min-width:1080px/.test(html));
+  check('表格固定布局 + 最小宽度 1200（窄列的像素下限）', /table\{[^}]*table-layout:fixed/.test(html) && /table\{[^}]*min-width:1200px/.test(html));
   const colCount = (h.match(/<col style="width:/g) || []).length;
   const thCount = (h.match(/<th[ >]/g) || []).length;
   const groupCount = (h.match(/<colgroup>/g) || []).length;
   check('每个表格 colgroup 列数与表头一致（7 列 × 2 类）',
     groupCount === 2 && colCount === thCount && colCount % 7 === 0,
     groupCount + '表 / ' + colCount + 'col / ' + thCount + 'th');
-  // 任务/工作项/说明 自适应（合计 77.5%）——内容展示全
-  check('三列文本列宽度自适应（18%/18%/41.5%）',
-    h.includes('<col style="width:18%"><col style="width:18%"><col style="width:41.5%">'));
+  // 三列文本列自适应（合计 75%）——内容展示全
+  check('三列文本列宽度自适应（17%/17%/41%）',
+    h.includes('<col style="width:17%"><col style="width:17%"><col style="width:41%">'));
   // 原人天/原费用/我的评估人天/状态 宽度够用即可（原费用略宽）
-  check('四个窄列宽度够用即可（原人天 4.5 / 原费用 8 / 评估人天 6 / 状态 4%）',
-    h.includes('<col style="width:4.5%"><col style="width:8%"><col style="width:6%"><col style="width:4%">'));
+  check('四个窄列宽度够用即可（原人天 4.5 / 原费用 8 / 评估人天 8 / 状态 4.5%）',
+    h.includes('<col style="width:4.5%"><col style="width:8%"><col style="width:8%"><col style="width:4.5%">'));
   const widths = [...h.matchAll(/<col style="width:([\d.]+)%">/g)].map(m => parseFloat(m[1]));
   const oneTable = widths.slice(0, 7).reduce((a, b) => a + b, 0);
   check('单表列宽合计 100%（不留空档，也不靠浏览器补齐）', Math.abs(oneTable - 100) < 0.01, oneTable + '%');
   check('原费用列宽于原人天列（费用列宽一些）', widths[4] > widths[3], widths[3] + ' vs ' + widths[4]);
+  // 「够用就行」得有依据：百分比随表格宽度缩放，所以按最窄场景（table min-width）折算成像素，
+  // 扣掉 td 左右内边距后与内容实际需求比对——避免只在宽屏看着够用、窄屏就被挤掉。
+  const MIN_TABLE = parseFloat((html.match(/table\{[^}]*min-width:(\d+)px/) || [])[1] || 0);
+  const PAD = 14;   // td 左右内边距各 7px
+  const NEED = [
+    [3, 36, '原人天(表头3字)'],
+    [4, 73, '原费用(百万级金额)'],
+    [5, 78, '评估人天(表头6字/步进器)'],
+    [6, 33, '状态(已提交3字)'],
+  ];
+  const short = NEED.filter(([i, need]) => widths[i] / 100 * MIN_TABLE - PAD < need)
+    .map(([i, need, name]) => name + '可用' + (widths[i] / 100 * MIN_TABLE - PAD).toFixed(1) + '<' + need);
+  check('四列窄列在最窄 ' + MIN_TABLE + 'px 下像素仍够用（不靠宽屏掩盖）',
+    MIN_TABLE >= 1200 && short.length === 0, short.join(' / '));
+  const textPct = widths.slice(0, 3).reduce((a, b) => a + b, 0);
+  check('文本三列拿到余下全部宽度（≥75%）', textPct >= 75, textPct + '%');
   check('三个文本列都用换行容器展示全文（9 格）',
     (h.match(/<td class="txt"><span class="clamp">/g) || []).length === 9,
     (h.match(/<td class="txt"><span class="clamp">/g) || []).length);
