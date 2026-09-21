@@ -141,6 +141,10 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
 /* 专家评估列：核减为正用绿色（省钱），未评估/免评估用弱化灰字占位 */
 .wl-cell-ok{color:#0f7b3d!important;font-weight:600}
 .wl-muted{text-align:center;color:#9aa1ab;font-size:12px}
+/* ★「免评估」醒目标签（琥珀色）：项目名前 + 专家评估列内共用，浅灰角标已看不清 */
+.wl-exempt-badge{display:inline-block;background:#fde68a;color:#92400e;border:1px solid #f59e0b;font-size:11px;
+  font-weight:600;padding:2px 7px;border-radius:4px;line-height:1.4;white-space:nowrap;margin-right:6px;vertical-align:1px}
+.wl-exempt-cell{color:#92400e;font-weight:700;font-size:13px;background:#fef3c7;padding:3px 8px;border-radius:4px}
 .wl-wrap thead .wl-g-expert{background:#ecfdf5;color:#065f46}
 /* 项目名称后的「打分」入口：极小图标按钮，不挤占名称宽度 */
 .wl-score-btn{border:1px solid #cbd5e1;background:#fff;color:#2563eb;border-radius:4px;font-size:11px;
@@ -1532,7 +1536,7 @@ function renderUploadPage(){
           '<div class="file-actions flex-shrink-0">'+
             autoTag+
             '<span class="badge '+(f.file_category==='estimation'?'badge-cat-estimation':'badge-cat')+' me-1">'+catName+'</span>'+
-            '<a href="'+fileUrl(API.replace('/api','')+f.url)+'" target="_blank" class="btn btn-outline-primary" title="预览"><i class="bi bi-eye"></i></a>'+delBtn+
+            '<a href="'+fileUrl(f.url)+'" target="_blank" class="btn btn-outline-primary" title="预览"><i class="bi bi-eye"></i></a>'+delBtn+
           '</div>'+
         '</div>'+
       '</div></div>';
@@ -2637,7 +2641,7 @@ function renderWorkloadProjectTable(d){
     const rowTip=attrs.tip;
     let cells='<td class="wl-freeze wl-num"'+rowTip+'>'+row.idx+'</td>';
     let nameCell='<td class="wl-freeze2 wl-name wl-txt"'+tipAttr(row.project_name,17)+'><span class="wl-clamp">';
-    if(p.needs_estimate===false) nameCell+='<span class="badge bg-light text-dark border" data-tip="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span> ';
+    if(p.needs_estimate===false) nameCell+='<span class="wl-exempt-badge" data-tip="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span>';
     nameCell+=esc(row.project_name)+'</span>';
     // 管理员/预审查看各专家打分的入口（免评估项目无打分可看，不显示）
     if(p.needs_estimate!==false) nameCell+='<button type="button" class="wl-score-btn" onclick="openExpertScores('+p.project_id+')" title="查看各专家打分明细">打分</button>';
@@ -2648,7 +2652,7 @@ function renderWorkloadProjectTable(d){
       const cls=(c.detail?'wl-detail ':'')+(g.cls||'')+' ';
       // 专家评估列：未评估/免评估时不显示 0 元，避免被误读成「评估后成本为 0」
       if(c.expert){
-        if(p.needs_estimate===false){ cells+='<td class="'+cls+'wl-muted">免评估</td>'; }
+        if(p.needs_estimate===false){ cells+='<td class="'+cls+'"><span class="wl-exempt-cell">免评估</span></td>'; }
         else if(!(p.evaluated_count>0)){ cells+='<td class="'+cls+'wl-muted">未评估</td>'; }
         else if(c.k==='expert_progress'){ cells+='<td class="'+cls+'wl-num">'+esc(v)+'</td>'; }
         else {

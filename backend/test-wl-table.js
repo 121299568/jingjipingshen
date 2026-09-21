@@ -122,7 +122,14 @@ const checks = [
     /name:'专家评估'[\s\S]{0,400}?cols:\[[\s\S]{0,300}?\]\s*\}/.test(block) &&
     !/label:'评估后成本'/.test(block) && /label:'核减额'/.test(block) && /label:'评估进度'/.test(block)],
   ['评估进度文案为「N 人」口径（非「N 项」）',
-    /expert_done_count\|\|0\)\+'\/'[\s\S]{0,80}?' 人'/.test(block) && !/' 项'/.test(block)]
+    /expert_done_count\|\|0\)\+'\/'[\s\S]{0,80}?' 人'/.test(block) && !/' 项'/.test(block)],
+  // 2026-09-22：「免评估」改为醒目琥珀色标签，浅灰角标已看不清
+  ['项目名前「免评估」使用醒目标签（wl-exempt-badge）',
+    /needs_estimate===false[\s\S]{0,160}?wl-exempt-badge/.test(block)],
+  ['专家评估列内「免评估」使用醒目占位（wl-exempt-cell）',
+    /needs_estimate===false[\s\S]{0,120}?wl-exempt-cell/.test(block)],
+  ['已删除浅灰角标形态（不再用 badge bg-light 写免评估）',
+    !/badge bg-light text-dark border[^<]*免评估/.test(block)]
 ];
 
 // ---- 行为断言：人员外包 / 专业分包展示「专家评估后」金额 ----

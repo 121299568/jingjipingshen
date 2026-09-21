@@ -2513,9 +2513,14 @@ function buildWorkloadSummary(sid, user) {
   });
   // 把「每个专家已评/分派项目数 + 完成度」直接回填到 evaluators 上（前端评审人完成度条读 d.evaluators）；
   // 之前这份进度算完塞进独立的 evaluator_progress、而 evaluators 本体没带这些字段 → 前端显示 undefined。
+  // ★ 免评估项目（needs_estimate=false，外包+分包成本为 0、无需专家评估）不占分母：
+  // 它们对任何专家都是「自动通过」，计入会虚高"已评"、稀释真实完成度。
+  // 因此 projects_assigned 只数可评估项目，projects_submitted 只数"已提交 且 可评估"的项目，
+  // 完成度 = 已提交 / 可评估（免评自动通过不算进已提交）。
+  const evaluableProjects = projects.filter(p => needsEstimate(p));
   const evaluatorProgress = evaluators.map(ev => {
-    const projCount = projects.length;
-    const submitted = projects.filter(p => db.store.expertEstimates.some(e => e.project_id === p.id && e.expert_id === ev.user_id)).length;
+    const projCount = evaluableProjects.length;
+    const submitted = evaluableProjects.filter(p => db.store.expertEstimates.some(e => e.project_id === p.id && e.expert_id === ev.user_id)).length;
     return { ...ev, projects_assigned: projCount, projects_submitted: submitted, completion: projCount > 0 ? Math.round(submitted / projCount * 100) / 100 : 0 };
   });
   evaluators.forEach((ev, i) => {
@@ -2534,8 +2539,11 @@ function buildWorkloadSummary(sid, user) {
   const batch_total_reduction = Math.round((batch_total_original_cost - batch_total_adjusted_cost) * 100) / 100;
   // 相对成本估算表的核减（评估前后同口径对比）
   const batch_expert_reduction = Math.round(projectSummaries.reduce((s, p) => s + (Number(p.expert_reduction) || 0), 0) * 100) / 100;
-  const batch_work_item_count = projectSummaries.reduce((s, p) => s + p.work_item_count, 0);
-  const batch_evaluated_count = projectSummaries.reduce((s, p) => s + p.evaluated_count, 0);
+  // ★ 工作项已评估分母只统计「可评估」项目（needs_estimate!==false）的工作项：
+  // 免评估项目的外包/分包成本为 0，本来就不参与专家评估，它们的工作项（职工/差旅/采购等）
+  // 若计入分母会虚高"工作项已评估"的基数。
+  const batch_work_item_count = projectSummaries.reduce((s, p) => s + (p.needs_estimate === false ? 0 : p.work_item_count), 0);
+  const batch_evaluated_count = projectSummaries.reduce((s, p) => s + (p.needs_estimate === false ? 0 : p.evaluated_count), 0);
   return {
     session_id: sid, session_name: session.name, evaluators, projects: projectSummaries,
     batch_total_adjusted_cost, batch_total_original_cost, batch_total_reduction,
