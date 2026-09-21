@@ -211,6 +211,20 @@ function cleanupTest() {
   check('评估已写入 expertEstimates（2 行）', estRows === '2', 'rows=' + estRows);
   check('工作项 5 人汇总已刷新（均值 3.5 × 单价 2000）', rollup[0] === '3.5' && rollup[1] === '7000', rollup.join('/'));
 
+  // 8b) ★ schema 守卫：自由文本列必须够宽
+  //     失败模式：任一列超长 → 整行 REPLACE 失败被 catch 跳过 → **静默丢明细**
+  //     （spec 曾报 Data too long；workItems 曾因缺列整批不落库）。这条挡住「有人又把列改窄」。
+  const widths = sql(`SELECT CONCAT(TABLE_NAME,'.',COLUMN_NAME,'=',CHARACTER_MAXIMUM_LENGTH)
+    FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='economic_review' AND (
+      (TABLE_NAME='procurementItems' AND COLUMN_NAME='spec') OR
+      (TABLE_NAME='travelItems' AND COLUMN_NAME='purpose') OR
+      (TABLE_NAME='workItems' AND COLUMN_NAME='work_task'));`).trim().split('\n');
+  const specW = parseInt((widths.find(w => /\.spec=/.test(w)) || '').split('=')[1], 10) || 0;
+  const purposeW = parseInt((widths.find(w => /\.purpose=/.test(w)) || '').split('=')[1], 10) || 0;
+  const taskW = parseInt((widths.find(w => /\.work_task=/.test(w)) || '').split('=')[1], 10) || 0;
+  check('spec 列已扩宽（≥1024，防整批保存失败丢明细）', specW >= 1024, 'width=' + specW);
+  check('purpose / work_task 列已扩宽（≥255）', purposeW >= 255 && taskW >= 255, `purpose=${purposeW} work_task=${taskW}`);
+
   // 9) 汇总页联动
   r = await req('GET', `/api/sessions/${sid}/workload-summary`);
   const pj = (r.body.projects || [])[0] || {};

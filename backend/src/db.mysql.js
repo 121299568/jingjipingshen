@@ -49,7 +49,12 @@ const COL_TYPE = {
   contract_party: 'VARCHAR(255) DEFAULT NULL',
   remark: 'TEXT',
   project_id: 'INT DEFAULT NULL',
-  work_task: 'VARCHAR(128) DEFAULT NULL',
+  // ★ 自由文本列长度（2026-09-21 修）：这些字段直接来自成本估算表/专家手填，长度不可控。
+  //   原来 spec/supplier/purpose/work_task 都是 128 或更小，实测出现过
+  //   `Data too long for column 'spec'` → REPLACE 整批失败被 catch 跳过 → **静默丢明细**，
+  //   与 workItems 缺列那次的失败模式完全相同。凡是「一整行一次 REPLACE」的表，
+  //   任何一列超长都会拖垮整行，所以自由文本列必须给足余量。
+  work_task: 'VARCHAR(255) DEFAULT NULL',
   work_item: 'VARCHAR(255) DEFAULT NULL',
   category: 'VARCHAR(32) DEFAULT NULL',
   cost: 'DOUBLE NOT NULL DEFAULT 0',
@@ -57,16 +62,16 @@ const COL_TYPE = {
   unit_price: 'DOUBLE NOT NULL DEFAULT 0',
   quantity: 'DOUBLE NOT NULL DEFAULT 0',
   item_name: 'VARCHAR(255) DEFAULT NULL',
-  spec: 'VARCHAR(128) DEFAULT NULL',
+  spec: 'VARCHAR(1024) DEFAULT NULL',
   amount: 'DOUBLE NOT NULL DEFAULT 0',
-  supplier: 'VARCHAR(128) DEFAULT NULL',
-  purpose: 'VARCHAR(128) DEFAULT NULL',
+  supplier: 'VARCHAR(255) DEFAULT NULL',
+  purpose: 'VARCHAR(255) DEFAULT NULL',
   person: 'VARCHAR(64) DEFAULT NULL',
   days: 'DOUBLE NOT NULL DEFAULT 0',
   work_item_id: 'INT DEFAULT NULL',
   expert_id: 'INT DEFAULT NULL',
   expert_name: 'VARCHAR(64) DEFAULT NULL',
-  comment: 'VARCHAR(255) DEFAULT NULL',
+  comment: 'VARCHAR(512) DEFAULT NULL',
   confirmed: 'TINYINT(1) NOT NULL DEFAULT 0',
   originalname: 'VARCHAR(255) DEFAULT NULL',
   uploader_id: 'INT DEFAULT NULL',
