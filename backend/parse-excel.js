@@ -56,6 +56,16 @@ function gv(grid, r, c) {
   return (row && row[c] != null) ? row[c] : null;
 }
 
+// 模板底部说明行识别：这些模板在每个成本表末尾都有一行说明（如
+// 「人员成本：核算长期职工工作量、成本，人员单价参照人资部价格；人员列一定要标注具体人名。」），
+// 且常被合并单元格把整段文字填进「工作项」列，于是被当成工作项入库（项目3 曾多出 9 条空明细）。
+// 判据：无人天、无费用、无人员，且文本是长句/含中文标点——真实工作项名不会有这些特征。
+function isNoteRowLike(item, days, cost, person) {
+  if (!item) return false;
+  if (days != null || cost != null || person) return false;
+  return item.length > 20 || /[，；。]/.test(item);
+}
+
 // ---------- 合计行识别 ----------
 // 明细表里的「合计/小计」行不是工作项，绝不能参与成本计算（项目70 曾因此把分包成本
 // 虚增 339.8 万）。两条判据，命中任一即按合计行跳过：
@@ -202,6 +212,10 @@ function makeFormulaEvaler(wb) {
   return { evalExpr, cellValue };
 }
 // 对整个工作簿做一次兜底：只改写「有公式且缓存为空或 0」且重算出非 0 的单元格
+// ★ 前提：读取时必须带 sheetStubs（见 readFile 调用处）。xlsx 里「有 <f> 但没有 <v>」的
+//   公式单元格（很多导出工具不写缓存值），SheetJS 默认会**整格丢弃**，连 cell.f 都拿不到；
+//   带 sheetStubs 才会以 t='z' 的桩形式暴露出来，这里才有机会重算。
+//   典型症状：费用列 `=E3*G3`（人天×单价）→ 系统费用全 0，而 Excel 打开自动重算看着有值。
 function recalcFormulaCells(wb) {
   if (!wb || !wb.Sheets) return 0;
   const E = makeFormulaEvaler(wb);
@@ -214,12 +228,18 @@ function recalcFormulaCells(wb) {
       for (let c = rng.s.c; c <= rng.e.c; c++) {
         const addr = XLSX.utils.encode_cell({ r, c });
         const cell = ws[addr];
-        if (!cell || !cell.f) continue;
-        if (!(cell.v === 0 || cell.v == null || cell.v === '')) continue; // 缓存已有有效值，不干预
-        const v = E.evalExpr(sn, String(cell.f), 0);
-        if (typeof v === 'number' && isFinite(v) && Math.abs(v) > 1e-9) {
-          cell.v = v; cell.t = 'n'; fixed++;
+        if (!cell) continue;
+        // 有公式且缓存无效（空桩 / 0 / 空串）→ 尝试重算
+        if (cell.f && (cell.t === 'z' || cell.v === 0 || cell.v == null || cell.v === '')) {
+          const v = E.evalExpr(sn, String(cell.f), 0);
+          if (typeof v === 'number' && isFinite(v) && Math.abs(v) > 1e-9) {
+            cell.v = v; cell.t = 'n'; fixed++;
+          }
         }
+        // 仍是空桩（无公式、或公式算不出/算出 0）→ 删掉，保持「空 = 该格不存在」的既有语义。
+        // 否则下游 gv()/num() 会把桩当成 0：空行被判成有数据、
+        // 「调整后费用」列 `=M*F/E`（含 AVERAGE，算不出）会变成 0 覆盖原成本。
+        if (cell.t === 'z') delete ws[addr];
       }
     }
   }
@@ -228,7 +248,8 @@ function recalcFormulaCells(wb) {
 
 // ---------- 主解析 ----------
 function parseProjectExcel(filePath) {
-  const wb = XLSX.readFile(filePath, { cellFormula: true, raw: true });
+  // ★ sheetStubs: true 不可省——见 recalcFormulaCells 注释（公式无缓存值的格会整格丢失）
+  const wb = XLSX.readFile(filePath, { cellFormula: true, raw: true, sheetStubs: true });
   recalcFormulaCells(wb);
   const sheets = resolveSheets(wb);
 
@@ -321,6 +342,7 @@ function parseProjectExcel(filePath) {
       const days = num(gv(raw, r, cDays));       // 人天(原始)
       const cost = num(gv(raw, r, cCost));       // 费用(原始)
       const person = str(gv(raw, r, cPerson));
+      if (isNoteRowLike(item, days, cost, person)) continue;
       // 合并单元格导致工作项为空：本行仍有数值则保留并沿用上一行工作项，避免静默丢行
       if (!item || item === '工作项') {
         if (days === null && cost === null && !person) continue;
@@ -411,10 +433,12 @@ function parseProjectExcel(filePath) {
       let item = str(gv(fill, r, cItem));
       const days = num(gv(raw, r, cDays));
       const cost = num(gv(raw, r, cCost));
+      if (isNoteRowLike(item, days, cost, '')) continue;
       if (!item || item === '工作项') {
         // 合并单元格会让续行的工作项为空。以前直接 continue 丢弃，导致「表里有值、系统里没有」；
-        // 改为：只要本行有人天或费用就保留，工作项沿用上一行（仍无则占位）。
-        if (days === null && cost === null) continue;
+        // 改为：只要本行有人天或费用（>0）就保留，工作项沿用上一行。
+        // 全是 0/空 的续行没有任何信息（如外包表只填了表头的一行），跳过，避免「（同上）」占位垃圾行。
+        if (!(days > 0) && !(cost > 0)) continue;
         item = lastItem || '（同上）';
       } else lastItem = item;
       const expertDays = cExp0 >= 0
@@ -488,6 +512,7 @@ function parseProjectExcel(filePath) {
       if (taskCol >= 0) { const tv = str(gv(fill, r, taskCol)); if (tv && tv !== header[taskCol]) task = tv; }
       const days = workloadCol >= 0 ? num(gv(raw, r, workloadCol)) : null;
       const desc = descCol >= 0 ? str(gv(raw, r, descCol)) : '';
+      if (isNoteRowLike(item, days, null, '')) continue;
       if (days === null && !desc) {
         // 没有工作量也没有说明的行，多半是占位空行，跳过
         if (!item) continue;
@@ -648,7 +673,7 @@ function matchInquiryCol(headers, kws) {
 }
 function parseInquiryExcel(filePath) {
   let wb;
-  try { wb = XLSX.readFile(filePath, { cellFormula: true, raw: true }); }
+  try { wb = XLSX.readFile(filePath, { cellFormula: true, raw: true, sheetStubs: true }); }
   catch (e) { return { __parseError: e && e.message, items: [] }; }
   recalcFormulaCells(wb);
   const items = [];
