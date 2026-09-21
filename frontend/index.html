@@ -1258,7 +1258,7 @@ function renderProjects(){
       const warnMsgs=[]; warns.forEach(w=>(w.messages||[]).forEach(m=>warnMsgs.push(m)));
       const warnTip=warnMsgs.length?' data-tip="⚠ 需关注：'+esc(warnMsgs.join('；'))+'"':'';
       return '<tr'+(warnMsgs.length?' class="dt-flag"':'')+'>'+
-        '<td class="dt-num">'+String(pi+1).padStart(2,'0')+'</td>'+
+        '<td class="dt-num"'+warnTip+'>'+String(pi+1).padStart(2,'0')+'</td>'+
         // 项目名不再用 substring 硬截断（会把转义实体切断），交给两行截断 + 悬浮看全文
         '<td class="dt-txt" data-tip="'+esc(p.project_name||'')+'"><span class="dt-clamp">'+esc(p.project_name||'')+'</span></td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
