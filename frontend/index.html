@@ -395,6 +395,7 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
         <h6 class="mb-0">工作量评估</h6>
         <button class="btn btn-outline-success btn-sm" id="downloadCostBtn" onclick="downloadCostExcel()" style="display:none"><i class="bi bi-download"></i> 导出成本明细</button>
       </div>
+      <div id="costSessionFilter" class="d-flex flex-wrap gap-2 mb-2 align-items-center"></div>
       <div id="costProjectFilter" class="d-flex flex-wrap gap-2 mb-3 align-items-center"></div>
       <div class="alert alert-info small mb-3">
         <strong>工作流程：</strong>点击上方项目序号快速切换项目；<span class="badge bg-success">绿色</span>表示您已提交该项目评估，<span class="badge bg-secondary">灰色</span>表示尚未提交；专家可在人员外包/专业分包明细中提交人天评估。
@@ -1598,6 +1599,60 @@ function getCostVisibleProjects(){
 }
 // 管理员/研发中心进入本页属于「只读查看」：可以看各专家打分，但不能代专家提交
 function isCostReadonly(){ return !!(currentUser&&['admin','rd'].includes(currentUser.role)); }
+
+// ===== 工作量评估页：先选批次，再按「项目资料页批次汇总表」的序号选项目 =====
+// ★ 序号口径必须与「项目资料页」一致：项目资料页按 projects 原始顺序在批次内从 01 编号，
+//   不能用本页过滤后数组的索引（跨批次混排会得到完全不同的号，业务对不上）。
+let costSessionFilterId=null;
+function costSeqMap(){
+  const m=new Map();
+  (projects||[]).forEach(p=>{
+    const k=String(p.session_id);
+    if(!m.has(k))m.set(k,new Map());
+    const inner=m.get(k);
+    inner.set(p,inner.size+1);
+  });
+  return m;
+}
+function costSessionOptions(){
+  const vis=getCostVisibleProjects();
+  const ids=[];
+  vis.forEach(p=>{ if(p.session_id!=null&&!ids.some(x=>String(x)===String(p.session_id))) ids.push(p.session_id); });
+  ids.sort((a,b)=>Number(a)-Number(b));
+  return ids.map(id=>({ id, name:((sessions||[]).find(s=>String(s.id)===String(id))||{}).name||('批次'+id) }));
+}
+function renderCostSessionFilter(){
+  const el=document.getElementById('costSessionFilter');
+  if(!el)return;
+  const opts=costSessionOptions();
+  if(!opts.length){ el.innerHTML='<span class="text-muted small">暂无可选批次</span>'; return; }
+  if(costSessionFilterId==null||!opts.some(o=>String(o.id)===String(costSessionFilterId))) costSessionFilterId=opts[0].id;
+  el.innerHTML='<span class="text-muted small me-2 align-self-center flex-shrink-0">选择批次：</span>'+
+    '<select class="form-select form-select-sm" style="width:auto;min-width:200px" onchange="selectCostSession(this.value)">'+
+    opts.map(o=>'<option value="'+o.id+'"'+(String(o.id)===String(costSessionFilterId)?' selected':'')+'>'+esc(o.name)+'</option>').join('')+
+    '</select>';
+}
+function selectCostSession(v){
+  costSessionFilterId=(v===''||v==null)?null:parseInt(v,10);
+  // 换批次后原选中项目已不在范围内，重置并自动选该批次第一个未提交项目
+  currentProjectId=null;
+  renderCostSessionFilter();
+  renderCostProjectFilter();
+  autoSelectCostProject();
+}
+// 当前批次内的项目（保持 projects 原始顺序，保证序号与项目资料页一致）
+function getCostFilteredProjects(){
+  const vis=getCostVisibleProjects();
+  if(costSessionFilterId==null)return vis;
+  return vis.filter(p=>String(p.session_id)===String(costSessionFilterId));
+}
+async function autoSelectCostProject(){
+  const list=getCostFilteredProjects();
+  if(!list.length)return;
+  const firstUnsubmitted=list.find(p=>!costProjectStatus[p.id]);
+  const pid=(firstUnsubmitted||list[0]).id;
+  await selectCostProject(pid);
+}
 async function loadCostProjectsStatus(){
   const visible=getCostVisibleProjects();
   if(!visible.length)return;
@@ -1617,14 +1672,16 @@ async function loadCostProjectsStatus(){
 function renderCostProjectFilter(){
   const el=document.getElementById('costProjectFilter');
   if(!el)return;
-  const visible=getCostVisibleProjects();
+  const visible=getCostFilteredProjects();
   if(!visible.length){
-    el.innerHTML='<span class="text-muted small">暂无项目</span>';
+    el.innerHTML='<span class="text-muted small">该批次暂无可评估项目</span>';
     return;
   }
   let h='<span class="text-muted small me-2 align-self-center flex-shrink-0">快速过滤项目：</span>';
-  visible.forEach((p,idx)=>{
-    const num=String(idx+1).padStart(2,'0');
+  // 序号取「项目资料页」同口径的批次内序号，而非本页数组的索引
+  const seqMap=costSeqMap();
+  visible.forEach(p=>{
+    const num=String(((seqMap.get(String(p.session_id))||new Map()).get(p))||0).padStart(2,'0');
     const submitted=costProjectStatus[p.id];
     const active=String(currentProjectId)===String(p.id);
     let cls;
@@ -1648,14 +1705,16 @@ function selectCostProject(pid){
   loadCostDetail(pid);
 }
 function updateCostSelect(){
+  renderCostSessionFilter();
   renderCostProjectFilter();
 }
 async function renderCostAnalysis(){
   await loadCostProjectsStatus();
-  const visible=getCostVisibleProjects();
   const adminTip=document.getElementById('costAdminTip');
   if(adminTip)adminTip.classList.toggle('d-none',!isCostReadonly());
-  // 若当前选中的项目不在「已启动评审的批次」内，重置后自动选首个未提交
+  // 先渲染批次下拉（它会确定默认批次），再按批次过滤项目
+  renderCostSessionFilter();
+  const visible=getCostFilteredProjects();
   if(currentProjectId && !visible.some(p=>String(p.id)===String(currentProjectId))){
     currentProjectId=null;
   }
@@ -1663,9 +1722,7 @@ async function renderCostAnalysis(){
   if(currentProjectId){
     await loadCostDetail(currentProjectId);
   }else{
-    const firstUnsubmitted=visible.find(p=>!costProjectStatus[p.id]);
-    const defaultPid=firstUnsubmitted?firstUnsubmitted.id:(visible[0]?visible[0].id:null);
-    if(defaultPid) await selectCostProject(defaultPid);
+    await autoSelectCostProject();
   }
 }
 async function loadCostDetail(pid){
@@ -1928,7 +1985,12 @@ function downloadCostExcel(){
   URL.revokeObjectURL(url);
 }
 
-function goToCost(pid){currentProjectId=pid;navigateTo('cost-analysis');loadCostDetail(pid);}
+function goToCost(pid){
+  // 从项目资料页跳转过来时，先把批次切到该项目所属批次，否则它不在当前过滤范围内会被忽略
+  const p=(projects||[]).find(x=>String(x.id)===String(pid));
+  if(p&&p.session_id!=null)costSessionFilterId=p.session_id;
+  currentProjectId=pid;navigateTo('cost-analysis');loadCostDetail(pid);
+}
 
 // STATS
 let deptChartInstance=null,monthlyChartInstance=null,fileChartInstance=null,sessionChartInstance=null;
