@@ -8,7 +8,7 @@ function pick(cands) {
   for (const c of cands) { try { if (fs.existsSync(c)) return c; } catch (_) {} }
   throw new Error('找不到文件，试过：' + cands.join(' , '));
 }
-const app = fs.readFileSync(pick([__dirname + '/index.html', __dirname + '/../frontend/index.html',
+const app = fs.readFileSync(pick([__dirname + '/frontend/index.html', __dirname + '/index.html', __dirname + '/../frontend/index.html',
   '/opt/jingjipingshen/frontend/index.html',
   'C:/Users/12129/WorkBuddy/mjumju正式版/lnsoft-patch/index.html']), 'utf8');
 const server = fs.readFileSync(pick([__dirname + '/server.js', __dirname + '/../backend/server.js',
@@ -70,7 +70,8 @@ const pOut = doc1._store['batchDrawerList'].innerHTML;
 const pTbody = (pOut.match(/<tbody>[\s\S]*?<\/tbody>/) || [''])[0];
 const pCols = count(pOut, /<col[ >]/g);
 const pHead = count(pOut, /<th[ >]/g);
-const pRowTds = [...pTbody.matchAll(/<tr>[\s\S]*?<\/tr>/g)].map(r => count(r[0], /<td/g));
+// ⚠ 必须写 /<tr[^>]*>/：告警行是 <tr class="dt-flag">，只匹配裸 <tr> 会漏计一整行
+const pRowTds = [...pTbody.matchAll(/<tr[^>]*>[\s\S]*?<\/tr>/g)].map(r => count(r[0], /<td/g));
 
 check('项目资料页：表格包在 dt-wrap 内（吸顶表头 + 斑马纹 + 悬浮）',
   /<div class="dt-wrap"[^>]*><table[\s\S]*?<colgroup>/.test(pOut));
@@ -86,8 +87,12 @@ check('项目资料页：序号/金额右对齐等宽数字',
 check('项目资料页：金额为 0 时仍显示 —（不误判为缺失）', /<td class="dt-num">-<\/td>/.test(pOut));
 check('项目资料页：操作列够宽且不被裁（184px + dt-acts）',
   /<col style="width:184px">/.test(pOut) && /class="dt-acts"/.test(pOut));
-check('项目资料页：告警角标前置（不会被名称截断吃掉）',
-  /<span class="dt-clamp">\s*<span class="text-warning"[^>]*><i class="bi bi-exclamation-triangle-fill"><\/i>1<\/span>/.test(pOut));
+// 2026-09-21 起：告警不再用 ⚠ 角标，统一并入行级「⚠ 需关注」悬浮提示 + 行标红
+check('项目资料页：告警行标红 dt-flag（仅 1 行，无告警行不标）',
+  count(pOut, /class="dt-flag"/g) === 1);
+check('项目资料页：告警并入「⚠ 需关注」行提示（序号格 data-tip），不再渲染 ⚠ 角标',
+  /<tr class="dt-flag">[\s\S]*?<td class="dt-num" data-tip="⚠ 需关注：估算表与汇总表基线不一致">02<\/td>/.test(pOut) &&
+  !/bi-exclamation-triangle-fill/.test(pOut));
 check('项目资料页：表头为 dt-num 的金额列也右对齐', /<th class="dt-num">合同金额<\/th>/.test(pOut));
 
 // =======================================================================

@@ -5,7 +5,7 @@ function pick(cands) {
   for (const c of cands) { try { if (fs.existsSync(c)) return c; } catch (_) {} }
   throw new Error('找不到文件，试过：' + cands.join(' , '));
 }
-const base = path.dirname(pick([__dirname + '/index.html', __dirname + '/../frontend/index.html',
+const base = path.dirname(pick([__dirname + '/frontend/index.html', __dirname + '/index.html', __dirname + '/../frontend/index.html',
   '/opt/jingjipingshen/frontend/index.html',
   'C:/Users/12129/WorkBuddy/mjumju正式版/lnsoft-patch/index.html'])) + '/';
 const app = fs.readFileSync(base + 'index.html', 'utf8');
@@ -50,7 +50,9 @@ const expectedAnom = (sample.projects || []).filter(p => {
   const tc = Number(cs.total_cost) || 0;
   const pr = cs.profit_rate != null ? Number(cs.profit_rate) : null;
   const iec = (p.internal_estimated_cost != null && p.internal_estimated_cost !== '') ? Number(p.internal_estimated_cost) : null;
-  return !(ca > 0) || (ca > 0 && tc > ca) || (pr != null && pr < 0) || (iec != null && tc > iec);
+  // 2026-09-21 起：导入校验告警并入「需关注」，有条目即算异常行（与 renderWorkloadProjectTable 同口径）
+  const hasWarn = (p.import_warnings || []).some(w => (w.messages || []).length > 0);
+  return !(ca > 0) || (ca > 0 && tc > ca) || (pr != null && pr < 0) || (iec != null && tc > iec) || hasWarn;
 }).length;
 
 const full = buildApi(false, false);
