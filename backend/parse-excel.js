@@ -56,6 +56,33 @@ function gv(grid, r, c) {
   return (row && row[c] != null) ? row[c] : null;
 }
 
+// ---------- 合计行识别 ----------
+// 明细表里的「合计/小计」行不是工作项，绝不能参与成本计算（项目70 曾因此把分包成本
+// 虚增 339.8 万）。两条判据，命中任一即按合计行跳过：
+//   1) 文本判据：指定列的文本**整词**为 合计/小计/总计/汇总/累计/Sum/Total。
+//      ★ 必须整词匹配：真实工作项名常含「汇总」二字（如「成果汇总与验收」「调研结果汇总」），
+//        用 includes 会把明细误删。「合计」字样也可能不在首列（模板把「合计」写在 B 列），
+//        所以调用方把值得检查的列都传进来。
+//   2) 公式判据：该行人天/费用单元格是 SUM 公式。真实明细行的数字是手填常量，
+//      只有合计行才是公式求和；这条能兜住「没有合计字样但确实是 SUM」的模板。
+const TOTAL_LABEL_RE = /^(合计|小计|总计|汇总|累计|求和|sum|total|subtotal)\s*[:：]?$/i;
+function isTotalRowByLabel(grid, r, cols) {
+  for (const c of cols) {
+    if (c == null || c < 0) continue;
+    if (TOTAL_LABEL_RE.test(str(gv(grid, r, c)))) return true;
+  }
+  return false;
+}
+function rowHasSumFormula(ws, r, cols) {
+  for (const c of cols) {
+    if (c == null || c < 0) continue;
+    const cell = ws[XLSX.utils.encode_cell({ r, c })];
+    // 只认 SUM( ：明细行也可能写 =D3*E3 之类的公式，那不是合计
+    if (cell && cell.f && /SUM\s*\(/i.test(String(cell.f))) return true;
+  }
+  return false;
+}
+
 // ---------- 表名模糊匹配 ----------
 // 业务人员手工表的 sheet 名往往与模板有出入（如「专业分包成本测算」「XX项目成本」）。
 // 不再要求精确相等，而是按关键词命中；先精确后模糊，且一张 sheet 只归属一个规范表。
@@ -285,7 +312,10 @@ function parseProjectExcel(filePath) {
     let lastItem = '';
     for (let r = hr + 1; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
-      if (aVal.includes('合计') || aVal.includes('说明')) continue;
+      if (aVal.includes('说明')) continue;
+      // 合计/小计行（含 SUM 公式合计行）不是工作项，跳过，否则会虚增成本
+      if (isTotalRowByLabel(fill, r, [0, 1, 2, 3, cTask, cItem])) continue;
+      if (rowHasSumFormula(ws, r, [cDays, cCost])) continue;
       const bVal = str(gv(fill, r, cTask));      // 工作任务(填充)
       let item = str(gv(fill, r, cItem));        // 工作项(填充)
       const days = num(gv(raw, r, cDays));       // 人天(原始)
@@ -335,19 +365,47 @@ function parseProjectExcel(filePath) {
     let cTask = pick(/工作任务/), cItem = pick(/工作项/), cDesc = pick(/工作说明|工作内容|说明/);
     let cDays = pick(/人天|工作量估算/);
     let cCost = pick(/费用/, /调整|占比|核减|合计/);
-    const cExp0 = pick(/专家\s*1|专家一/);
-    const cAvg = pick(/平均/), cAdj = pick(/调整后/);
+    let cExp0 = pick(/专家\s*1|专家一/);
+    let cAvg = pick(/平均/), cAdj = pick(/调整后/);
     // 定位失败时回落到历史列位，保证老模板不被改坏
     if (cTask < 0) cTask = 1;
     if (cItem < 0) cItem = 2;
     if (cDesc < 0) cDesc = 3;
     if (cDays < 0) cDays = 4;
     if (cCost < 0) cCost = 5;
+    // ★ 一张表常有多个分区，每区各有表头且列位会漂移（项目70 的分包表有 4 个区：
+    //   前 3 区是「…|工作量（人天）|费用（元）」，第 4 区表头变成
+    //   「…|工作说明|单位|数量|单价|费用（元）」——费用列从 H 漂到 I，还多了数量/单价列）。
+    //   只按首个表头定位一次，会让后续分区全读错列（把单价当费用），成本整体算错。
+    //   因此遇到「重复表头行」时按新区表头重新定位；认不出数值列则不当表头，原样继续。
+    const repick = (r2) => {
+      const nh = [];
+      for (let c = 0; c <= lastCol; c++) nh.push(str(gv(fill, r2, c)));
+      const npick = (re, ex) => nh.findIndex(h => h && re.test(h) && !(ex && ex.test(h)));
+      const nt = npick(/工作任务/), ni = npick(/工作项/), nd = npick(/工作说明|工作内容|说明/);
+      const ndays = npick(/人天|工作量估算/), ncost = npick(/费用/, /调整|占比|核减|合计/);
+      if (ndays < 0 && ncost < 0) return false;   // 认不出任何数值列，不是新表头
+      cTask = nt;                                  // 新区没有的列一律置 -1（num(gv) 对 -1 安全返回 null）
+      cItem = ni;
+      cDesc = nd;
+      cDays = ndays;
+      cCost = ncost;
+      cExp0 = npick(/专家\s*1|专家一/);
+      cAvg = npick(/平均/);
+      cAdj = npick(/调整后/);
+      lastItem = '';                               // 新分区：工作项不沿用上一区的
+      return true;
+    };
     let task = '';
     let lastItem = '';
     for (let r = hr + 1; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
-      if (aVal.includes('合计') || aVal.includes('说明')) continue;
+      if (aVal.includes('说明')) continue;
+      // 合计/小计行（含 SUM 公式合计行）不是工作项，跳过，否则会虚增成本
+      if (isTotalRowByLabel(fill, r, [0, 1, 2, 3, cTask, cItem])) continue;
+      if (rowHasSumFormula(ws, r, [cDays, cCost])) continue;
+      // 遇到新分区表头（A 列为「序号/编号」且能认出数值列）：重定位列位后跳过表头行
+      if (/^(序号|编号)$/.test(aVal) && repick(r)) continue;
       const bVal = str(gv(fill, r, cTask));
       if (bVal && bVal !== '工作任务') task = bVal;
       let item = str(gv(fill, r, cItem));
@@ -421,7 +479,10 @@ function parseProjectExcel(filePath) {
     let task = '';
     for (let r = hr + 1; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
-      if (aVal.includes('合计') || aVal.includes('说明')) continue;
+      if (aVal.includes('说明')) continue;
+      // 合计/小计行（含 SUM 公式合计行）不是工作项，跳过，否则会虚增成本
+      if (isTotalRowByLabel(fill, r, [0, 1, 2, 3, taskCol, itemCol])) continue;
+      if (rowHasSumFormula(ws, r, [workloadCol])) continue;
       const item = str(gv(fill, r, itemCol));
       if (!item || item === header[itemCol]) continue;   // 空行 / 表头重复
       if (taskCol >= 0) { const tv = str(gv(fill, r, taskCol)); if (tv && tv !== header[taskCol]) task = tv; }
