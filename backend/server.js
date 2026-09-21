@@ -1204,20 +1204,21 @@ app.put('/api/work-report/text', auth(['admin']), (req, res) => {
   res.json({ ok: true });
 });
 
-// ===== 告警规则：人员外包 + 专业分包 占「估算总成本」比例超过 60% =====
+// ===== 告警规则：人员外包 + 专业分包 占「合同额」比例超过 60% =====
 // 与既有告警（合同额不一致 / 估算成本>内部预估成本）同口径：成本估算表导入时计算，
 // 命中则追加到 import_warnings，在批次项目列表以 ⚠ 黄标呈现，仅告警不拦截导入。
+// 分母取合同额（优先成本估算表内合同额，缺失时回落项目登记合同额）；合同额为 0/空则不告警。
 const OUTSOURCE_SUBCONTRACT_RATIO_LIMIT = 0.6; // 60%
-function checkOutsourceSubcontractAlert(cs) {
-  if (!cs || cs.total_cost == null) return null;
-  const total = Number(cs.total_cost) || 0;
-  if (total <= 0) return null;
+function checkOutsourceSubcontractAlert(cs, contractAmount) {
+  if (!cs || contractAmount == null) return null;
+  const contract = Number(contractAmount) || 0;
+  if (contract <= 0) return null;
   const os = Number(cs.outsourcing_cost) || 0;
   const sub = Number(cs.subcontract_cost) || 0;
-  const ratio = (os + sub) / total;
+  const ratio = (os + sub) / contract;
   if (ratio > OUTSOURCE_SUBCONTRACT_RATIO_LIMIT) {
     const pctVal = Math.round(ratio * 10000) / 100;
-    return `人员外包+专业分包占估算总成本 ${pctVal}%（¥${(os + sub).toLocaleString()} / 总成本¥${total.toLocaleString()}），超过 60% 阈值，外包/分包依赖过高，请复核`;
+    return `人员外包+专业分包占合同额 ${pctVal}%（¥${(os + sub).toLocaleString()} / 合同额¥${contract.toLocaleString()}），超过 60% 阈值，外包/分包依赖过高，请复核`;
   }
   return null;
 }
@@ -1297,8 +1298,9 @@ app.post('/api/projects/:id/files', auth(), upload.single('file'), (req, res) =>
     if (internalCostR2 != null && estCostR2 != null && estCostR2 - internalCostR2 > 0.01) {
       vIssues.push(`估算成本 ¥${estCostR2.toLocaleString()} 大于汇总表「内部信息系统填报预估成本」 ¥${internalCostR2.toLocaleString()}`);
     }
-    // 告警规则：人员外包 + 专业分包 占估算总成本超过 60%
-    const osAlert = checkOutsourceSubcontractAlert(parsed.cost_summary);
+    // 告警规则：人员外包 + 专业分包 占合同额超过 60%
+    const osContractAmt = (parsed.project && parsed.project.contract_amount != null) ? parsed.project.contract_amount : project.contract_amount;
+    const osAlert = checkOutsourceSubcontractAlert(parsed.cost_summary, osContractAmt);
     if (osAlert) vIssues.push(osAlert);
     // 最新一次估算表上传的校验结论覆盖旧告警：传了干净的表，旧告警自动消除
     project.import_warnings = vIssues.length
@@ -1564,8 +1566,9 @@ async function handleFolderUpload(req, res) {
         if (internalCostR != null && estCostR != null && estCostR - internalCostR > 0.01) {
           validation.messages.push(`估算成本 ¥${estCostR.toLocaleString()} 大于明细表「内部填报预估成本」 ¥${internalCostR.toLocaleString()}`);
         }
-        // 告警规则：人员外包 + 专业分包 占估算总成本超过 60%
-        const osAlert = checkOutsourceSubcontractAlert(parsed.cost_summary);
+        // 告警规则：人员外包 + 专业分包 占合同额超过 60%
+        const osContractAmt = (parsed.project && parsed.project.contract_amount != null) ? parsed.project.contract_amount : match.contract_amount;
+        const osAlert = checkOutsourceSubcontractAlert(parsed.cost_summary, osContractAmt);
         if (osAlert) { validation.level = 'warn'; validation.messages.push(osAlert); }
       }
     }
