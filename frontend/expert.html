@@ -39,12 +39,24 @@
   .b-lock{background:#fee2e2;color:#991b1b}
   .back{display:inline-flex;align-items:center;gap:5px;background:none;border:none;color:var(--brand);
     cursor:pointer;font-size:13px;padding:2px 0;margin-bottom:4px}
-  /* 固定布局 + 单行省略：任何长文本都不撑高行，一屏能多看几行（悬浮看全文） */
-  table{width:100%;min-width:880px;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
-  th,td{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;vertical-align:middle;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  th{background:#f9fafb;font-weight:600;color:#374151;position:sticky;top:0;z-index:2;font-size:12px}
-  td.num,th.num{text-align:right}
+  /* 固定布局 + 显式列宽：窄列单行不换行（宽度够用即可），文本列换行把内容展示全 */
+  table{width:100%;min-width:1080px;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
+  th,td{border-bottom:1px solid var(--line);padding:3px 7px;text-align:left;vertical-align:middle}
+  th{background:#f8fafc;font-weight:600;color:#374151;position:sticky;top:0;z-index:2;font-size:12px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:inset 0 -1px 0 #dfe3e8}
+  td.num,th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  /* 最后一列「提交状态」靠右，列宽够用即可 */
+  td.st,th.st{text-align:right;white-space:nowrap}
+  /* 文本列（任务/工作项/说明）：换行展示全文；pre-line 保留原始换行，行高压到 1.32 尽量不占高度 */
+  td.txt{padding:3px 7px;white-space:pre-line;word-break:break-word;overflow-wrap:anywhere;line-height:1.32}
+  /* 窄列（人员）：单行不换行，放不下才省略 */
+  td.nw{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* 超长说明默认最多 6 行，点「展开全文」就地展开——避免个别超长行把整页撑爆 */
+  .clamp{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+  .clamp.open{display:block;overflow:visible}
+  .more{margin-top:1px;background:none;border:none;color:var(--brand);cursor:pointer;
+    font-size:11.5px;padding:0;line-height:1.2}
+  .more:hover{text-decoration:underline}
   .cat{font-size:13px;font-weight:600;margin:9px 0 4px}
   .cat:first-child{margin-top:2px}
   input[type=number]{width:100%;max-width:112px;padding:3px 14px 3px 6px;border:1px solid #d1d5db;
@@ -128,6 +140,42 @@ function bindAdjustMarks(){
   });
 }
 
+// ---------- 文本列：换行展示全文；超长（>6 行）折叠为「展开全文」按钮 ----------
+// 任务/工作项/说明三列都走这里，口径一致。
+function txtCell(v){
+  const raw=(v==null||v==='')?'—':String(v);
+  // 预置按钮只是为了让 HTML 自解释；真实是否溢出由 syncMore() 量一次排版决定
+  const maybeLong=raw.length>=90;
+  return '<td class="txt"><span class="clamp">'+esc(raw)+'</span>'
+    +(maybeLong?'<button type="button" class="more" hidden onclick="toggleMore(this)">展开全文</button>':'')
+    +'</td>';
+}
+// 渲染后按真实排版量一次：内容超过 6 行才显示「展开全文」；窗口变窄时也能补上
+function syncMore(){
+  const cells=document.querySelectorAll('td.txt');
+  for(let i=0;i<cells.length;i++){
+    const td=cells[i], sp=td.querySelector('.clamp');
+    if(!sp) continue;
+    const open=sp.classList.contains('open');
+    const over=!open&&(sp.scrollHeight-sp.clientHeight>2);
+    let btn=td.querySelector('.more');
+    if(over&&!btn){
+      btn=document.createElement('button');
+      btn.type='button'; btn.className='more'; btn.textContent='展开全文'; btn.hidden=false;
+      btn.addEventListener('click',function(){toggleMore(this);});
+      td.appendChild(btn);
+    }
+    if(btn&&!open) btn.hidden=!over;
+  }
+}
+function toggleMore(btn){
+  const td=btn.closest('td'); if(!td) return;
+  const sp=td.querySelector('.clamp'); if(!sp) return;
+  const open=sp.classList.toggle('open');
+  btn.textContent=open?'收起':'展开全文';
+  btn.hidden=false;
+}
+
 function renderError(msg){
   $('app').innerHTML='<div class="err"><h2>无法打开评估页</h2><div>'+esc(msg)+'</div>'
     +'<div class="hint">如需帮助，请联系经济评审管理员重新生成评估链接。</div></div>';
@@ -196,31 +244,32 @@ function renderProject(){
   d.categories.forEach(c=>{
     const items=d.items.filter(x=>x.category===c.key);
     if(!items.length) return;
-    // 固定列宽 + 单行省略：长文本不再撑高行高，一屏能多显示近一倍行数（悬浮单元格可看全文）
+    // 列宽口径：任务/工作项/说明自适应（共 64.5%）并换行展示全文；
+    // 人员/原人天/原费用/我的评估人天/状态「够用即可」（原费用略宽），最后一列状态靠右
     h+='<div class="cat">'+esc(c.label)+'（'+items.length+' 项）</div>'
       +'<div class="tbl-wrap"><table><colgroup>'
-      +'<col style="width:84px"><col style="width:150px"><col style="width:208px"><col style="width:68px">'
-      +'<col style="width:58px"><col style="width:84px"><col style="width:118px"><col style="width:110px">'
+      +'<col style="width:15%"><col style="width:15%"><col style="width:34.5%">'
+      +'<col style="width:6%"><col style="width:4.5%"><col style="width:8%"><col style="width:8%"><col style="width:9%">'
       +'</colgroup><thead><tr>'
       +'<th>任务</th><th>工作项</th><th>说明</th><th>人员</th><th class="num">原人天</th><th class="num">原费用</th>'
-      +'<th class="num">我的评估人天</th><th>状态</th>'
+      +'<th class="num">我的评估人天</th><th class="st">状态</th>'
       +'</tr></thead><tbody>';
     items.forEach(w=>{
       const pd=w.person_days!=null?w.person_days:null;
       const cur=w.my_days!=null?w.my_days:(pd!=null?pd:'');
       const adjusted=(w.my_days!=null&&pd!=null&&w.my_days!==pd);
       h+='<tr>'
-        +'<td title="'+esc(w.work_task||'')+'">'+esc(w.work_task||'—')+'</td>'
-        +'<td title="'+esc(w.work_item||'')+'">'+esc(w.work_item||'—')+'</td>'
-        +'<td title="'+esc(w.description||'')+'">'+esc(w.description||'—')+'</td>'
-        +'<td title="'+esc(w.person||'')+'">'+esc(w.person||'—')+'</td>'
+        +txtCell(w.work_task)
+        +txtCell(w.work_item)
+        +txtCell(w.description)
+        +'<td class="nw" title="'+esc(w.person||'')+'">'+esc(w.person||'—')+'</td>'
         +'<td class="num">'+(pd!=null?pd:'—')+'</td>'
         +'<td class="num" style="color:#6b7280">'+money(w.cost)+'</td>'
         +'<td class="num"><input type="number" min="0" step="'+estimateStep+'" data-wid="'+w.id+'" '
           +'data-pd="'+(pd!=null?pd:'')+'" '
           +(p.locked?'disabled ':'')+'value="'+cur+'" '
           +'placeholder="'+(pd!=null?pd:'?')+'"></td>'
-        +'<td class="statuscell">'+(w.my_days!=null
+        +'<td class="st statuscell">'+(w.my_days!=null
             ?('<span class="saved">已提交 '+w.my_days+'</span>'+(adjusted?(' <span class="adjnote">原'+pd+'</span>'):''))
             :'<span class="pending">未提交</span>')+'</td>'
         +'</tr>';
@@ -239,6 +288,7 @@ function renderProject(){
     +(p.locked?'已归档，不可提交':(anySubmitted?'更新我的评估':'提交我的评估'))+'</button></div></div>';
   $('app').innerHTML=h;
   bindAdjustMarks();
+  syncMore();
 }
 
 function backToList(){ CUR=null; history.replaceState(null,'',PATHCODE?location.pathname:('?k='+encodeURIComponent(TOKEN))); load(); }
@@ -277,6 +327,10 @@ async function load(){
     STATE=await api(API);
     renderList();
   }catch(e){ renderError(e.message); }
+}
+// 列宽按百分比，窗口尺寸变化后「是否超过 6 行」的判定会变，重新量一次
+if(window&&typeof window.addEventListener==='function'){
+  window.addEventListener('resize',function(){try{syncMore();}catch(_){}});
 }
 load();
 </script>

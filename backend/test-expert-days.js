@@ -1,8 +1,15 @@
 // 专家免登录评估页 —— 桩 DOM 回归测试
 // 覆盖：①「我的评估人天」默认取原人天 + 步长箭头微调 ②紧凑排版（单行截断 + 序号）③短链路径模式
 const fs = require('fs');
-const base = 'C:/Users/12129/WorkBuddy/mjumju正式版/lnsoft-patch/';
-const html = fs.readFileSync(base + 'frontend/expert.html', 'utf8');
+// 路径自适应：本地（脚本在 lnsoft-patch/ 下）、服务器仓库（backend/ 与 frontend/ 同级）、
+// 服务器直跑目录 —— 三处都能跑，避免硬编码绝对路径导致换机器就崩
+function pick(cands) {
+  for (const c of cands) { try { if (fs.existsSync(c)) return c; } catch (_) {} }
+  throw new Error('找不到文件，试过：' + cands.join(' , '));
+}
+const html = fs.readFileSync(pick([__dirname + '/frontend/expert.html', __dirname + '/../frontend/expert.html',
+  '/opt/jingjipingshen/frontend/expert.html',
+  'C:/Users/12129/WorkBuddy/mjumju正式版/lnsoft-patch/frontend/expert.html']), 'utf8');
 const script = html.match(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/)[1];
 
 // ---------- 桩 DOM ----------
@@ -38,7 +45,8 @@ const ITEMS = {
   1: [
     { id: 101, category: 'outsourcing', work_task: '需求分析', work_item: '业务需求调研与梳理', description: '走访200户企业，梳理生产工艺与能耗模型，形成需求规格说明书并组织评审', person: '张三', person_days: 12, cost: 24000, my_days: 10, my_comment: '', my_submitted_at: '2026-09-20T10:00:00Z' },
     { id: 102, category: 'outsourcing', work_task: '开发', work_item: '平台功能开发', description: '数据接入', person: '李四', person_days: 30, cost: 60000, my_days: null, my_comment: '', my_submitted_at: null },
-    { id: 103, category: 'subcontract', work_task: '实施', work_item: '现场部署实施', description: '共200户核验', person: '外部供应商', person_days: 18, cost: 36000, my_days: null, my_comment: '', my_submitted_at: null }
+    // 长说明：验证「超过 6 行才折叠」——含真实换行，对应线上 326 字的超长描述
+    { id: 103, category: 'subcontract', work_task: '实施', work_item: '现场部署实施', description: '工作地点：潍坊昌邑公司UPS蓄电池间\n作业现场布置\n工作班成员：1名电工，1名调试工程师\n工作内容：蓄电池间空调系统维修，含拆装、清洗、加注冷媒、调试运行并出具验收单，需配合甲方停电计划安排作业窗口，作业完成后清理现场', person: '外部供应商', person_days: 18, cost: 36000, my_days: null, my_comment: '', my_submitted_at: null }
   ],
   3: [
     { id: 301, category: 'outsourcing', work_task: '开发', work_item: '数据治理开发', description: '已归档', person: '赵六', person_days: 20, cost: 40000, my_days: null },
@@ -123,17 +131,37 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('所有行记录原人天 data-pd', inputs.every(i => i.dataset.pd !== ''));
   check('改动过的行标黄（adj）', byWid(101).classList.contains('adj') && !byWid(102).classList.contains('adj'));
 
-  // ===== C. 紧凑排版 =====
-  check('表格固定布局 + 最小宽度', /table\{[^}]*table-layout:fixed/.test(html) && /table\{[^}]*min-width:880px/.test(html));
+  // ===== C. 列宽口径与全文展示 =====
+  check('表格固定布局 + 最小宽度 1080', /table\{[^}]*table-layout:fixed/.test(html) && /table\{[^}]*min-width:1080px/.test(html));
   const colCount = (h.match(/<col style="width:/g) || []).length;
   const thCount = (h.match(/<th[ >]/g) || []).length;
   const groupCount = (h.match(/<colgroup>/g) || []).length;
   check('每个表格 colgroup 列数与表头一致（8 列 × 2 类）',
     groupCount === 2 && colCount === thCount && colCount % 8 === 0,
     groupCount + '表 / ' + colCount + 'col / ' + thCount + 'th');
-  check('长文本单元格全部单行省略 + title 悬浮',
-    (h.match(/<td title="[^"]*">/g) || []).length === 12, (h.match(/<td title="[^"]*">/g) || []).length);
-  check('单元格 nowrap/ellipsis 样式已定义', /th,td\{[^}]*text-overflow:ellipsis/.test(html));
+  // 任务/工作项/说明 自适应（合计 64.5%）——内容展示全
+  check('三列文本列宽度自适应（15%/15%/34.5%）',
+    h.includes('<col style="width:15%"><col style="width:15%"><col style="width:34.5%">'));
+  // 人员/原人天/原费用/我的评估人天/状态 宽度够用即可（原费用略宽）
+  check('五个窄列宽度够用即可（6/4.5/8/8/9%）',
+    h.includes('<col style="width:6%"><col style="width:4.5%"><col style="width:8%"><col style="width:8%"><col style="width:9%">'));
+  check('原费用列宽于原人天列（费用列宽一些）', h.indexOf('width:4.5%') < h.indexOf('width:8%'));
+  check('三个文本列都用换行容器展示全文（9 格）',
+    (h.match(/<td class="txt"><span class="clamp">/g) || []).length === 9,
+    (h.match(/<td class="txt"><span class="clamp">/g) || []).length);
+  check('文本列已去掉单行截断的 title 写法', !/<td title="[^"]*">/.test(h));
+  check('文本列 pre-line 保留原始换行 + 行高压紧 1.32',
+    /td\.txt\{[^}]*white-space:pre-line/.test(html) && /td\.txt\{[^}]*line-height:1\.32/.test(html));
+  check('超长文本默认折叠为 6 行', /\.clamp\{[^}]*-webkit-line-clamp:6/.test(html));
+  check('超长说明带「展开全文」按钮（可就地展开）',
+    /class="more"[^>]*>展开全文</.test(h) && /\.clamp\.open\{[^}]*display:block/.test(html));
+  check('短说明不给按钮（避免噪音）',
+    (h.match(/class="more"/g) || []).length === 1, (h.match(/class="more"/g) || []).length);
+  check('人员列单行省略（窄列不换行）',
+    /<td class="nw"/.test(h) && /td\.nw\{[^}]*text-overflow:ellipsis/.test(html));
+  check('最后一列「状态」靠右（表头 + 单元格）',
+    /<th class="st">状态<\/th>/.test(h) && /<td class="st statuscell">/.test(h) && /td\.st,th\.st\{[^}]*text-align:right/.test(html));
+  check('金额/人天右对齐等宽数字', /td\.num,th\.num\{[^}]*tabular-nums/.test(html));
   check('明细页显示序号进度', /第 1 \/ 3 个项目/.test(h), (h.match(/第 \d+ \/ \d+ 个项目/) || [])[0]);
   check('明细页项目名最多两行', /\.ptitle\{[^}]*line-clamp:2/.test(html));
   check('表格可视高度按视口计算（不用 60vh 浪费）', /max-height:calc\(100vh - \d+px\)/.test(html));

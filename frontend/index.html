@@ -142,7 +142,42 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
 .wl-compact .wl-g-direction,.wl-compact .wl-detail{display:none}
 .wl-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .wl-toolbar .form-control-sm{width:auto;min-width:150px}
-.wl-toolbar .btn-sm{padding:.25rem .55rem}
+  .wl-toolbar .btn-sm{padding:.25rem .55rem}
+/* ===== 通用紧凑数据表（与上方「评估汇总」同一视觉语言）=====
+   样式标杆是 .wl-*；项目资料页 / 年度汇总页直接复用这套规则，避免三处表格各写一份。
+   统一效果：吸顶表头(带分隔阴影) + 斑马纹/悬浮 + 左侧冻结列 + 金额右对齐等宽数字 + 两行截断。 */
+.dt-wrap{max-height:72vh;overflow:auto;position:relative;background:#fff}
+.dt-wrap table{border-collapse:separate;border-spacing:0;font-size:12.5px;table-layout:fixed;width:100%}
+.dt-wrap thead th{position:sticky;top:0;z-index:4;background:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  box-shadow:inset 0 -1px 0 #dfe3e8;font-weight:600;color:#374151;font-size:12px;padding:4px 6px;vertical-align:middle}
+.dt-wrap thead tr.dt-h1 th{height:26px;padding-top:0;padding-bottom:0;vertical-align:middle}
+.dt-wrap thead tr.dt-h1 th.dt-group{text-align:center;font-weight:600;box-shadow:inset -1px 0 0 #fff,inset 0 -1px 0 #dfe3e8}
+.dt-wrap thead tr.dt-h1 th.dt-group-pre{background:#e8f0fe;color:#1a56b8}
+.dt-wrap thead tr.dt-h1 th.dt-group-post{background:#fde8e8;color:#b83a3a}
+.dt-wrap thead tr.dt-h2 th{top:26px}
+.dt-wrap tbody td{padding:4px 6px;border-bottom:1px solid #eef0f3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.dt-wrap tbody tr:nth-child(even) td{background:#fcfdff}
+.dt-wrap tbody tr:hover td{background:#f6f9ff}
+.dt-wrap tfoot td{position:sticky;bottom:0;z-index:4;background:#f1f5f9;font-weight:600;padding:4px 6px;
+  white-space:nowrap;border-top:1px solid #dfe3e8}
+.dt-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dt-ctr{text-align:center}
+.dt-muted{color:#6b7280}
+/* 长文本列：两行截断。⚠ 截断类必须落在 td 内层 span 上——设在 td 会让它不再是 table-cell，
+   单元格脱离表格列布局，整行与表头错行（这条坑在评估汇总表上踩过并已固化断言）。 */
+.dt-txt{white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word;line-height:1.4}
+.dt-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.45;word-break:break-word}
+/* 左侧冻结列：left 偏移由行内给出（列宽可变，写死会失配）；.dt-f-last 是冻结区边界 */
+.dt-f{position:sticky;z-index:5;background:#fff;box-shadow:inset -1px 0 0 #e5e7eb}
+.dt-f-last{box-shadow:inset -1px 0 0 #cbd5e1,3px 0 6px -3px rgba(15,23,42,.14)}
+.dt-wrap thead .dt-f{background:#f8fafc;z-index:6}
+.dt-wrap tfoot .dt-f{background:#f1f5f9;z-index:6}
+.dt-zero{color:#c3c7cf}
+/* 操作列：按钮不换行也不许被裁（固定布局下 overflow:hidden 会把按钮切掉） */
+.dt-acts{white-space:nowrap;overflow:visible;text-overflow:clip;text-align:right}
+/* 年度汇总页的行内可编辑单元格 */
+.dt-ed{outline:1px dashed #d8dde5;display:inline-block;min-width:48px;padding:0 4px;border-radius:3px}
+.dt-ed:focus{outline:2px solid #667eea;background:#fffbea}
 /* ===== 即时悬浮提示（替代原生 title 的 1 秒延迟） ===== */
 #tipBox{position:fixed;z-index:3000;max-width:520px;background:#212529;color:#fff;font-size:12px;line-height:1.6;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.32);pointer-events:none;display:none;white-space:pre-wrap;word-break:break-word}
 </style>
@@ -258,9 +293,10 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
           </div>
         </div>
         <div class="card-body p-0">
-          <div class="table-responsive">
-            <table class="table table-hover mb-0">
-              <thead class="table-light"><tr><th style="width:40px"><input type="checkbox" id="bizConfirmAll" onchange="bizToggleAll(this)"></th><th>项目</th><th>事业部</th><th>合同金额</th><th>状态</th><th>我方确认</th></tr></thead>
+          <div class="dt-wrap" style="max-height:52vh">
+            <table class="table table-sm mb-0" style="min-width:920px">
+              <colgroup><col style="width:40px"><col><col style="width:160px"><col style="width:130px"><col style="width:110px"><col style="width:112px"></colgroup>
+              <thead><tr><th class="dt-ctr"><input type="checkbox" id="bizConfirmAll" onchange="bizToggleAll(this)"></th><th>项目</th><th>承接事业部</th><th class="dt-num">合同金额</th><th>状态</th><th class="dt-ctr">我方确认</th></tr></thead>
               <tbody id="bizConfirmBody"></tbody>
             </table>
           </div>
@@ -514,11 +550,13 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
       </div>
       <div class="card card-custom mb-3">
         <div class="card-body p-0">
-          <div class="table-responsive" style="max-height:62vh;overflow:auto">
-            <table class="table table-sm table-bordered mb-0 align-middle" id="annualTable">
-              <thead id="annualHead" class="sticky-top" style="position:sticky;top:0;z-index:2;background:#fff"></thead>
+          <!-- 49 列宽表：与「评估汇总」同一套紧凑样式（吸顶表头 / 吸底合计 / 左侧冻结 / 金额右对齐） -->
+          <div class="dt-wrap" id="annualWrap" style="max-height:66vh">
+            <table class="table table-sm mb-0" id="annualTable" style="min-width:4200px">
+              <colgroup id="annualCols"></colgroup>
+              <thead id="annualHead"></thead>
               <tbody id="annualBody"></tbody>
-              <tfoot id="annualFoot" class="table-group-divider fw-bold"></tfoot>
+              <tfoot id="annualFoot"></tfoot>
             </table>
           </div>
         </div>
@@ -1219,17 +1257,19 @@ function renderProjects(){
       const warnTip=warns.map(w=>((w.file?'【'+w.file+'】':'')+((w.messages||[]).join('；')))).join('\n');
       const warnTag=warns.length?' <span class="text-warning" style="cursor:help" data-tip="导入校验告警（已正常导入，请人工核对）：\n'+esc(warnTip)+'"><i class="bi bi-exclamation-triangle-fill"></i>'+warns.length+'</span>':'';
       return '<tr>'+
-        '<td>'+String(pi+1).padStart(2,'0')+'</td>'+
-        '<td data-tip="'+esc(p.project_name||'')+'">'+esc(p.project_name||'').substring(0,24)+warnTag+'</td>'+
+        '<td class="dt-num">'+String(pi+1).padStart(2,'0')+'</td>'+
+        // 项目名不再用 substring 硬截断（会把转义实体切断），交给两行截断 + 悬浮看全文；
+        // 告警角标放在名称之前，避免被截断吃掉（页面上已有这个约定：徽标前置）
+        '<td class="dt-txt" data-tip="'+esc(p.project_name||'')+'"><span class="dt-clamp">'+warnTag+esc(p.project_name||'')+'</span></td>'+
         '<td>'+(p.biz_department||'-')+'</td>'+
-        '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
+        '<td class="dt-num">'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
         '<td><span class="badge '+statusBg+'">'+projectStatusLabel(p.status)+'</span></td>'+
-        '<td class="small text-muted">'+lastOp+'</td>'+
-        '<td class="text-center">'+ck('estimation')(has('estimation'))+'</td>'+
-        '<td class="text-center">'+ck('feasibility')(has('feasibility'))+'</td>'+
-        '<td class="text-center">'+ck('bid')(has('bid'))+'</td>'+
-        '<td class="text-center">'+ck('contract')(has('contract'))+'</td>'+
-        '<td>'+
+        '<td class="dt-muted">'+lastOp+'</td>'+
+        '<td class="dt-ctr">'+ck('estimation')(has('estimation'))+'</td>'+
+        '<td class="dt-ctr">'+ck('feasibility')(has('feasibility'))+'</td>'+
+        '<td class="dt-ctr">'+ck('bid')(has('bid'))+'</td>'+
+        '<td class="dt-ctr">'+ck('contract')(has('contract'))+'</td>'+
+        '<td class="dt-acts">'+
           '<button class="btn btn-sm btn-info me-1" title="查看/上传资料" onclick="goToUpload('+p.id+')"><i class="bi bi-folder"></i></button>'+
           '<button class="btn btn-sm btn-success me-1" title="工作量评估" onclick="goToCost('+p.id+')"><i class="bi bi-graph-down"></i></button>'+
           '<button class="btn btn-sm btn-primary me-1" title="评审流程" onclick="openFlowModal('+p.id+')"><i class="bi bi-list-check"></i></button>'+
@@ -1237,10 +1277,14 @@ function renderProjects(){
         '</td>'+
       '</tr>';
     }).join('');
+    // 列宽与评估汇总同源：固定布局 + 显式 colgroup（最后一列宽度要放得下 4 个操作按钮，否则会被裁）
     const body='<div class="batch-body">'+
-      (total>0?'<div class="table-responsive"><table class="table table-hover mb-0">'+
-        '<thead class="table-light"><tr><th>序号</th><th>项目名称</th><th>承接事业部</th><th>合同金额</th><th>状态</th><th>最后操作时间</th>'+
-        '<th class="text-center">估算表</th><th class="text-center">可研</th><th class="text-center">投标</th><th class="text-center">合同</th><th>操作</th></tr></thead>'+
+      (total>0?'<div class="dt-wrap" style="max-height:62vh"><table class="table table-sm mb-0" style="min-width:1060px">'+
+        '<colgroup><col style="width:44px"><col><col style="width:152px"><col style="width:126px"><col style="width:104px">'+
+        '<col style="width:104px"><col style="width:62px"><col style="width:54px"><col style="width:54px"><col style="width:54px">'+
+        '<col style="width:184px"></colgroup>'+
+        '<thead><tr><th class="dt-num">序号</th><th>项目名称</th><th>承接事业部</th><th class="dt-num">合同金额</th><th>状态</th><th>最后操作时间</th>'+
+        '<th class="dt-ctr">估算表</th><th class="dt-ctr">可研</th><th class="dt-ctr">投标</th><th class="dt-ctr">合同</th><th class="dt-acts">操作</th></tr></thead>'+
         '<tbody>'+rows+'</tbody></table></div>':'<div class="batch-empty">该批次暂无项目，请通过「Excel导入（评审汇总表）」批量导入或「新建项目」挂接</div>')+
     '</div>';
     return '<div class="batch-drawer '+(isOpen?'open':'')+' '+(g.archived?'archived':'')+'" data-batch="'+g.key+'">'+head+body+'</div>';
@@ -1259,12 +1303,12 @@ function renderBizConfirmSummary(){
   body.innerHTML=pending.map(p=>{
     const myConfirm = p.biz_confirmed===true?'<span class="badge bg-success">已认可</span>':(p.biz_confirmed===false?'<span class="badge bg-warning text-dark">已退回</span>':'<span class="badge bg-secondary">待反馈</span>');
     return '<tr>'+
-      '<td><input type="checkbox" class="biz-confirm-chk" value="'+p.id+'"></td>'+
-      '<td>'+esc(p.project_name||'')+'</td>'+
+      '<td class="dt-ctr"><input type="checkbox" class="biz-confirm-chk" value="'+p.id+'"></td>'+
+      '<td class="dt-txt" data-tip="'+esc(p.project_name||'')+'"><span class="dt-clamp">'+esc(p.project_name||'')+'</span></td>'+
       '<td>'+(p.biz_department||'-')+'</td>'+
-      '<td>'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
+      '<td class="dt-num">'+(p.contract_amount?'¥'+Number(p.contract_amount).toLocaleString():'-')+'</td>'+
       '<td><span class="badge '+statusBadgeClass(p.status)+'">'+projectStatusLabel(p.status)+'</span></td>'+
-      '<td>'+myConfirm+'</td>'+
+      '<td class="dt-ctr">'+myConfirm+'</td>'+
     '</tr>';
   }).join('');
 }
@@ -3457,6 +3501,15 @@ function annualMoney(v){return (v==null||v===''||isNaN(Number(v)))?'—':Number(
 function annualPct(v){return (v==null||v===''||isNaN(Number(v)))?'':(Number(v)*100).toFixed(2)+'%';}
 const ANNUAL_PRE_MAP={pre_long_term:'long_term_cost',pre_zhongshi:'zhongshi_cost',pre_huazhao:'huazhao_cost',pre_outsourcing:'outsourcing_cost',pre_subcontract:'subcontract_cost',pre_procurement:'procurement_cost',pre_travel:'travel_cost',pre_third_party:'third_party_test_cost',pre_ip:'ip_cost'};
 const ANNUAL_POST_MAP={post_long_term:'long_term_cost',post_zhongshi:'zhongshi_cost',post_huazhao:'huazhao_cost',post_outsourcing:'outsourcing_cost',post_subcontract:'subcontract_cost',post_procurement:'procurement_cost',post_travel:'travel_cost',post_third_party:'third_party_test_cost',post_ip:'ip_cost'};
+// 年度汇总表列宽覆盖（没列到的按类型给默认值：金额 122 / 比率 96 / 可编辑 132 / 文本 126）
+const ANNUAL_W={batch:60,seq:44,project_code:118,project_name:220,dept:120,project_type:104,
+  contract_amount:122,sys_pre_cost:150,
+  pre_subcontract_scope:170,pre_business_direction:132,pre_business_sub_direction:132,pre_product_direction:132,
+  pre_restricted:118,pre_is_digital:104,
+  post_review_opinion:190,post_review_time:110,
+  import_status:96,import_time:110,import_reason:140,rate_reason:230,labor_subcontract_note:140,bid_gross_margin:100};
+// 左侧冻结列（顺序即横向叠放顺序，left 偏移由列宽累计得出）
+const ANNUAL_FROZEN=['batch','seq','project_name'];
 function renderAnnual(){
   fetch(API+'/annual/'+annualYear,{headers:authH()}).then(r=>r.json()).then(d=>{
     const s=d.summary;
@@ -3464,12 +3517,36 @@ function renderAnnual(){
     const cols=s.columns;
     const preStart=cols.findIndex(c=>c.group==='pre');const preCount=cols.filter(c=>c.group==='pre').length;
     const postStart=cols.findIndex(c=>c.group==='post');const postCount=cols.filter(c=>c.group==='post').length;
-    let r1='<tr>';
-    cols.forEach((c,i)=>{ if(c.group==='pre'){ if(i===preStart) r1+='<th class="text-center" colspan="'+preCount+'" style="background:#e8f0fe;color:#1a56b8">评审前</th>'; }
-      else if(c.group==='post'){ if(i===postStart) r1+='<th class="text-center" colspan="'+postCount+'" style="background:#fde8e8;color:#b83a3a">评审后</th>'; }
-      else r1+='<th></th>'; });
+    // ---- 列宽：固定布局 + 显式 colgroup（与评估汇总同源）。表头文字永不被截断，故按字数取下限 ----
+    const colW=c=>{
+      const base=(c.type==='money'?122:(c.type==='pct'?96:(c.editable?132:126)));
+      const labelW=String(c.label||'').length*12+18;
+      return Math.max(ANNUAL_W[c.key]||base, Math.min(labelW,260));
+    };
+    // ---- 左侧冻结列：批次 / 序号 / 项目名称。left 偏移由累计列宽现算，改列宽不会失配 ----
+    const fzLeft={};let acc=0;
+    ANNUAL_FROZEN.forEach(k=>{fzLeft[k]=acc;acc+=colW(cols.find(c=>c.key===k)||{key:k});});
+    const fzLast=ANNUAL_FROZEN[ANNUAL_FROZEN.length-1];
+    const fzCls=k=>(k&&fzLeft[k]!=null)?('dt-f'+(k===fzLast?' dt-f-last':'')):'';
+    const fzSty=k=>(k&&fzLeft[k]!=null)?(' style="left:'+fzLeft[k]+'px"'):'';
+    const tdAttr=(cls,k)=>{const s=(fzCls(k)+' '+(cls||'')).trim();return (s?' class="'+s+'"':'')+fzSty(k);};
+    // colgroup 与最小宽度：49 列靠横向滚动，总量由列宽累加得出
+    const totalW=cols.reduce((sum,c)=>sum+colW(c),0)+96;
+    const colHost=document.getElementById('annualCols');
+    if(colHost) colHost.innerHTML=cols.map(c=>'<col style="width:'+colW(c)+'px">').join('')+'<col style="width:96px">';
+    const tblEl=document.getElementById('annualTable');
+    if(tblEl) tblEl.style.minWidth=totalW+'px';
+    let r1='<tr class="dt-h1">';
+    cols.forEach((c,i)=>{
+      if(c.group==='pre'){ if(i===preStart) r1+='<th class="dt-group dt-group-pre" colspan="'+preCount+'">评审前</th>'; }
+      else if(c.group==='post'){ if(i===postStart) r1+='<th class="dt-group dt-group-post" colspan="'+postCount+'">评审后</th>'; }
+      else { const fc=fzCls(c.key); r1+='<th'+(fc?' class="'+fc+'"':'')+fzSty(c.key)+'></th>'; }
+    });
     r1+='<th></th></tr>';
-    let r2='<tr>'+cols.map(c=>'<th class="small" style="white-space:nowrap;vertical-align:bottom">'+esc(c.label)+'</th>').join('')+'<th>操作</th></tr>';
+    let r2='<tr class="dt-h2">'+cols.map(c=>{
+      const fc=fzCls(c.key);
+      return '<th'+(fc?' class="'+fc+'"':'')+fzSty(c.key)+' title="'+esc(c.label)+'">'+esc(c.label)+'</th>';
+    }).join('')+'<th class="dt-acts">操作</th></tr>';
     document.getElementById('annualHead').innerHTML=r1+r2;
     const body=document.getElementById('annualBody');
     if(!s.rows.length){ body.innerHTML='<tr><td class="text-muted text-center" colspan="'+(cols.length+1)+'">该年度暂无数据</td></tr>'; }
@@ -3480,21 +3557,23 @@ function renderAnnual(){
           let disp='';
           if(c.type==='pct') disp=(v==null?'':(Number(v)*100).toFixed(2));
           else disp=(v==null?'':v);
-          const cls=c.type==='money'?'text-end':'';
-          return '<td class="'+cls+'"><span class="ed" contenteditable="true" data-pid="'+r.project_id+'" data-key="'+c.key+'" data-type="'+c.type+'" style="outline:1px dashed #ccc;min-width:54px;display:inline-block;padding:0 4px">'+esc(String(disp))+'</span></td>';
+          const cls=(c.type==='text')?'dt-txt':(c.type==='money'?'dt-num':'');
+          return '<td'+tdAttr(cls,c.key)+'>'
+            +'<span class="ed dt-ed" contenteditable="true" data-pid="'+r.project_id+'" data-key="'+c.key+'" data-type="'+c.type+'">'+esc(String(disp))+'</span></td>';
         }
-        if(c.type==='money') return '<td class="text-end">'+annualMoney(v)+'</td>';
-        if(c.type==='pct') return '<td class="text-end">'+annualPct(v)+'</td>';
-        return '<td>'+(v==null?'':esc(v))+'</td>';
+        if(c.type==='money') return '<td'+tdAttr('dt-num'+(Number(v)===0?' dt-zero':''),c.key)+'>'+annualMoney(v)+'</td>';
+        if(c.type==='pct') return '<td'+tdAttr('dt-num'+(v==null?' dt-zero':''),c.key)+'>'+annualPct(v)+'</td>';
+        const txt=(v==null?'':String(v));
+        return '<td'+tdAttr('dt-txt',c.key)+(txt?' data-tip="'+esc(txt)+'"':'')+'><span class="dt-clamp">'+esc(txt||'-')+'</span></td>';
       }).join('');
-      return '<tr>'+tds+'<td><button class="btn btn-sm btn-outline-primary" onclick="saveAnnualRow('+r.project_id+')">保存</button></td></tr>';
+      return '<tr>'+tds+'<td class="dt-acts"><button class="btn btn-sm btn-outline-primary" onclick="saveAnnualRow('+r.project_id+')">保存</button></td></tr>';
     }).join('');
     const t=s.totals;
     document.getElementById('annualFoot').innerHTML='<tr>'+cols.map(c=>{
       const v=t[c.key];
-      if(c.type==='money') return '<td class="text-end">'+annualMoney(v)+'</td>';
-      if(c.type==='pct') return '<td class="text-end">'+annualPct(v)+'</td>';
-      return '<td>'+(v==null?'':esc(v))+'</td>';
+      if(c.type==='money') return '<td'+tdAttr('dt-num',c.key)+'>'+annualMoney(v)+'</td>';
+      if(c.type==='pct') return '<td'+tdAttr('dt-num',c.key)+'>'+annualPct(v)+'</td>';
+      return '<td'+tdAttr('',c.key)+'>'+(v==null?'':esc(v))+'</td>';
     }).join('')+'<td></td></tr>';
     const hist=((d.doc&&d.doc.data&&d.doc.data.edit_history)||[]);
     document.getElementById('annualHistory').innerHTML=hist.slice().reverse().map(h=>'<div class="small border-bottom py-1"><b>'+esc(h.user)+'</b> 于 '+esc((h.at||'').replace('T',' ').slice(0,16))+' 修改了「'+esc(h.field||'')+'」'+(h.after?('：'+esc(String(h.after).slice(0,30))):'')+'</div>').join('')||'<div class="text-muted small">暂无编辑记录</div>';
