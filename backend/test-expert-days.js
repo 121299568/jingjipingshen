@@ -271,7 +271,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const b1 = B.document.querySelectorAll('input[data-wid]');
   check('短链：明细与预填同样生效', b1.length === 3 && b1.find(i => i.dataset.wid === '102').value === '30');
   check('短链：明细接口走 /api/e/<code>/projects/1', B.urls.includes('/api/e/Kf7mQ2x9/projects/1'), B.urls.slice(0, 4).join(' , '));
-  check('短链：无 code 且无 k 时才报错', (() => { const C = makeApp({ search: '', pathname: '/expert.html' }); return /无法打开评估页|缺少访问令牌/.test(C.appHTML); })());
+  // load() 自 2026-09-21 起为 async（先探测管理员只读模式），构造后需等一个微任务周期再断言
+  const C = makeApp({ search: '', pathname: '/expert.html' });
+  await sleep(30);
+  check('短链：无 code 且无 k 时才报错', /无法打开评估页|缺少访问令牌/.test(C.appHTML), C.appHTML.slice(0, 60));
 
   console.log('\n结果：PASS=' + pass + ' FAIL=' + fail);
   process.exit(fail ? 1 : 0);

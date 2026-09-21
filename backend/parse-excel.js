@@ -164,24 +164,43 @@ function parseProjectExcel(filePath) {
     const fill = expandGrid(ws, true).grid;   // 文本用
     const raw = expandGrid(ws, false).grid;   // 数值用
     const lastRow = XLSX.utils.decode_range(ws['!ref']).e.r;
+    const lastCol = XLSX.utils.decode_range(ws['!ref']).e.c;
     const hr = detectHeaderRow(fill, lastRow, ['工作项', '费用'], 1);
+    // 与专家评估表同理：列位按表头定位（人员表常见「0编号 1工作任务 2工作项 3工作说明 4人天 5人员 6费用」，
+    // 但不同项目会在中间插入列），定位不到时回落到历史列位。
+    const head = [];
+    for (let c = 0; c <= lastCol; c++) head.push(str(gv(fill, hr, c)));
+    const pick = (re, ex) => head.findIndex(h => h && re.test(h) && !(ex && ex.test(h)));
+    let cTask = pick(/工作任务/), cItem = pick(/工作项/), cDesc = pick(/工作说明|说明/);
+    let cDays = pick(/人天|工作量估算/), cPerson = pick(/人员|姓名|责任人/);
+    let cCost = pick(/费用/, /占比|合计/);
+    if (cTask < 0) cTask = 1;
+    if (cItem < 0) cItem = 2;
+    if (cDesc < 0) cDesc = 3;
+    if (cDays < 0) cDays = 4;
+    if (cPerson < 0) cPerson = 5;
+    if (cCost < 0) cCost = 6;
     let task = '';
+    let lastItem = '';
     for (let r = hr + 1; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
       if (aVal.includes('合计') || aVal.includes('说明')) continue;
-      const bVal = str(gv(fill, r, 1));        // 工作任务(填充)
-      const item = str(gv(fill, r, 2));        // 工作项(填充)
-      const days = num(gv(raw, r, 4));         // 人天(原始)
-      const cost = num(gv(raw, r, 6));         // 费用(原始)
-      const person = str(gv(raw, r, 5));
-      if (!item || item === '工作项') continue; // 需有工作项名，过滤表头/空行
-      if (days === null && cost === null && !person) continue; // 过滤说明文字行
+      const bVal = str(gv(fill, r, cTask));      // 工作任务(填充)
+      let item = str(gv(fill, r, cItem));        // 工作项(填充)
+      const days = num(gv(raw, r, cDays));       // 人天(原始)
+      const cost = num(gv(raw, r, cCost));       // 费用(原始)
+      const person = str(gv(raw, r, cPerson));
+      // 合并单元格导致工作项为空：本行仍有数值则保留并沿用上一行工作项，避免静默丢行
+      if (!item || item === '工作项') {
+        if (days === null && cost === null && !person) continue;
+        item = lastItem || '（同上）';
+      } else lastItem = item;
       if (bVal && bVal !== '工作任务') task = bVal;
       result.work_items.push({
         category,
         work_task: task,
         work_item: item,
-        description: str(gv(raw, r, 3)),
+        description: str(gv(raw, r, cDesc)),
         person_days: days,
         person,
         cost,
@@ -203,25 +222,52 @@ function parseProjectExcel(filePath) {
     const fill = expandGrid(ws, true).grid;
     const raw = expandGrid(ws, false).grid;
     const lastRow = XLSX.utils.decode_range(ws['!ref']).e.r;
+    const lastCol = XLSX.utils.decode_range(ws['!ref']).e.c;
     const hr = detectHeaderRow(fill, lastRow, ['工作项', '专家'], 1);
+    // ★ 列位必须按表头动态定位，不能写死。
+    // 两种表的布局并不一致：人员外包是「0序号 1工作任务 2工作项 3工作说明 4人天 5费用」，
+    // 专业分包在前面多一列「分包项目」→「0序号 1分包项目 2工作任务 3工作项 4-5工作说明 6人天 7费用」。
+    // 硬编码 4/5 会让分包表把「工作说明」当人天读 → 人天与费用全部落库为 0（2026-09-21 修复）。
+    const head = [];
+    for (let c = 0; c <= lastCol; c++) head.push(str(gv(fill, hr, c)));
+    const pick = (re, ex) => head.findIndex(h => h && re.test(h) && !(ex && ex.test(h)));
+    let cTask = pick(/工作任务/), cItem = pick(/工作项/), cDesc = pick(/工作说明|工作内容|说明/);
+    let cDays = pick(/人天|工作量估算/);
+    let cCost = pick(/费用/, /调整|占比|核减|合计/);
+    const cExp0 = pick(/专家\s*1|专家一/);
+    const cAvg = pick(/平均/), cAdj = pick(/调整后/);
+    // 定位失败时回落到历史列位，保证老模板不被改坏
+    if (cTask < 0) cTask = 1;
+    if (cItem < 0) cItem = 2;
+    if (cDesc < 0) cDesc = 3;
+    if (cDays < 0) cDays = 4;
+    if (cCost < 0) cCost = 5;
     let task = '';
+    let lastItem = '';
     for (let r = hr + 1; r <= lastRow; r++) {
       const aVal = str(gv(fill, r, 0));
       if (aVal.includes('合计') || aVal.includes('说明')) continue;
-      const bVal = str(gv(fill, r, 1));
+      const bVal = str(gv(fill, r, cTask));
       if (bVal && bVal !== '工作任务') task = bVal;
-      const item = str(gv(fill, r, 2));
-      if (!item || item === '工作项') continue;
-      const days = num(gv(raw, r, 4));
-      const cost = num(gv(raw, r, 5));
-      const expertDays = [6, 7, 8, 9, 10].map(ci => num(gv(raw, r, ci)));
-      const avg = num(gv(raw, r, 11));
-      const adjusted = num(gv(raw, r, 12));
+      let item = str(gv(fill, r, cItem));
+      const days = num(gv(raw, r, cDays));
+      const cost = num(gv(raw, r, cCost));
+      if (!item || item === '工作项') {
+        // 合并单元格会让续行的工作项为空。以前直接 continue 丢弃，导致「表里有值、系统里没有」；
+        // 改为：只要本行有人天或费用就保留，工作项沿用上一行（仍无则占位）。
+        if (days === null && cost === null) continue;
+        item = lastItem || '（同上）';
+      } else lastItem = item;
+      const expertDays = cExp0 >= 0
+        ? [0, 1, 2, 3, 4].map(i => num(gv(raw, r, cExp0 + i)))
+        : [6, 7, 8, 9, 10].map(ci => num(gv(raw, r, ci)));
+      const avg = cAvg >= 0 ? num(gv(raw, r, cAvg)) : num(gv(raw, r, 11));
+      const adjusted = cAdj >= 0 ? num(gv(raw, r, cAdj)) : num(gv(raw, r, 12));
       result.work_items.push({
         category,
         work_task: task,
         work_item: item,
-        description: str(gv(raw, r, 3)),
+        description: str(gv(raw, r, cDesc)),
         person_days: days,
         cost,
         expert_days: expertDays,

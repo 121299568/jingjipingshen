@@ -1576,6 +1576,14 @@ async function handleFolderUpload(req, res) {
     const safe = realName.replace(/[^\w\u4e00-\u9fa5.-]/g, '_');
     if (match) {
       let finalCategory = category;
+      // ★ 内容兜底：文件名不含「成本/估算」字样但实际解析出了工作项或成本数据 → 按估算表处理。
+      // 缺失这一句时，第十四批 34 个项目里只有文件名带「估算表」的 7 个被解析，
+      // 其余 27 个（如「国网威海…技术支持服务项目.xlsx」）被 inferFileCategory 判成 other：
+      // 既不抽取明细，也不点亮项目资料里的「估算表」清单位 → 表现为「材料匹配上了但没挂进项目资料」。
+      if (parsed && !parsed.__parseError && finalCategory !== 'estimation'
+        && ((parsed.work_items || []).length > 0 || Object.keys(parsed.cost_summary || {}).length > 0)) {
+        finalCategory = 'estimation';
+      }
       // 校验告警持久化到项目（批次项目列表 ⚠ 显示）：仅估算表类 Excel 覆盖旧告警，干净的估算表自动消除旧告警
       if (parsed && !parsed.__parseError && finalCategory === 'estimation') {
         match.import_warnings = validation.messages.length
@@ -1649,6 +1657,80 @@ app.get('/api/sessions/:id/files', auth(['admin', 'rd', 'biz']), (req, res) => {
   if (!session) return res.status(404).json({ error: '批次不存在' });
   const pids = new Set(db.store.projects.filter(p => p.session_id === sessionId).map(p => p.id));
   res.json(db.store.files.filter(f => (f.inbox && f.session_id === sessionId) || (!f.inbox && pids.has(f.project_id))));
+});
+
+// 重新解析批次内已上传的成本估算表
+// 用途：①历史批次在「内容兜底判定」修复前上传的估算表被误判为 other，未抽取明细；
+//      ②估算表修订后重新上传，需按最新版重算。二者都不必让用户再传一遍。
+// 规则：每个项目挑一份「当前版」Excel（优先 file_category=estimation，其次任何能解析出内容的），
+//      解析成功即改写 file_category 并重建成本明细与告警。
+app.post('/api/sessions/:id/reparse', auth(['admin', 'rd']), (req, res) => {
+  const sessionId = parseInt(req.params.id);
+  const session = db.store.reviewSessions.find(s => s.id === sessionId);
+  if (!session) return res.status(404).json({ error: '批次不存在' });
+  const projects = db.store.projects.filter(p => p.session_id === sessionId);
+  const report = [];
+  let parsedOk = 0, reclassified = 0, failed = 0;
+  for (const p of projects) {
+    const cands = (db.store.files || []).filter(f => f.project_id === p.id && /\.(xlsx|xls)$/i.test(f.filename || '') && f.is_current !== false);
+    if (!cands.length) { report.push({ project_id: p.id, project_name: p.project_name, result: 'no-excel' }); continue; }
+    // 优先已标记为估算表的，其次按上传时间取最新
+    const ordered = cands.slice().sort((a, b) => {
+      const ae = a.file_category === 'estimation' ? 0 : 1, be = b.file_category === 'estimation' ? 0 : 1;
+      if (ae !== be) return ae - be;
+      return String(b.upload_time || '').localeCompare(String(a.upload_time || ''));
+    });
+    let done = null;
+    for (const f of ordered) {
+      const filePath = path.join(UPLOAD_DIR, f.filename);
+      if (!fs.existsSync(filePath)) continue;
+      let parsed = null;
+      try { parsed = require('./parse-excel').parseProjectExcel(filePath); } catch (e) { parsed = { __parseError: e && e.message }; }
+      if (!parsed || parsed.__parseError) continue;
+      if (!(parsed.work_items || []).length && !Object.keys(parsed.cost_summary || {}).length) continue;
+      const wasOther = f.file_category !== 'estimation';
+      if (wasOther) { f.file_category = 'estimation'; reclassified++; }
+      // 与上传路径同口径的校验告警
+      const msgs = [];
+      const eContract = parsed.project && parsed.project.contract_amount != null ? Number(parsed.project.contract_amount) : null;
+      const pContract = p.contract_amount != null ? Number(p.contract_amount) : null;
+      if (eContract != null && pContract != null && Math.abs(eContract - pContract) > 1) {
+        msgs.push(`成本估算表合同额 ¥${eContract.toLocaleString()} 与项目登记合同额 ¥${pContract.toLocaleString()} 不一致`);
+      }
+      const estCost = parsed.cost_summary && parsed.cost_summary.total_cost != null ? Math.round(Number(parsed.cost_summary.total_cost) * 100) / 100 : null;
+      const internalCost = p.internal_estimated_cost != null ? Math.round(Number(p.internal_estimated_cost) * 100) / 100 : null;
+      if (internalCost != null && estCost != null && estCost - internalCost > 0.01) {
+        msgs.push(`成本估算 ¥${estCost.toLocaleString()} 超过内部填报预估 ¥${internalCost.toLocaleString()}`);
+      }
+      const osAlert = checkOutsourceSubcontractAlert(parsed.cost_summary, eContract != null ? eContract : pContract);
+      if (osAlert) msgs.push(osAlert);
+      p.import_warnings = msgs.length ? [{ file: f.originalname, messages: msgs, time: new Date().toISOString() }] : [];
+      // ★ 重建明细会生成新的 workItems.id，专家打分/确认记录按旧 id 关联会全部失联。
+      // 解析前后用「来源 sheet + 行号」做稳定键，把已有打分重新指到新 id 上。
+      const oldKey = new Map(db.store.workItems.filter(w => w.project_id === p.id)
+        .map(w => [w.id, (w.source_sheet || '') + '|' + (w.row || '') + '|' + (w.work_item || '')]));
+      const ests = db.store.expertEstimates.filter(e => e.project_id === p.id);
+      const confs = db.store.confirmations.filter(c => c.project_id === p.id);
+      extractCostIntoProject(p, parsed, req.user.id);
+      const newId = new Map(db.store.workItems.filter(w => w.project_id === p.id)
+        .map(w => [(w.source_sheet || '') + '|' + (w.row || '') + '|' + (w.work_item || ''), w.id]));
+      let remap = 0;
+      [...ests, ...confs].forEach(rec => {
+        const k = oldKey.get(rec.work_item_id);
+        if (!k) return;
+        const nid = newId.get(k);
+        if (nid != null && nid !== rec.work_item_id) { rec.work_item_id = nid; remap++; }
+      });
+      if (remap) console.log(`[reparse] 项目${p.id} 重映射 ${remap} 条打分/确认到新明细`);
+      parsedOk++;
+      done = { project_id: p.id, project_name: p.project_name, file: f.originalname, result: wasOther ? 'reclassified' : 'ok', warnings: msgs };
+      break;
+    }
+    if (!done) { failed++; report.push({ project_id: p.id, project_name: p.project_name, result: 'parse-empty' }); }
+    else report.push(done);
+  }
+  db.save();
+  res.json({ ok: true, projects: projects.length, parsed: parsedOk, reclassified, failed, report });
 });
 
 // 收件箱文件改派到具体项目
@@ -1849,8 +1931,11 @@ app.post('/api/sessions/:id/assign', auth(['admin', 'rd']), (req, res) => {
     const u = db.store.users.find(x => x.id === id);
     if (!u) return res.status(400).json({ error: '存在无效的用户ID: ' + id });
   }
+  // ★ 一次分派多人时，若每条都各自 nextId()（基于尚未 push 的数组），会拿到同一个 id，
+  // 落库时后者 REPLACE 掉前者 → 分了 3 个人实际只剩最后 1 个。这里显式递增分配。
+  let seq = db.nextId(db.store.sessionAssignments);
   const make = (uid, role) => ({
-    id: db.nextId(db.store.sessionAssignments),
+    id: seq++,
     session_id: sessionId,
     user_id: uid,
     user_role: role,
@@ -2238,8 +2323,21 @@ function computeWorkItemRollup(projectId, workItemId, evaluators) {
   const valid = expert_days.filter(d => d != null && d > 0);
   const expert_count = valid.length;
   const avg = expert_count > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / expert_count * 100) / 100 : 0;
-  const unit_price = Number(wi.unit_price) || 0;
-  const adjusted_cost = avg > 0 ? Math.round(avg * unit_price * 100) / 100 : 0;
+  // ★ 单人天单价兜底：成本估算表解析器只产出 person_days 与 cost，不产出 unit_price，
+  // 直接用 wi.unit_price 恒为 0 → 调整后费用 = 平均人天 × 0 = 0，
+  // 表现为「专家打分都提交了，但评估汇总页汇总金额全是 0」。
+  // 因此单价缺失时按 cost/person_days 反推（与 Excel「费用/工作量估算」口径一致）。
+  let unit_price = Number(wi.unit_price) || 0;
+  if (!(unit_price > 0)) {
+    const pd0 = Number(wi.person_days) || 0;
+    const c0 = Number(wi.cost) || 0;
+    if (pd0 > 0 && c0 > 0) unit_price = c0 / pd0;
+  }
+  // ★ 无人评估的工作项必须保持原成本，不能算成 0。
+  // 专家评估只覆盖「人员外包 / 专业分包」，长期/中实/华兆及开发/实施等工作项不参与打分；
+  // 若把它们记成 0，批次汇总会把未评估的大额成本全部误算成核减。
+  const origCost = Math.round((Number(wi.cost) || 0) * 100) / 100;
+  const adjusted_cost = avg > 0 ? Math.round(avg * unit_price * 100) / 100 : origCost;
   return { evaluators: evs, expert_days, expert_count, expert_days_avg: avg, adjusted_cost, unit_price };
 }
 
@@ -2254,6 +2352,56 @@ function persistWorkItemRollup(projectId, workItemId) {
   wi.expert_days_avg = r.expert_days_avg;
   wi.adjusted_cost = r.adjusted_cost;
 }
+
+// ==================== 管理员：项目专家打分明细（只读矩阵）====================
+// 行=工作项，列=专家1-5 的人天 + 平均 + 调整后费用。供管理员在专家评估页/汇总页查看
+// 「每个项目的每个专家分别打了多少分」，不提供任何写入能力。
+app.get('/api/projects/:id/expert-scores', auth(['admin', 'rd']), (req, res) => {
+  const p = db.store.projects.find(x => x.id === parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '项目不存在' });
+  const evaluators = getBatchEvaluators(p.id);
+  // 附带各专家在本批次的邀请短链，便于管理员直接打开该专家的评估页查看（只读旁听）
+  const invites = (db.store.expertInvites || []).filter(iv => Number(iv.session_id) === Number(p.session_id));
+  const evaluatorsWithLink = evaluators.map(ev => {
+    const iv = invites.find(i => Number(i.user_id) === Number(ev.user_id));
+    const code = iv ? (iv.short_code || (iv.extra && iv.extra.short_code) || null) : null;
+    return { ...ev, short_code: code, invite_status: iv ? iv.status : null };
+  });
+  const wis = db.store.workItems.filter(w => w.project_id === p.id);
+  const work_items = wis.map(w => {
+    const r = computeWorkItemRollup(p.id, w.id, evaluators) || {};
+    return {
+      id: w.id, category: w.category, source_sheet: w.source_sheet,
+      work_task: w.work_task || '', work_item: w.work_item || '', description: w.description || '',
+      person: w.person || '', person_days: Number(w.person_days) || 0, cost: Number(w.cost) || 0,
+      unit_price: r.unit_price || 0,
+      expert_days: r.expert_days || [], expert_count: r.expert_count || 0,
+      expert_days_avg: r.expert_days_avg || 0, adjusted_cost: r.adjusted_cost || 0
+    };
+  });
+  const total_original = Math.round(work_items.reduce((s, w) => s + w.cost, 0) * 100) / 100;
+  const total_adjusted = Math.round(work_items.reduce((s, w) => s + w.adjusted_cost, 0) * 100) / 100;
+  const submitted = work_items.reduce((s, w) => s + w.expert_count, 0);
+  res.json({
+    project_id: p.id, project_name: p.project_name, project_code: p.project_code || '',
+    session_id: p.session_id, status: p.status,
+    needs_estimate: needsEstimate(p),
+    evaluators: evaluatorsWithLink, work_items,
+    stats: {
+      item_count: work_items.length,
+      evaluator_count: evaluators.length,
+      submitted_slots: submitted,
+      total_original_cost: total_original,
+      total_adjusted_cost: total_adjusted,
+      reduction: Math.round((total_original - total_adjusted) * 100) / 100
+    }
+  });
+});
+
+// 当前登录者身份（极小返回，供专家评估页判断是否进入管理员只读模式）
+app.get('/api/whoami', auth(), (req, res) => {
+  res.json({ id: req.user.id, username: req.user.username || '', real_name: req.user.real_name || '', role: req.user.role || '' });
+});
 
 // ==================== 成本明细 ====================
 app.get('/api/projects/:id/cost', auth(), (req, res) => {
@@ -2303,16 +2451,27 @@ function buildWorkloadSummary(sid, user) {
     .map((a, i) => ({ slot: i + 1, user_id: a.user_id, user_name: a.user_name, role: a.user_role }));
   const projectSummaries = projects.map(p => {
     const wis = db.store.workItems.filter(w => w.project_id === p.id);
-    let totalAdjusted = 0, evaluatedWI = 0;
+    // 人员类工作项经专家评估后重算；非人员费用（采购/差旅/测试/知识产权）不在评估范围内，保持原值。
+    // 因此「评估后总成本」= 原总成本 − 工作项原成本合计 + 工作项评估后成本合计，
+    // 直接用 Σ工作项 adjusted 当总成本会漏掉采购等大额费用，口径不对。
+    let totalAdjusted = 0, evaluatedWI = 0, totalOriginalWI = 0;
     wis.forEach(w => {
       const r = computeWorkItemRollup(p.id, w.id, evaluators) || {};
       totalAdjusted += r.adjusted_cost || 0;
+      totalOriginalWI += Number(w.cost) || 0;
       if ((r.expert_count || 0) > 0) evaluatedWI++;
     });
+    totalAdjusted = Math.round(totalAdjusted * 100) / 100;
+    totalOriginalWI = Math.round(totalOriginalWI * 100) / 100;
     const cs = p.cost_summary || {};
+    const baseTotal = Number(cs.total_cost) || 0;
+    const adjustedTotal = Math.round((baseTotal - totalOriginalWI + totalAdjusted) * 100) / 100;
     return {
       project_id: p.id, project_name: p.project_name, status: p.status,
       contract_amount: Number(p.contract_amount) || 0,
+      total_cost: baseTotal,
+      adjusted_total_cost: adjustedTotal,
+      expert_reduction: Math.round((baseTotal - adjustedTotal) * 100) / 100,
       internal_estimated_cost: p.internal_estimated_cost != null ? Number(p.internal_estimated_cost) : null,
       biz_department: p.biz_department || '-',
       project_type: p.project_type || '',
@@ -2327,7 +2486,7 @@ function buildWorkloadSummary(sid, user) {
       // 导入校验告警透传到评估汇总页（该页数据来自本接口，非 /api/projects；漏了这行则 ⚠ 角标永远不显示）
       import_warnings: p.import_warnings || [],
       work_item_count: wis.length, evaluated_count: evaluatedWI,
-      total_adjusted_cost: Math.round(totalAdjusted * 100) / 100
+      total_adjusted_cost: totalAdjusted
     };
   });
   const evaluatorProgress = evaluators.map(ev => {
@@ -2335,16 +2494,22 @@ function buildWorkloadSummary(sid, user) {
     const submitted = projects.filter(p => db.store.expertEstimates.some(e => e.project_id === p.id && e.expert_id === ev.user_id)).length;
     return { ...ev, projects_assigned: projCount, projects_submitted: submitted, completion: projCount > 0 ? Math.round(submitted / projCount * 100) / 100 : 0 };
   });
-  const batch_total_adjusted_cost = Math.round(projectSummaries.reduce((s, p) => s + p.total_adjusted_cost, 0) * 100) / 100;
+  // 评估后总成本（完整口径：含采购/差旅等非评估费用）求和
+  const batch_total_adjusted_cost = Math.round(projectSummaries.reduce((s, p) => s + (Number(p.adjusted_total_cost) || 0), 0) * 100) / 100;
+  // 批次原成本估算合计（成本估算表总成本，用于与评估后对照）
+  const batch_total_cost = Math.round(projectSummaries.reduce((s, p) => s + (Number(p.total_cost) || 0), 0) * 100) / 100;
   // 批次原预估成本（汇总表里登记的"内部信息系统填报预估成本"求和）
   const batch_total_original_cost = Math.round(projectSummaries.reduce((s, p) => s + (Number(p.internal_estimated_cost) || 0), 0) * 100) / 100;
   // 核减费用 = 原预估成本 - 专家评估完以后的预估成本
   const batch_total_reduction = Math.round((batch_total_original_cost - batch_total_adjusted_cost) * 100) / 100;
+  // 相对成本估算表的核减（评估前后同口径对比）
+  const batch_expert_reduction = Math.round(projectSummaries.reduce((s, p) => s + (Number(p.expert_reduction) || 0), 0) * 100) / 100;
   const batch_work_item_count = projectSummaries.reduce((s, p) => s + p.work_item_count, 0);
   const batch_evaluated_count = projectSummaries.reduce((s, p) => s + p.evaluated_count, 0);
   return {
     session_id: sid, session_name: session.name, evaluators, projects: projectSummaries,
     batch_total_adjusted_cost, batch_total_original_cost, batch_total_reduction,
+    batch_total_cost, batch_expert_reduction,
     batch_work_item_count, batch_evaluated_count, evaluator_progress: evaluatorProgress
   };
 }

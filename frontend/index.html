@@ -138,6 +138,24 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
 .wl-wrap thead tr.wl-h1 th.wl-freeze{box-shadow:inset -1px 0 0 #e5e7eb}
 .wl-wrap thead tr.wl-h1 th.wl-freeze2{box-shadow:inset -1px 0 0 #cbd5e1,3px 0 6px -3px rgba(15,23,42,.14)}
 .wl-cell-bad{background:#fff5f5!important;color:#c0281f!important;font-weight:600}
+/* 专家评估列：核减为正用绿色（省钱），未评估/免评估用弱化灰字占位 */
+.wl-cell-ok{color:#0f7b3d!important;font-weight:600}
+.wl-muted{text-align:center;color:#9aa1ab;font-size:12px}
+.wl-wrap thead .wl-g-expert{background:#ecfdf5;color:#065f46}
+/* 项目名称后的「打分」入口：极小图标按钮，不挤占名称宽度 */
+.wl-score-btn{border:1px solid #cbd5e1;background:#fff;color:#2563eb;border-radius:4px;font-size:11px;
+  line-height:1;padding:2px 5px;margin-left:5px;cursor:pointer;vertical-align:1px;white-space:nowrap}
+.wl-score-btn:hover{background:#eff6ff;border-color:#2563eb}
+/* 专家打分明细弹窗：行=工作项，列=各专家人天 */
+.es-wrap{max-height:66vh;overflow:auto;border:1px solid #e5e7eb;border-radius:8px}
+.es-wrap table{font-size:12.5px}
+.es-wrap thead th{position:sticky;top:0;background:#f8fafc;z-index:2;white-space:nowrap;text-align:center}
+.es-wrap td{white-space:nowrap;padding:4px 8px;vertical-align:middle}
+.es-wrap tbody tr:nth-child(even) td{background:#fcfdff}
+.es-miss{color:#c3c7cf}
+.es-avg{font-weight:600;background:#f1f5f9!important}
+.es-stat{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:8px}
+.es-stat b{font-variant-numeric:tabular-nums}
 /* 精简模式：隐藏业务方向组与明细列 */
 .wl-compact .wl-g-direction,.wl-compact .wl-detail{display:none}
 .wl-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -381,6 +399,9 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
       <div class="alert alert-info small mb-3">
         <strong>工作流程：</strong>点击上方项目序号快速切换项目；<span class="badge bg-success">绿色</span>表示您已提交该项目评估，<span class="badge bg-secondary">灰色</span>表示尚未提交；专家可在人员外包/专业分包明细中提交人天评估。
       </div>
+      <div class="alert alert-warning small mb-3 d-none" id="costAdminTip">
+        <strong>管理员查看模式（只读）：</strong>可查看任意批次、任意状态的项目，以及人员外包/专业分包明细中<b>每位专家各自填写的人天</b>、平均值与调整后费用；但不能代替专家提交或修改评估。
+      </div>
       <div id="costHeaderCard" class="card card-custom mb-3 d-none"><div class="card-body" id="costHeaderBody"></div></div>
       <div class="row g-3 mb-3" id="costSummaryCards"></div>
       <div id="costDetailCard" class="card card-custom d-none">
@@ -601,6 +622,14 @@ body.nav-pinned .nav-pin:hover{background:rgba(224,36,36,.26)}
       <div class="mb-3"><label class="form-label">合同金额(元)</label><input type="number" class="form-control" id="projAmount"></div>
     </div>
     <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-success" onclick="saveProject()">保存</button></div>
+  </div></div>
+</div>
+
+<div class="modal fade" id="expertScoreModal" tabindex="-1">
+  <div class="modal-dialog modal-xl"><div class="modal-content">
+    <div class="modal-header"><h5 class="mb-0" id="esTitle">专家打分明细</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body" id="esBody"></div>
+    <div class="modal-footer"><span class="text-muted small me-auto">只读视图，仅供查看各专家评估人天，不提供修改。</span><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button></div>
   </div></div>
 </div>
 
@@ -1561,8 +1590,14 @@ function getCostVisibleProjects(){
   // 仅显示已启动评审（进行中 in_progress）的批次下、处于「评审中/待确认」状态的项目。
   // 被管理员/研发中心退回(rejected)、草稿(draft)、已归档(completed)的项目不进入工作量评估页。
   const activeIds=new Set((sessions||[]).filter(s=>s.status==='in_progress').map(s=>s.id));
+  // ★ 管理员/研发中心例外：可查看任意批次、任意状态的项目（只读），
+  // 否则「新建但未启动评审」的批次（如 pending + 项目 draft）在本页一个项目都看不到，
+  // 无法核对各专家打分情况。
+  if(currentUser&&['admin','rd'].includes(currentUser.role)) return (projects||[]).slice();
   return (projects||[]).filter(p=>activeIds.has(p.session_id)&&(p.status==='reviewing'||p.status==='pending_confirm'));
 }
+// 管理员/研发中心进入本页属于「只读查看」：可以看各专家打分，但不能代专家提交
+function isCostReadonly(){ return !!(currentUser&&['admin','rd'].includes(currentUser.role)); }
 async function loadCostProjectsStatus(){
   const visible=getCostVisibleProjects();
   if(!visible.length)return;
@@ -1600,7 +1635,10 @@ function renderCostProjectFilter(){
     }
     const dot=submitted?'<span class="position-absolute top-0 start-100 translate-middle p-1 bg-white border border-success rounded-circle"><span class="visually-hidden">已提交</span></span>':'';
     const badge=submitted?'已提交':'未提交';
-    h+='<button type="button" class="btn btn-sm '+cls+' position-relative" title="'+(p.project_name||p.name||('项目'+num))+' - '+badge+'" onclick="selectCostProject('+p.id+')">'+num+dot+'</button>';
+    // 管理员可见范围跨批次，序号会重复，因此把批次名带进悬浮标题便于定位
+    const sess=(sessions||[]).find(s=>String(s.id)===String(p.session_id));
+    const sname=sess?(sess.name||('批次'+p.session_id)):'未关联批次';
+    h+='<button type="button" class="btn btn-sm '+cls+' position-relative" title="'+esc(sname)+' · '+esc(p.project_name||p.name||('项目'+num))+' - '+badge+'" onclick="selectCostProject('+p.id+')">'+num+dot+'</button>';
   });
   el.innerHTML=h;
 }
@@ -1615,6 +1653,8 @@ function updateCostSelect(){
 async function renderCostAnalysis(){
   await loadCostProjectsStatus();
   const visible=getCostVisibleProjects();
+  const adminTip=document.getElementById('costAdminTip');
+  if(adminTip)adminTip.classList.toggle('d-none',!isCostReadonly());
   // 若当前选中的项目不在「已启动评审的批次」内，重置后自动选首个未提交
   if(currentProjectId && !visible.some(p=>String(p.id)===String(currentProjectId))){
     currentProjectId=null;
@@ -2448,6 +2488,11 @@ function renderWorkloadProjectTable(d){
       {k:'third_party_test_cost',label:'第三方测试',money:true,w:96},
       {k:'ip_cost',label:'知识产权',money:true,w:92},
     ]},
+    {name:'专家评估',cls:'wl-g-expert',cols:[
+      {k:'adjusted_total_cost',label:'评估后成本',money:true,expert:true,w:116},
+      {k:'expert_reduction',label:'核减额',money:true,expert:true,w:104},
+      {k:'expert_progress',label:'评估进度',expert:true,w:104},
+    ]},
     {name:'业务方向',cls:'wl-g-direction',cols:[
       {k:'is_digital',label:'数字化',w:68},
       {k:'business_direction',label:'业务方向',detail:true,txt:true,w:150},
@@ -2455,7 +2500,7 @@ function renderWorkloadProjectTable(d){
       {k:'product_direction',label:'产品方向',detail:true,txt:true,w:130},
     ]},
   ];
-  const moneyKeys=['contract_amount','total_cost','long_term_cost','zhongshi_cost','huazhao_cost','outsourcing_cost','subcontract_cost','procurement_cost','travel_cost','third_party_test_cost','ip_cost'];
+  const moneyKeys=['contract_amount','total_cost','long_term_cost','zhongshi_cost','huazhao_cost','outsourcing_cost','subcontract_cost','procurement_cost','travel_cost','third_party_test_cost','ip_cost','adjusted_total_cost','expert_reduction'];
   const totals={};moneyKeys.forEach(k=>totals[k]=0);
   // 冻结列宽（与 CSS 变量 --wl-c1/--wl-c2 同源）
   const WL_C1=44, WL_C2=252;
@@ -2484,6 +2529,9 @@ function renderWorkloadProjectTable(d){
       procurement_cost:cs.procurement_cost||0, travel_cost:cs.travel_cost||0, third_party_test_cost:cs.third_party_test_cost||0,
       ip_cost:cs.ip_cost||0, is_digital:p.is_digital?'是':'否',
       is_restricted_subcontract:p.is_restricted_subcontract||'-', subcontract_scope:p.subcontract_scope||'-',
+      adjusted_total_cost:(p.needs_estimate===false||!(p.evaluated_count>0))?null:(p.adjusted_total_cost!=null?p.adjusted_total_cost:null),
+      expert_reduction:(p.needs_estimate===false||!(p.evaluated_count>0))?null:(p.expert_reduction!=null?p.expert_reduction:null),
+      expert_progress:(p.needs_estimate===false)?'免评估':(((p.evaluated_count||0)+'/'+(p.work_item_count||0))+' 项'),
       business_direction:p.business_direction||'-',
       business_sub_direction:p.business_sub_direction||'-', product_direction:p.product_direction||'-'
     };
@@ -2500,12 +2548,25 @@ function renderWorkloadProjectTable(d){
     let cells='<td class="wl-freeze wl-num"'+rowTip+'>'+row.idx+'</td>';
     let nameCell='<td class="wl-freeze2 wl-name wl-txt"'+tipAttr(row.project_name,17)+'><span class="wl-clamp">';
     if(p.needs_estimate===false) nameCell+='<span class="badge bg-light text-dark border" data-tip="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span> ';
-    nameCell+=esc(row.project_name)+'</span></td>';
+    nameCell+=esc(row.project_name)+'</span>';
+    // 管理员/预审查看各专家打分的入口（免评估项目无打分可看，不显示）
+    if(p.needs_estimate!==false) nameCell+='<button type="button" class="wl-score-btn" onclick="openExpertScores('+p.project_id+')" title="查看各专家打分明细">打分</button>';
+    nameCell+='</td>';
     cells+=nameCell;
     visGroups.forEach(g=>g.cols.forEach(c=>{
       const v=row[c.k];
       const cls=(c.detail?'wl-detail ':'')+(g.cls||'')+' ';
-      if(c.money){
+      // 专家评估列：未评估/免评估时不显示 0 元，避免被误读成「评估后成本为 0」
+      if(c.expert){
+        if(p.needs_estimate===false){ cells+='<td class="'+cls+'wl-muted">免评估</td>'; }
+        else if(!(p.evaluated_count>0)){ cells+='<td class="'+cls+'wl-muted">未评估</td>'; }
+        else if(c.k==='expert_progress'){ cells+='<td class="'+cls+'wl-num">'+esc(v)+'</td>'; }
+        else {
+          const n=Number(v)||0;
+          const isRed=c.k==='expert_reduction';
+          cells+='<td class="'+cls+'wl-num'+(isRed&&n>0?' wl-cell-ok':'')+'">'+(isRed&&n>0?'−¥':'¥')+Math.abs(n).toLocaleString()+'</td>';
+        }
+      } else if(c.money){
         const n=Number(v)||0;
         const bad=(c.k==='contract_amount'&&ca<=0)||(c.k==='total_cost'&&costBad);
         const c2=cls+'wl-num'+(n===0?' wl-zero':'')+(bad?' wl-cell-bad':'');
@@ -2530,7 +2591,10 @@ function renderWorkloadProjectTable(d){
     const cls=(c.detail?'wl-detail ':'')+(g.cls||'')+' ';
     if(c.money){
       const n=Number(totals[c.k])||0;
-      footCells+='<td class="'+cls+'wl-num">¥'+n.toLocaleString()+'</td>';
+      // 专家评估列在无任何评估数据时显示占位，不显示 ¥0
+      if(c.expert&&n===0){ footCells+='<td class="'+cls+'wl-num">—</td>'; }
+      else if(c.expert&&c.k==='expert_reduction'&&n>0){ footCells+='<td class="'+cls+'wl-num wl-cell-ok">−¥'+n.toLocaleString()+'</td>'; }
+      else footCells+='<td class="'+cls+'wl-num">¥'+n.toLocaleString()+'</td>';
     } else if(c.pct){
       const v=totals.contract_amount>0?totals.subcontract_cost/totals.contract_amount*100:null;
       footCells+='<td class="'+cls+'wl-num">'+(v==null?'':Math.round(v*100)/100+'%')+'</td>';
@@ -2566,6 +2630,56 @@ function toggleWlCompact(){
   const wrap=document.getElementById('wlWrap');
   if(wrap)wrap.classList.toggle('wl-compact',wlCompactMode);
   wlFilterTable();
+}
+// ==================== 管理员：查看某项目的专家打分明细（只读）====================
+// 行=工作项，列=评审专家1-5 各自填写的人天，末两列为平均人天与调整后费用。
+async function openExpertScores(pid){
+  const el=document.getElementById('expertScoreModal');
+  const body=document.getElementById('esBody');
+  if(!el||!body)return;
+  body.innerHTML='<div class="text-muted text-center py-4">加载中…</div>';
+  if(window.bootstrap&&bootstrap.Modal)bootstrap.Modal.getOrCreateInstance(el).show();
+  try{
+    const r=await fetch(API+'/projects/'+pid+'/expert-scores',{headers:authH()});
+    const d=await r.json();
+    if(d&&d.error){body.innerHTML='<div class="text-danger py-3">'+esc(d.error)+'</div>';return;}
+    renderExpertScores(d);
+  }catch(e){body.innerHTML='<div class="text-danger py-3">加载失败：'+esc((e&&e.message)||e)+'</div>';}
+}
+function renderExpertScores(d){
+  const body=document.getElementById('esBody');if(!body)return;
+  const evs=d.evaluators||[], wis=d.work_items||[], st=d.stats||{};
+  const ttl=document.getElementById('esTitle');
+  if(ttl)ttl.textContent='专家打分明细 · '+(d.project_name||('项目'+d.project_id));
+  if(!wis.length){body.innerHTML='<div class="text-muted py-3">该项目暂无成本估算明细，请先上传成本估算表。</div>';return;}
+  if(!evs.length){body.innerHTML='<div class="text-warning py-3">该批次尚未分派评审专家，无法显示打分列。</div>';return;}
+  let h='<div class="es-stat">'+
+    '<span>工作项 <b>'+(st.item_count||0)+'</b> 项</span>'+
+    '<span>评审专家 <b>'+(st.evaluator_count||0)+'</b> 位</span>'+
+    '<span>已提交 <b>'+(st.submitted_slots||0)+'</b> 条</span>'+
+    '<span>原成本 <b>¥'+Number(st.total_original_cost||0).toLocaleString()+'</b></span>'+
+    '<span>评估后 <b>¥'+Number(st.total_adjusted_cost||0).toLocaleString()+'</b></span>'+
+    '<span>核减 <b style="color:#0f7b3d">¥'+Number(st.reduction||0).toLocaleString()+'</b></span>'+
+    '</div>';
+  h+='<div class="es-wrap"><table class="table table-sm mb-0 align-middle"><thead><tr>'+
+    '<th style="text-align:left">工作任务 / 工作项</th><th>原人天</th><th>原费用</th>'+
+    evs.map(e=>'<th>'+(e.short_code
+        ? '<a href="/e/'+esc(e.short_code)+'" target="_blank" rel="noopener" title="在新窗口打开该专家的评估页（只读查看）">'+esc(e.user_name||('专家'+e.slot))+' <i class="bi bi-box-arrow-up-right" style="font-size:10px"></i></a>'
+        : esc(e.user_name||('专家'+e.slot)))+'</th>').join('')+
+    '<th>平均人天</th><th>调整后费用</th></tr></thead><tbody>';
+  wis.forEach(w=>{
+    h+='<tr><td style="white-space:normal;max-width:340px"><div class="small text-muted">'+esc(w.work_task||'-')+'</div><div>'+esc(w.work_item||'-')+'</div></td>'+
+      '<td style="text-align:right">'+Number(w.person_days||0)+'</td>'+
+      '<td style="text-align:right">¥'+Number(w.cost||0).toLocaleString()+'</td>';
+    evs.forEach((e,ei)=>{
+      const v=(w.expert_days||[])[ei];
+      h+='<td style="text-align:center" class="'+(v==null?'es-miss':'')+'">'+(v==null?'—':Number(v))+'</td>';
+    });
+    h+='<td class="es-avg" style="text-align:right">'+(w.expert_days_avg||'—')+'</td>'+
+      '<td style="text-align:right">¥'+Number(w.adjusted_cost||0).toLocaleString()+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  body.innerHTML=h;
 }
 function toggleWlAnomaly(){
   wlAnomalyOnly=!wlAnomalyOnly;

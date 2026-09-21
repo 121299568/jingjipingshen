@@ -80,6 +80,9 @@
   .err{max-width:520px;margin:60px auto;background:#fff;border:1px solid var(--line);border-radius:12px;padding:28px;text-align:center}
   .err h2{margin:0 0 8px;font-size:16px;color:var(--danger)}
   .hint{color:var(--muted);font-size:12px;margin-top:4px}
+  /* 管理员只读模式提示条 */
+  .adminbar{margin-top:8px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;
+    border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.5}
   .tbl-wrap{overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff;
     max-height:calc(100vh - 176px);min-height:240px}
   /* 评估人天：默认预填原人天；两侧「− / +」按钮按所选步长增减 */
@@ -222,7 +225,8 @@ function renderList(){
       +'<span class="chip done">已提交 <b>'+s.stats.done+'</b> 个</span>'
       +'<span class="chip">有效期剩余 <b>'+left+'</b> 天</span>'
     +'</div>'
-    +'<div class="hint">请只填写您本人的评估值。系统仅展示您自己提交的人天，不含其他专家数据。</div>'
+    +(ADMIN_VIEW?'<div class="adminbar">管理员查看模式（'+esc(ADMIN_NAME)+'）：只读，可查看 ' +esc(s.expert_name)+' 已提交的人天，但不能代其修改或提交。</div>'
+      :'<div class="hint">请只填写您本人的评估值。系统仅展示您自己提交的人天，不含其他专家数据。</div>')
   +'</div>';
   if(!s.projects.length){
     h+='<div class="card center">本批次暂无可评估的项目。</div>';
@@ -289,7 +293,7 @@ function renderProject(){
       const pd=w.person_days!=null?w.person_days:null;
       const cur=w.my_days!=null?w.my_days:(pd!=null?pd:'');
       const adjusted=(w.my_days!=null&&pd!=null&&w.my_days!==pd);
-      const lockAttr=p.locked?'disabled ':'';
+      const lockAttr=(p.locked||ADMIN_VIEW)?'disabled ':'';
       // 状态列只显示「已提交 / 未提交」（改动与否看输入框黄框），数值与原始人天走悬浮标题
       const tip=w.my_days!=null?('已提交 '+w.my_days+' 人天'+(adjusted?('（原 '+pd+'）'):'')):'未提交';
       h+='<tr>'
@@ -320,8 +324,10 @@ function renderProject(){
     +'<span class="lbl">左右 ± 按步长微调 · 黄框=已改动 · 本表 '+d.items.length+' 项</span>'
     +'</div>'
     +'<button class="primary" id="submitBtn" data-label="'+(anySubmitted?'更新我的评估':'提交我的评估')+'"'
-    +(p.locked?' disabled':'')+' onclick="submitAll('+p.id+')">'
-    +(p.locked?'已归档，不可提交':(anySubmitted?'更新我的评估':'提交我的评估'))+'</button></div></div>';
+    +((p.locked||ADMIN_VIEW)?' disabled':'')+' onclick="submitAll('+p.id+')">'
+    +(p.locked?'已归档，不可提交':(ADMIN_VIEW?'管理员只读，不可提交':(anySubmitted?'更新我的评估':'提交我的评估')))+'</button>'
+    +(ADMIN_VIEW?'':'<button class="ghostbtn" onclick="backToList()" style="margin-left:8px">返回列表</button>')
+    +'</div></div>';
   $('app').innerHTML=h;
   bindAdjustMarks();
   syncMore();
@@ -357,7 +363,21 @@ async function submitAll(pid){
   }
 }
 
+// 管理员只读模式：带主站登录态的管理员/预审打开任一专家评估页时，
+// 页面照常展示该专家的填写结果，但所有输入与提交被禁用，避免误改专家数据。
+let ADMIN_VIEW=false, ADMIN_NAME='';
+async function detectAdmin(){
+  const t=(typeof localStorage!=='undefined')?localStorage.getItem('token'):null;
+  if(!t) return;
+  try{
+    const r=await fetch('/api/whoami',{headers:{Authorization:'Bearer '+t}});
+    if(!r.ok) return;
+    const u=await r.json().catch(()=>({}));
+    if(u.role==='admin'||u.role==='rd'){ ADMIN_VIEW=true; ADMIN_NAME=u.real_name||u.username||''; }
+  }catch(_){ /* 未登录或非管理员：按普通专家流程继续 */ }
+}
 async function load(){
+  await detectAdmin();
   if(!TOKEN&&!PATHCODE){ renderError('链接缺少访问令牌，请使用管理员发给您的完整链接打开'); return; }
   try{
     STATE=await api(API);

@@ -62,7 +62,9 @@ const COL_TYPE = {
   unit_price: 'DOUBLE NOT NULL DEFAULT 0',
   quantity: 'DOUBLE NOT NULL DEFAULT 0',
   item_name: 'VARCHAR(255) DEFAULT NULL',
-  spec: 'VARCHAR(1024) DEFAULT NULL',
+  // 采购「配置说明」在真实估算表里会出现大段技术参数，1024 字符仍不够，
+  // 超长会导致整行 REPLACE 失败被 catch 跳过 → 采购明细静默丢失（只在内存、重启即丢）。
+  spec: 'TEXT DEFAULT NULL',
   amount: 'DOUBLE NOT NULL DEFAULT 0',
   supplier: 'VARCHAR(255) DEFAULT NULL',
   purpose: 'VARCHAR(255) DEFAULT NULL',
