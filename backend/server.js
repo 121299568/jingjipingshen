@@ -2511,10 +2511,18 @@ function buildWorkloadSummary(sid, user) {
       expert_total_count: evaluators.length
     };
   });
+  // 把「每个专家已评/分派项目数 + 完成度」直接回填到 evaluators 上（前端评审人完成度条读 d.evaluators）；
+  // 之前这份进度算完塞进独立的 evaluator_progress、而 evaluators 本体没带这些字段 → 前端显示 undefined。
   const evaluatorProgress = evaluators.map(ev => {
     const projCount = projects.length;
     const submitted = projects.filter(p => db.store.expertEstimates.some(e => e.project_id === p.id && e.expert_id === ev.user_id)).length;
     return { ...ev, projects_assigned: projCount, projects_submitted: submitted, completion: projCount > 0 ? Math.round(submitted / projCount * 100) / 100 : 0 };
+  });
+  evaluators.forEach((ev, i) => {
+    const p = evaluatorProgress[i];
+    ev.projects_assigned = p.projects_assigned;
+    ev.projects_submitted = p.projects_submitted;
+    ev.completion = p.completion;
   });
   // 评估后总成本（完整口径：含采购/差旅等非评估费用）求和
   const batch_total_adjusted_cost = Math.round(projectSummaries.reduce((s, p) => s + (Number(p.adjusted_total_cost) || 0), 0) * 100) / 100;
