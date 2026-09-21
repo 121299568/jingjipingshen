@@ -2465,9 +2465,13 @@ function renderWorkloadProjectTable(d){
     const costBad=(ca>0&&tc>ca)||(iec!=null&&tc>iec);
     const rowTip=anom.length?' data-tip="⚠ 需关注：'+esc(anom.join('；'))+'"':'';
     let cells='<td class="wl-freeze wl-num"'+rowTip+'>'+row.idx+'</td>';
+    // 导入校验告警（与项目资料页同款 ⚠ 角标 + 悬浮详情；仅提示不拦截）
+    const wn=p.import_warnings&&p.import_warnings.length?p.import_warnings:[];
+    const wnTip=wn.map(w=>((w.file?'【'+w.file+'】':'')+((w.messages||[]).join('；')))).join('\n');
+    const wnTag=wn.length?' <span class="text-warning" style="cursor:help" data-tip="导入校验告警（已正常导入，请人工核对）：\n'+esc(wnTip)+'"><i class="bi bi-exclamation-triangle-fill"></i>'+wn.length+'</span>':'';
     let nameCell='<td class="wl-freeze2 wl-name wl-txt"'+tipAttr(row.project_name,17)+'><span class="wl-clamp">';
     if(p.needs_estimate===false) nameCell+='<span class="badge bg-light text-dark border" data-tip="人员外包与专业分包成本均为 0，无需专家工作量评估">免评估</span> ';
-    nameCell+=esc(row.project_name)+'</span></td>';
+    nameCell+=wnTag+esc(row.project_name)+'</span></td>';
     cells+=nameCell;
     visGroups.forEach(g=>g.cols.forEach(c=>{
       const v=row[c.k];
