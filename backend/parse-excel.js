@@ -609,6 +609,22 @@ function parseProjectExcel(filePath) {
   if (result.cost_summary.profit_rate == null && result.project.contract_amount) {
     result.cost_summary.profit_rate = +(1 - result.cost_summary.total_cost / result.project.contract_amount).toFixed(4);
   }
+  // ★ 费用列整列为空的兜底告警：2026-09-21 批量出现「有人天无费用」，根因是新版 Excel
+  // 的「费用（元）」列整列没填（旧版是公式自动算出，新版模板换成空列后填表人没补）。
+  // 解析器只能如实反映单元格内容，这里在解析结果上挂一条告警，让上传时就能发现，
+  // 而不是等事后对数据才发现成本全是 0。
+  {
+    const CAT_LABEL = { long_term: '长期职工', zhongshi: '中实职工', huazhao: '华兆职工', outsourcing: '人员外包', subcontract: '专业分包' };
+    for (const cat of Object.keys(CAT_LABEL)) {
+      const rows = result.work_items.filter(w => w.category === cat);
+      const daysRows = rows.filter(w => w.person_days != null && w.person_days !== 0).length;
+      const costRows = rows.filter(w => w.cost != null && w.cost !== 0).length;
+      if (daysRows > 0 && costRows === 0) {
+        result.warnings.push(`「${CAT_LABEL[cat]}成本估算」表共 ${daysRows} 行有人天，但「费用（元）」列全部为空——成本将记为 0。请检查 Excel 源文件的该列是否漏填`);
+      }
+    }
+  }
+
   result.meta = { parsed_at: new Date().toISOString(), sheet_count: wb.SheetNames.length, sheets: wb.SheetNames };
   return result;
 }

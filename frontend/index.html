@@ -1859,9 +1859,13 @@ function setEstimateStep(val, btn){
 function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
   if(!items.length)return '<p class="text-muted text-center py-4">暂无明细</p>';
   const catMap={long_term:'长期职工',zhongshi:'中实职工',huazhao:'华兆职工',outsourcing:'人员外包',subcontract:'专业分包'};
+  // 人员外包/专业分包表本身没有「人员」列（该列只存在于职工成本表），不再渲染，避免整列「-」
+  const showPerson=items.length>0 && !items.some(w=>w.category==='outsourcing'||w.category==='subcontract');
   const evs=(evaluators||[]);
   let h='<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>';
-  h+='<th>任务</th><th>工作项</th><th>工作说明</th><th>人天</th><th>人员</th><th>原费用</th>';
+  h+='<th>任务</th><th>工作项</th><th>工作说明</th><th>人天</th>';
+  if(showPerson)h+='<th>人员</th>';
+  h+='<th>原费用</th>';
   if(showExpert){
     evs.forEach(ev=>{ h+='<th>专家'+ev.slot+'<br><small class="text-muted">'+esc(ev.user_name||'')+'</small></th>'; });
     h+='<th>平均</th><th>调整后费用</th><th>评估</th>';
@@ -1873,7 +1877,7 @@ function renderWorkItemsTable(items, showExpert, isExpert, evaluators){
       '<td title="'+esc(w.work_item||'')+'">'+esc(w.work_item||'')+'</td>'+
       '<td>'+esc(w.description||'')+'</td>'+
       '<td>'+(w.person_days!=null?w.person_days:'-')+'</td>'+
-      '<td>'+esc(w.person||'-')+'</td>'+
+      (showPerson?'<td>'+esc(w.person||'-')+'</td>':'')+
       '<td class="text-muted">¥'+Number(w.cost||0).toLocaleString()+'</td>';
     if(showExpert){
       const exp=(w.expert_days||[]).map(d=>d!=null?d:'-').join('</td><td>');
@@ -1968,7 +1972,9 @@ function downloadCostExcel(){
   (costResult.work_items||[]).forEach(w=>{
     const expSys=(w.expert_days_list||[]).join('/');
     const expExcel=(w.expert_days||[]).join('/');
-    csv+=[catMap[w.category]||w.category,w.work_task||'',w.work_item||'',w.description||'',w.person_days||'',w.person||'',w.cost||0,expExcel,w.expert_days_avg||'',w.adjusted_cost||w.cost||0,expSys].map(c=>'"'+c+'"').join(',')+'\n';
+    // 人员外包/专业分包无「人员」字段，该列留空（与明细表口径一致）
+    const personVal=(w.category==='outsourcing'||w.category==='subcontract')?'':(w.person||'');
+    csv+=[catMap[w.category]||w.category,w.work_task||'',w.work_item||'',w.description||'',w.person_days||'',personVal,w.cost||0,expExcel,w.expert_days_avg||'',w.adjusted_cost||w.cost||0,expSys].map(c=>'"'+c+'"').join(',')+'\n';
   });
   if(costResult.procurement_items&&costResult.procurement_items.length){
     csv+='\n采购明细\n类别,名称,规格,单位,数量,单价,小计,备注\n';
