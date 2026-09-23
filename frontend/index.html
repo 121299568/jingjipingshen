@@ -3425,9 +3425,11 @@ async function doImportOfflineEval(){
     });
     html+='</tbody></table>';
     box.innerHTML=html;
-    // 刷新当前页面相关展示
-    if(currentPage==='projects') renderProjects();
-    if(currentPage==='workload-summary') renderWorkloadSummary();
+    // 刷新当前页面相关展示（页面状态以 .page.active 为准）
+    const activePageEl=document.querySelector('.page.active');
+    const activePage=activePageEl?(activePageEl.id||'').replace(/^page-/,''):'';
+    if(activePage==='projects') renderProjects();
+    if(activePage==='workload-summary') renderWorkloadSummary();
   }catch(e){box.innerHTML='<div class="alert alert-danger small">出错：'+e.message+'</div>';}
 }
 
