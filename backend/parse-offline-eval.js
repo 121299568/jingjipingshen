@@ -63,6 +63,111 @@ function getSheetGrid(wb, name) {
   return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
 }
 
+// ==================== 「人员外包 / 专业分包」明细 sheet 的专家评估值解析 ====================
+// 这两张明细表的结构是「一行一个工作项 × 5 位专家各一列人天」，但：
+//   1) 专家列位置不固定（模板改版、多插/少插一列都会漂移），**绝不写死 G~K**；
+//   2) 序号列为空但「工作说明」有内容的行为数不少（分母 sheet 实测 94 个有序号 + 29 个无序号 = 123 行）；
+//   3) 合并单元格导致「工作任务 / 工作项」列大量为空，需向下填充。
+// 因此全部按表头动态定位。
+const EXPERT_SHEET_HINTS = [
+  { category: 'outsourcing', hint: '人员外包' },
+  { category: 'subcontract', hint: '专业分包' }
+];
+
+const cstr = (v) => String(v === undefined || v === null ? '' : v).trim();
+
+function findSheetName(wb, hint) {
+  return (wb.SheetNames || []).find(n => n.replace(/\s/g, '').includes(hint)) || null;
+}
+
+// 定位「5 位专家评估值」所在列：
+//   首选：表头上方紧邻的标题行里的连续 1/2/3/4/5（模板原样，最贴近"专家N"语义）；
+//   兜底：表头行中重复出现的「工作量估算（人天）」列，去掉项目自身那一列后取后 5 列。
+function locateExpertCols(grid, headerRow, dayCols) {
+  for (let r = Math.max(0, headerRow - 3); r < headerRow; r++) {
+    const row = grid[r] || [];
+    const nums = [];
+    row.forEach((c, i) => { if (/^[1-5]$/.test(cstr(c))) nums.push(i); });
+    if (nums.length === 5) return nums;
+  }
+  if (dayCols.length >= 6) return dayCols.slice(dayCols.length - 5);
+  if (dayCols.length === 5) return dayCols.slice();
+  return [];
+}
+
+function parseDetailExperts(grid) {
+  if (!grid) return null;
+  // 表头行：含「工作任务」的那一行（实测为第 2 行，但按内容定位更稳）
+  let headerRow = -1;
+  for (let r = 0; r < grid.length; r++) {
+    if ((grid[r] || []).some(c => cstr(c) === '工作任务')) { headerRow = r; break; }
+  }
+  if (headerRow < 0) return null;
+  const head = grid[headerRow] || [];
+  const colOf = (re) => { for (let c = 0; c < head.length; c++) if (re.test(cstr(head[c]))) return c; return -1; };
+
+  const colNo = head.findIndex(c => cstr(c) === '序号');
+  const colTask = colOf(/工作任务/);
+  const colItem = colOf(/工作项/);
+  const colDesc = colOf(/工作说明|工作内容/);
+  const colCost = colOf(/^费用/);           // 第一个「费用（元）」= 项目自身费用列
+  const dayCols = [];
+  head.forEach((c, i) => { if (/工作量估算|人天/.test(cstr(c))) dayCols.push(i); });
+  const expertCols = locateExpertCols(grid, headerRow, dayCols);
+  // 项目自身工作量列 = 工作量列中不属于专家列的（存在时）
+  const selfDayCol = dayCols.find(c => expertCols.indexOf(c) < 0);
+  if (colDesc < 0) return null;
+
+  const rows = [];
+  let lastTask = '', lastItem = '';
+  for (let r = headerRow + 1; r < grid.length; r++) {
+    const row = grid[r] || [];
+    const A = cstr(row[0]);
+    const B = cstr(row[1]);
+    const desc = cstr(row[colDesc]);
+    const rawItem = cstr(row[colItem]);
+    // 排除：重复表头、合计/小计行、说明行、全空行
+    if (desc === '工作说明' || /^序号$/.test(A)) continue;
+    if (/合计|小计|说明/.test(A) || /^合计$/.test(B) || /^小计$/.test(B)) continue;
+    if (!A && !B && !desc && !rawItem && !cstr(row[colTask])) continue;
+    // 数据行判定：序号为数字，或虽有合并单元格但「工作说明」有内容
+    if (!/^\d+$/.test(A) && !desc) continue;
+
+    if (cstr(row[colTask])) lastTask = cstr(row[colTask]);
+    if (rawItem) lastItem = rawItem;
+    // raw:false 下空单元格为 ''，与真实的 0 可区分 → 空值视为「该专家未评估」，不写入
+    const expert_days = expertCols.map(c => (cstr(row[c]) === '' ? null : num(cstr(row[c]))));
+    rows.push({
+      work_task: lastTask, work_item: lastItem, description: desc,
+      person_days: selfDayCol >= 0 ? num(cstr(row[selfDayCol])) : null,
+      cost: colCost >= 0 ? num(cstr(row[colCost])) : null,
+      expert_days
+    });
+  }
+  return {
+    header_row: headerRow, col_no: colNo, col_task: colTask, col_item: colItem,
+    col_desc: colDesc, col_days: selfDayCol, col_cost: colCost,
+    expert_cols: expertCols, rows
+  };
+}
+
+// 解析「人员外包 / 专业分包」两张明细表的专家评估值（供导入时按顺序回写 expertEstimates）
+function parseExpertSheets(wb) {
+  const out = [];
+  const warnings = [];
+  for (const cfg of EXPERT_SHEET_HINTS) {
+    const name = findSheetName(wb, cfg.hint);
+    if (!name) { warnings.push(`未找到「${cfg.hint}」明细 sheet，其专家评估值未解析`); continue; }
+    const detail = parseDetailExperts(getSheetGrid(wb, name));
+    if (!detail) { warnings.push(`「${name}」无法识别表头，其专家评估值未解析`); continue; }
+    if (detail.expert_cols.length !== 5) {
+      warnings.push(`「${name}」按表头只定位到 ${detail.expert_cols.length} 个专家列（期望 5），请核对表头`);
+    }
+    out.push({ sheet: name, category: cfg.category, ...detail });
+  }
+  return { sheets: out, warnings };
+}
+
 function parseOfflineEval(filePath) {
   const wb = XLSX.readFile(filePath, { raw: false, cellFormula: false });
   const base = getSheetGrid(wb, '项目基本信息');
@@ -156,7 +261,10 @@ function parseOfflineEval(filePath) {
       procurement_cost, travel_cost, third_party_test_cost: third_party_test_cost || 0, ip_cost: ip_cost || 0
     }
   };
-  return { project, warnings };
+  // 专家评估值（人员外包 / 专业分包两张明细表，列位置按表头动态解析）
+  const expertParsed = parseExpertSheets(wb);
+  warnings.push(...expertParsed.warnings);
+  return { project, warnings, expertSheets: expertParsed.sheets };
 }
 
 module.exports = { parseOfflineEval };

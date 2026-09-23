@@ -2792,6 +2792,91 @@ app.get('/api/sessions/:id/export-versions-zip', auth(['admin', 'rd', 'biz']), (
   archive.finalize();
 });
 
+// 把离线评估表里「人员外包 / 专业分包」两张明细表的专家 1..5 人天，
+// 按【行序】覆盖系统内对应工作项的专家评估值（expertEstimates）。
+//
+// 为什么按行序而不是按名称匹配：这两张明细表存在大量合并单元格，
+// 「工作任务 / 工作项」列经常为空且大量重名（如表内 3 行都叫「需求分析确认」、
+// 27 行都叫「强电安装工程」），按名称无法唯一对应。
+// 而系统 workItems 与明细表同源同序，已用真实数据逐行核对：
+//   项目31 人员外包 25 行 = 系统 25 条；专业分包 94 个有序号行 + 29 个无序号但
+//   「工作说明」非空的行 = 123 条 = 系统 123 条，且逐行 person_days 完全吻合。
+// 为防止表与系统版本错配导致错位覆盖，额外做两道闸：
+//   ① 行数必须完全相等，否则整类跳过并告警；
+//   ② 逐行用「工作量」列与系统 person_days 交叉校验，不一致只告警、不回退跳过。
+function applyOfflineExpertEstimates(project, parsed) {
+  const sheets = (parsed && parsed.expertSheets) || [];
+  const result = { evaluators: 0, applied: [] };
+  if (!sheets.length) return result;
+  const evaluators = getBatchEvaluators(project.id);   // slot 1..5：按 sessionAssignments.id 升序
+  result.evaluators = evaluators.length;
+  if (!evaluators.length) {
+    result.no_evaluators = '该批次尚未分配专家/会计师事务所，专家评估值未写入';
+    return result;
+  }
+  for (const sh of sheets) {
+    const items = db.store.workItems
+      .filter(w => w.project_id === project.id && w.category === sh.category)
+      .sort((a, b) => a.id - b.id);
+    const info = {
+      category: sh.category, sheet: sh.sheet, expert_cols: sh.expert_cols || [],
+      table_rows: (sh.rows || []).length, work_items: items.length,
+      created: 0, overwritten: 0, unchanged: 0, empty_cells: 0, mismatched_rows: []
+    };
+    if (!sh.rows || !sh.rows.length) {
+      info.warning = '明细表内没有识别到数据行';
+      result.applied.push(info);
+      continue;
+    }
+    if (!items.length) {
+      info.warning = '系统内该项目没有该类别的工作项';
+      result.applied.push(info);
+      continue;
+    }
+    if (items.length !== sh.rows.length) {
+      info.warning = `行数不一致（表 ${sh.rows.length} 行 / 系统 ${items.length} 条），为避免错位覆盖已跳过`;
+      result.applied.push(info);
+      continue;
+    }
+    const slots = Math.min(evaluators.length, (sh.expert_cols || []).length);
+    sh.rows.forEach((row, i) => {
+      const wi = items[i];
+      const pd = Number(wi.person_days) || 0;
+      if (row.person_days != null && pd > 0 && Math.abs(row.person_days - pd) > 0.001) {
+        if (info.mismatched_rows.length < 5) {
+          info.mismatched_rows.push(`第${i + 1}行「${row.work_item || row.work_task || ''}」表 ${row.person_days} 人天 vs 系统 ${pd} 人天`);
+        }
+      }
+      for (let s = 0; s < slots; s++) {
+        const v = row.expert_days ? row.expert_days[s] : null;
+        // 空单元格 = 该专家未评估 → 保持系统原值不动；明确的 0 是有效评估值 → 写入
+        if (v === null || v === undefined || !isFinite(v)) { info.empty_cells++; continue; }
+        const ev = evaluators[s];
+        const existing = db.store.expertEstimates.find(e =>
+          e.project_id === project.id && e.work_item_id === wi.id && Number(e.expert_id) === Number(ev.user_id));
+        if (existing) {
+          if (Number(existing.days) === Number(v)) { info.unchanged++; continue; }
+          existing.days = v;
+          existing.expert_name = existing.expert_name || ev.user_name;
+          existing.updated_at = new Date().toISOString();
+          info.overwritten++;
+        } else {
+          db.store.expertEstimates.push({
+            id: db.nextId(db.store.expertEstimates),
+            project_id: project.id, work_item_id: wi.id,
+            expert_id: ev.user_id, expert_name: ev.user_name, expert_role: ev.role,
+            days: v, comment: '', submitted_at: new Date().toISOString()
+          });
+          info.created++;
+        }
+      }
+      persistWorkItemRollup(project.id, wi.id);
+    });
+    result.applied.push(info);
+  }
+  return result;
+}
+
 // ==================== 离线评估表（专家评估示例）批量导入 ====================
 // 「线上线下双轨」：把线下填好的 per-project 成本估算表（含「项目基本信息」+ 明细 sheet）批量导入，
 // 按 项目编号(主)/项目名称(次) 在批次内匹配系统项目，自动写入 cost_summary，回灌到评审结果汇总表。
@@ -2845,6 +2930,20 @@ app.post('/api/sessions/:id/import-offline-eval', auth(['admin', 'rd']), offline
         });
         snapshotPre(target);
       }
+      // 专家评估值：把「人员外包 / 专业分包」明细表的专家 1..5 人天按行序覆盖系统内评估值
+      const expertApply = applyOfflineExpertEstimates(target, parsed);
+      const expertWarnings = [];
+      (expertApply.applied || []).forEach(a => {
+        const label = a.category === 'outsourcing' ? '人员外包' : '专业分包';
+        if ((a.created || 0) + (a.overwritten || 0) + (a.unchanged || 0) > 0) {
+          changes.push(`${label}专家评估：${a.created || 0}新增/${a.overwritten || 0}覆盖/${a.unchanged || 0}未变`);
+        }
+        if (a.warning) expertWarnings.push(`${label}专家评估未应用：${a.warning}`);
+        if (a.mismatched_rows && a.mismatched_rows.length) {
+          expertWarnings.push(`${label}行序校验：${a.mismatched_rows.length} 行的表内工作量与系统记录不一致（已按行序写入，建议复核）`);
+        }
+      });
+      if (expertApply.no_evaluators) expertWarnings.push(expertApply.no_evaluators);
       // 离线评估表文件版本化（来者为准，旧版留盘；不删除项目）
       const fext = path.extname(realName);
       const vfile = {
@@ -2862,7 +2961,8 @@ app.post('/api/sessions/:id/import-offline-eval', auth(['admin', 'rd']), offline
       rep.project_id = target.id;
       rep.project_name = target.project_name;
       rep.updated = changes;
-      rep.warnings = parsed.warnings || [];
+      rep.warnings = (parsed.warnings || []).concat(expertWarnings);
+      rep.expert_apply = expertApply.applied || [];
       imported++;
       updatedFieldsTotal += changes.length;
     } catch (e) {
